@@ -50,7 +50,6 @@ export default function InventarioBodega() {
     }
   ]);
 
-  // Estados del formulario de nuevo producto
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
   const [marca, setMarca] = useState('');
@@ -164,13 +163,13 @@ export default function InventarioBodega() {
               <span style={{ fontSize: '10px', color: '#9ca3af' }}>Stock Global</span>
             </div>
             <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '12px', textAlign: 'center' }}>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: stockCritico > 0 ? '#fb7185' : '#34d399', display: 'block'}>{stockCritico}</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: stockCritico > 0 ? '#fb7185' : '#34d399', display: 'block' }}>{stockCritico}</span>
               <span style={{ fontSize: '10px', color: '#9ca3af' }}>Críticos</span>
             </div>
           </div>
         </div>
 
-        {/* Formulario Completo para Nuevo Producto / Moto / Electrodoméstico */}
+        {/* Formulario Completo */}
         <div style={{
           backgroundColor: '#111827',
           border: '1px solid #1f2937',
@@ -315,7 +314,7 @@ export default function InventarioBodega() {
             </div>
           </div>
 
-          {/* Tarjetas de inventario con foto, datos y botones por lotes */}
+          {/* Tarjetas de inventario */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {productosFiltrados.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px', padding: '20px' }}>No hay productos en esta categoría.</p>
@@ -332,7 +331,6 @@ export default function InventarioBodega() {
                     flexDirection: 'column',
                     gap: '10px'
                   }}>
-                    {/* Fila superior: Foto + Datos principales */}
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                       <img
                         src={prod.imagen}
