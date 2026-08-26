@@ -1,8 +1,9 @@
 import './globals.css';
+import type { Metadata } from 'next';
 
-export const metadata = {
-  title: 'Tienda-SS - Sistema Logístico',
-  description: 'Sistema de gestión de inventario, ventas y rutas de entrega',
+export const metadata: Metadata = {
+  title: 'Tienda-SS - Sistema Logístico e Inventario',
+  description: 'Sistema profesional de gestión de inventario, ventas, rutas y administración',
 };
 
 export default function RootLayout({
@@ -12,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body className="bg-slate-900 text-slate-100 antialiased">
+      <body className="bg-slate-950 text-slate-100 antialiased">
         {children}
       </body>
     </html>
