@@ -8,112 +8,141 @@ export default function TiendaSSApp() {
   const [rol, setRol] = useState<string | null>(null);
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (usuario === 'jefe' && password === '1234') setRol('jefe');
-    else if (usuario === 'bodega' && password === '1234') setRol('bodega');
-    else if (usuario === 'vendedor' && password === '1234') setRol('vendedor');
-    else if (usuario === 'chofer' && password === '1234') setRol('chofer');
-    else alert('Credenciales incorrectas. Prueba usuario: jefe / bodega / vendedor / chofer (contraseña: 1234)');
+    setError('');
+    const userClean = usuario.trim().toLowerCase();
+
+    if (
+      (userClean === 'jefe' || userClean === 'bodega' || userClean === 'vendedor' || userClean === 'chofer') &&
+      password === '1234'
+    ) {
+      setRol(userClean);
+    } else {
+      setError('Credenciales incorrectas. Verifica tu usuario y contraseña (1234).');
+    }
   };
 
   if (!rol) {
     return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-6">
-        <div className="bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6">
+      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl shadow-2xl p-8 space-y-6">
+          
+          {/* Encabezado */}
           <div className="text-center space-y-2">
-            <h1 className="text-3xl font-extrabold text-indigo-400">Tienda-SS</h1>
-            <p className="text-slate-400 text-sm">Sistema Logístico e Inventario de Tienda</p>
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 text-2xl font-bold mb-1 shadow-inner">
+              ⚡
+            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-white">Tienda-SS</h1>
+            <p className="text-sm text-slate-400">Sistema Logístico e Inventario Profesional</p>
           </div>
+
+          {/* Formulario de Acceso */}
           <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                Usuario (jefe, bodega, vendedor, chofer)
-              </label>
+            {error && (
+              <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs p-3 rounded-xl text-center">
+                {error}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">Usuario de acceso</label>
               <input
                 type="text"
-                placeholder="Ej. bodega"
+                placeholder="Ej. bodega, vendedor, chofer, jefe"
                 value={usuario}
                 onChange={(e) => setUsuario(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+                className="w-full bg-slate-950/60 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                Contraseña
-              </label>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">Contraseña</label>
               <input
                 type="password"
-                placeholder="••••"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+                className="w-full bg-slate-950/60 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
                 required
               />
             </div>
+
             <button
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-lg transition shadow-lg text-sm"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 active:scale-[0.99] text-white font-semibold rounded-xl py-3 text-sm shadow-lg shadow-indigo-600/30 transition duration-200"
             >
               Iniciar Sesión
             </button>
           </form>
-          <div className="bg-slate-900/60 p-3 rounded-lg text-xs text-slate-400 space-y-1">
-            <p className="font-semibold text-slate-300">Accesos de prueba (Contraseña: 1234):</p>
-            <p>• <b>bodega</b>: Control de inventario</p>
-            <p>• <b>vendedor</b>: Caja y catálogo</p>
-            <p>• <b>chofer</b>: Rutas de entrega</p>
-            <p>• <b>jefe</b>: Panel general de administración</p>
+
+          {/* Accesos rápidos de prueba */}
+          <div className="border-t border-slate-800/80 pt-4 space-y-2">
+            <p className="text-xs font-medium text-slate-400 text-center uppercase tracking-wider">
+              Accesos rápidos (Clave: <span className="text-indigo-400 font-bold">1234</span>)
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-950/40 border border-slate-800 p-2.5 rounded-lg">
+                <span className="font-bold text-indigo-400 block">📦 bodega</span>
+                <span className="text-slate-400 text-[11px]">Inventario</span>
+              </div>
+              <div className="bg-slate-950/40 border border-slate-800 p-2.5 rounded-lg">
+                <span className="font-bold text-indigo-400 block">🛒 vendedor</span>
+                <span className="text-slate-400 text-[11px]">Caja y catálogo</span>
+              </div>
+              <div className="bg-slate-950/40 border border-slate-800 p-2.5 rounded-lg">
+                <span className="font-bold text-indigo-400 block">🚚 chofer</span>
+                <span className="text-slate-400 text-[11px]">Rutas de entrega</span>
+              </div>
+              <div className="bg-slate-950/40 border border-slate-800 p-2.5 rounded-lg">
+                <span className="font-bold text-indigo-400 block">⚡ jefe</span>
+                <span className="text-slate-400 text-[11px]">Administración</span>
+              </div>
+            </div>
           </div>
+
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <nav className="bg-slate-800 border-b border-slate-700 px-6 py-3 flex justify-between items-center shadow">
-        <div className="flex items-center space-x-3">
-          <span className="font-bold text-lg text-indigo-400">Tienda-SS</span>
-          <span className="text-xs bg-slate-700 px-2.5 py-1 rounded-full text-slate-300 uppercase">
-            Rol: {rol}
-          </span>
-        </div>
+    <div className="relative min-h-screen bg-slate-950">
+      <div className="absolute top-4 right-4 z-50">
         <button
           onClick={() => setRol(null)}
-          className="bg-rose-600/80 hover:bg-rose-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition shadow"
+          className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-xl text-xs font-medium shadow-md transition"
         >
-          Cerrar Sesión
+          🚪 Cerrar Sesión
         </button>
-      </nav>
+      </div>
 
-      <main>
-        {rol === 'bodega' && <InventarioBodega />}
-        {rol === 'vendedor' && <ModuloVentas />}
-        {rol === 'chofer' && <ModuloChofer />}
-        {rol === 'jefe' && (
-          <div className="p-6 max-w-6xl mx-auto space-y-6">
-            <h1 className="text-2xl font-bold">👑 Panel General de Administración (Jefe)</h1>
-            <p className="text-slate-400">Bienvenido al centro de mando. Aquí puedes supervisar todos los módulos:</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
-              <div onClick={() => setRol('bodega')} className="bg-slate-800 border border-slate-700 p-6 rounded-xl cursor-pointer hover:border-indigo-500 transition shadow">
-                <h3 className="text-lg font-bold text-indigo-300">📦 Inventario Bodega</h3>
-                <p className="text-slate-400 text-sm mt-2">Gestionar entradas, salidas y existencias físicas.</p>
+      {rol === 'bodega' && <InventarioBodega />}
+      {rol === 'vendedor' && <ModuloVentas />}
+      {rol === 'chofer' && <ModuloChofer />}
+      {rol === 'jefe' && (
+        <div className="min-h-screen bg-slate-900 text-slate-100 p-8 flex flex-col items-center justify-center space-y-6">
+          <div className="max-w-xl w-full bg-slate-800 border border-slate-700 p-8 rounded-2xl shadow-xl text-center space-y-4">
+            <h1 className="text-3xl font-bold text-indigo-400">Panel General de Administración</h1>
+            <p className="text-slate-300 text-sm">
+              Bienvenido al núcleo de control gerencial de Tienda-SS. Desde aquí supervisas operaciones globales, finanzas y logística.
+            </p>
+            <div className="grid grid-cols-2 gap-4 pt-4">
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                <span className="text-2xl font-bold text-emerald-400 block">$12,450</span>
+                <span className="text-xs text-slate-400">Ventas del Día</span>
               </div>
-              <div onClick={() => setRol('vendedor')} className="bg-slate-800 border border-slate-700 p-6 rounded-xl cursor-pointer hover:border-indigo-500 transition shadow">
-                <h3 className="text-lg font-bold text-emerald-300">🏷️ Módulo de Ventas</h3>
-                <p className="text-slate-400 text-sm mt-2">Consultar catálogo, precios y facturar a clientes.</p>
-              </div>
-              <div onClick={() => setRol('chofer')} className="bg-slate-800 border border-slate-700 p-6 rounded-xl cursor-pointer hover:border-indigo-500 transition shadow">
-                <h3 className="text-lg font-bold text-amber-300">🚚 Rutas de Envíos</h3>
-                <p className="text-slate-400 text-sm mt-2">Supervisar entregas y estados de transporte.</p>
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                <span className="text-2xl font-bold text-indigo-400 block">4 Rutas</span>
+                <span className="text-xs text-slate-400">Activas en Ruta</span>
               </div>
             </div>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }
