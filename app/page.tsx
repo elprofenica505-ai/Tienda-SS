@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useRef } from 'react';
 
-interface ProductoBodega {
+interface Producto {
   id: string;
   codigo: string;
   nombre: string;
@@ -13,16 +13,19 @@ interface ProductoBodega {
   imagen: string;
 }
 
+interface CarritoItem extends Producto {
+  cantidadVenta: number;
+}
+
 export default function TiendaSSApp() {
-  // Estado para controlar qué vista está activa: 'login', 'bodega', 'vendedor', 'chofer', 'jefe'
   const [vistaActual, setVistaActual] = useState<'login' | 'bodega' | 'vendedor' | 'chofer' | 'jefe'>('login');
   
-  // Estados del Login
+  // Login
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
 
-  // Estados de Bodega (con la cámara integrada)
-  const [productos, setProductos] = useState<ProductoBodega[]>([
+  // Base de datos completa inicial de productos
+  const [productos, setProductos] = useState<Producto[]>([
     {
       id: '1',
       codigo: 'TV-SON-55',
@@ -33,9 +36,32 @@ export default function TiendaSSApp() {
       stock: 12,
       precio: 450,
       imagen: 'https://images.unsplash.com/photo-1593784991095-a205069470b6?auto=format&fit=crop&w=300&q=80'
+    },
+    {
+      id: '2',
+      codigo: 'MOT-01',
+      nombre: 'Moto Deportiva 200cc',
+      marca: 'Yamaha',
+      modelo: 'R200',
+      categoria: 'Motos y Vehículos',
+      stock: 5,
+      precio: 2400,
+      imagen: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=300&q=80'
+    },
+    {
+      id: '3',
+      codigo: 'CEL-XI-12',
+      nombre: 'Smartphone Note 12',
+      marca: 'Xiaomi',
+      modelo: 'Redmi Note',
+      categoria: 'Celulares',
+      stock: 25,
+      precio: 210,
+      imagen: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=300&q=80'
     }
   ]);
 
+  // Estados Bodega (Formulario y Cámara)
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
   const [marca, setMarca] = useState('');
@@ -43,26 +69,29 @@ export default function TiendaSSApp() {
   const [categoria, setCategoria] = useState('Electrodomésticos');
   const [stockInicial, setStockInicial] = useState('');
   const [precio, setPrecio] = useState('');
-  
   const [imagenPreview, setImagenPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [busqueda, setBusqueda] = useState('');
-  const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
+  const [busquedaBodega, setBusquedaBodega] = useState('');
   const [guardando, setGuardando] = useState(false);
 
-  // Procesar Login por texto o accesos rápidos
+  // Estados Vendedor (Caja y Catálogo)
+  const [carrito, setCarrito] = useState<CarritoItem[]>([]);
+  const [busquedaVendedor, setBusquedaVendedor] = useState('');
+  const [ventaExitosa, setVentaExitosa] = useState(false);
+
+  // Procesar Login
   const handleLogin = (e?: React.FormEvent, rolForzado?: string) => {
     if (e) e.preventDefault();
     const rol = rolForzado || usuario.toLowerCase().trim();
 
-    if (rol === 'bodega' || rol === 'vendedor' || rol === 'chofer' || rol === 'jefe') {
+    if (['bodega', 'vendedor', 'chofer', 'jefe'].includes(rol)) {
       setVistaActual(rol as any);
     } else {
       alert('⚠️ Usuario o clave incorrecta. Usa los accesos rápidos de abajo (clave: 1234)');
     }
   };
 
-  // Capturar foto de la cámara
+  // Capturar foto de la cámara en Bodega
   const handleCapturarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -72,7 +101,7 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Guardar producto nuevo en bodega
+  // Registrar producto en Bodega
   const registrarProducto = (e: React.FormEvent) => {
     e.preventDefault();
     if (!codigo || !nombre || !stockInicial) {
@@ -81,7 +110,7 @@ export default function TiendaSSApp() {
     }
 
     setGuardando(true);
-    const nuevoItem: ProductoBodega = {
+    const nuevoItem: Producto = {
       id: Date.now().toString(),
       codigo,
       nombre,
@@ -109,7 +138,58 @@ export default function TiendaSSApp() {
     setProductos(productos.map(p => p.id === id ? { ...p, stock: Math.max(0, p.stock + delta) } : p));
   };
 
-  // ── 1. VISTA DE LOGIN ORIGINAL ──
+  // Funciones de Vendedor (Caja)
+  const agregarAlCarrito = (prod: Producto) => {
+    if (prod.stock <= 0) {
+      alert('⚠️ No hay stock disponible de este producto.');
+      return;
+    }
+    const existe = carrito.find(item => item.id === prod.id);
+    if (existe) {
+      if (existe.cantidadVenta >= prod.stock) {
+        alert('⚠️ No puedes agregar más unidades de las que hay en stock.');
+        return;
+      }
+      setCarrito(carrito.map(item => item.id === prod.id ? { ...item, cantidadVenta: item.cantidadVenta + 1 } : item));
+    } else {
+      setCarrito([...carrito, { ...prod, cantidadVenta: 1 }]);
+    }
+  };
+
+  const cambiarCantidadCarrito = (id: string, delta: number) => {
+    const prodBase = productos.find(p => p.id === id);
+    setCarrito(carrito.map(item => {
+      if (item.id === id) {
+        const nuevaCantidad = item.cantidadVenta + delta;
+        if (nuevaCantidad <= 0) return null;
+        if (prodBase && nuevaCantidad > prodBase.stock) {
+          alert('⚠️ Stock máximo alcanzado.');
+          return item;
+        }
+        return { ...item, cantidadVenta: nuevaCantidad };
+      }
+      return item;
+    }).filter(Boolean) as CarritoItem[]);
+  };
+
+  const procesarVenta = () => {
+    if (carrito.length === 0) return;
+
+    // Descontar stock real
+    let nuevosProductos = [...productos];
+    carrito.forEach(itemCar => {
+      nuevosProductos = nuevosProductos.map(p => p.id === itemCar.id ? { ...p, stock: Math.max(0, p.stock - itemCar.cantidadVenta) } : p);
+    });
+
+    setProductos(nuevosProductos);
+    setCarrito([]);
+    setVentaExitosa(true);
+    setTimeout(() => setVentaExitosa(false), 4000);
+  };
+
+  const totalVenta = carrito.reduce((sum, item) => sum + (item.precio * item.cantidadVenta), 0);
+
+  // ── 1. VISTA DE LOGIN ──
   if (vistaActual === 'login') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
@@ -184,13 +264,18 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ── 2. VISTA DE BODEGA CON CÁMARA INTEGRADA ──
+  // ── 2. VISTA DE BODEGA ──
   if (vistaActual === 'bodega') {
+    const productosFiltrados = productos.filter(p => 
+      p.nombre.toLowerCase().includes(busquedaBodega.toLowerCase()) ||
+      p.codigo.toLowerCase().includes(busquedaBodega.toLowerCase()) ||
+      p.marca.toLowerCase().includes(busquedaBodega.toLowerCase())
+    );
+
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif', boxSizing: 'border-box', width: '100%', overflowX: 'hidden' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px', boxSizing: 'border-box' }}>
           
-          {/* Header con botón funcional de salida al Login */}
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#ffffff', margin: '0 0 2px 0' }}>📦 Tienda-SS</h1>
@@ -204,9 +289,8 @@ export default function TiendaSSApp() {
             </button>
           </div>
 
-          {/* Formulario con Cámara */}
           <form onSubmit={registrarProducto} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', boxSizing: 'border-box', width: '100%' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto (Motos, TV, etc.)</h2>
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto</h2>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#030712', padding: '8px', borderRadius: '10px', border: '1px solid #374151', boxSizing: 'border-box', width: '100%' }}>
               <input
@@ -238,7 +322,7 @@ export default function TiendaSSApp() {
             <div style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
               <input
                 type="text"
-                placeholder="Código / SKU (Ej. MOT-01)"
+                placeholder="Código / SKU"
                 value={codigo}
                 onChange={e => setCodigo(e.target.value)}
                 style={{ flex: 1, minWidth: 0, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none', boxSizing: 'border-box' }}
@@ -256,7 +340,7 @@ export default function TiendaSSApp() {
 
             <input
               type="text"
-              placeholder="Nombre del producto (Ej. Moto Eléctrica)"
+              placeholder="Nombre del producto"
               value={nombre}
               onChange={e => setNombre(e.target.value)}
               style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '8px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
@@ -307,17 +391,17 @@ export default function TiendaSSApp() {
 
           {/* Listado de Existencias */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', boxSizing: 'border-box' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias Actuales</h2>
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias Actuales ({productosFiltrados.length})</h2>
             
             <input
               type="text"
               placeholder="🔍 Buscar por nombre, marca o código..."
-              value={busqueda}
-              onChange={e => setBusqueda(e.target.value)}
+              value={busquedaBodega}
+              onChange={e => setBusquedaBodega(e.target.value)}
               style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none', width: '100%', boxSizing: 'border-box' }}
             />
 
-            {productos.map(prod => (
+            {productosFiltrados.map(prod => (
               <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <img src={prod.imagen} alt={prod.nombre} style={{ width: '55px', height: '55px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#1f2937', flexShrink: 0 }} />
@@ -327,21 +411,21 @@ export default function TiendaSSApp() {
                       <span style={{ fontSize: '10px', color: '#34d399', fontWeight: 700, backgroundColor: 'rgba(52, 211, 153, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>{prod.stock} unids</span>
                     </div>
                     <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#fff', margin: '2px 0' }}>{prod.nombre}</h3>
-                    <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>{prod.marca} - {prod.modelo}</p>
+                    <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>{prod.marca} - {prod.modelo} | <b>${prod.precio}</b></p>
                   </div>
                 </div>
 
                 <div style={{ borderTop: '1px solid #1f2937', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   <span style={{ fontSize: '9px', color: '#ef4444' }}>🔻 Salida de Stock:</span>
                   <div style={{ display: 'flex', gap: '3px' }}>
-                    {[-1, -5, -10, -50, -100].map(val => (
+                    {[-1, -5, -10, -50].map(val => (
                       <button key={val} onClick={() => actualizarStock(prod.id, val)} style={{ flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '4px', padding: '4px 0', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}>{val}</button>
                     ))}
                   </div>
 
                   <span style={{ fontSize: '9px', color: '#10b981', marginTop: '2px' }}>➕ Entrada de Stock:</span>
                   <div style={{ display: 'flex', gap: '3px' }}>
-                    {[1, 5, 10, 50, 100].map(val => (
+                    {[1, 5, 10, 50].map(val => (
                       <button key={val} onClick={() => actualizarStock(prod.id, val)} style={{ flex: 1, backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '4px', padding: '4px 0', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}>+{val}</button>
                     ))}
                   </div>
@@ -355,12 +439,117 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ── 3. VISTAS PARA VENDEDOR / CHOFER / JEFE ──
+  // ── 3. VISTA DE VENDEDOR (Caja y Catálogo Operativo) ──
+  if (vistaActual === 'vendedor') {
+    const catalogoFiltrado = productos.filter(p => 
+      p.nombre.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
+      p.codigo.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
+      p.categoria.toLowerCase().includes(busquedaVendedor.toLowerCase())
+    );
+
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif', boxSizing: 'border-box', width: '100%', overflowX: 'hidden' }}>
+        <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px', boxSizing: 'border-box' }}>
+          
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+            <div>
+              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: '0 0 2px 0' }}>🛒 Tienda-SS</h1>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y Catálogo de Vendedor</p>
+            </div>
+            <button
+              onClick={() => setVistaActual('login')}
+              style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+            >
+              🚪 Cerrar Sesión
+            </button>
+          </div>
+
+          {ventaExitosa && (
+            <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', color: '#34d399', padding: '12px', borderRadius: '12px', textAlign: 'center', fontSize: '12px', fontWeight: 700 }}>
+              🎉 ¡Venta procesada con éxito! Stock actualizado en bodega.
+            </div>
+          )}
+
+          {/* Carrito de Venta Actual */}
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', boxSizing: 'border-box' }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>🛍️ Carrito de Venta</h2>
+            
+            {carrito.length === 0 ? (
+              <p style={{ fontSize: '11px', color: '#6b7280', margin: 0, textAlign: 'center', padding: '10px 0' }}>El carrito está vacío. Selecciona productos abajo.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {carrito.map(item => (
+                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#030712', padding: '8px 10px', borderRadius: '8px', border: '1px solid #374151' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#fff', display: 'block' }}>{item.nombre}</span>
+                      <span style={{ fontSize: '10px', color: '#34d399' }}>${item.precio} c/u</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button onClick={() => cambiarCantidadCarrito(item.id, -1)} style={{ backgroundColor: '#1f2937', color: '#fff', border: 'none', width: '22px', height: '22px', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}>-</button>
+                      <span style={{ fontSize: '12px', fontWeight: 700, minWidth: '15px', textAlign: 'center' }}>{item.cantidadVenta}</span>
+                      <button onClick={() => cambiarCantidadCarrito(item.id, 1)} style={{ backgroundColor: '#1f2937', color: '#fff', border: 'none', width: '22px', height: '22px', borderRadius: '4px', cursor: 'pointer', fontWeight: 700 }}>+</button>
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ borderTop: '1px solid #1f2937', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>Total a Pagar:</span>
+                  <span style={{ fontSize: '15px', fontWeight: 800, color: '#34d399' }}>${totalVenta.toFixed(2)}</span>
+                </div>
+
+                <button
+                  onClick={procesarVenta}
+                  style={{ backgroundColor: '#10b981', color: '#030712', border: 'none', padding: '10px', borderRadius: '8px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', marginTop: '4px' }}
+                >
+                  💳 Cobrar y Facturar
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Catálogo Disponible */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', boxSizing: 'border-box' }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#facc15', margin: 0 }}>📦 Catálogo de Productos</h2>
+            
+            <input
+              type="text"
+              placeholder="🔍 Buscar producto para vender..."
+              value={busquedaVendedor}
+              onChange={e => setBusquedaVendedor(e.target.value)}
+              style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none', width: '100%', boxSizing: 'border-box' }}
+            />
+
+            {catalogoFiltrado.map(prod => (
+              <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                  <img src={prod.imagen} alt={prod.nombre} style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '8px', backgroundColor: '#1f2937', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: '9px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
+                    <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#fff', margin: '2px 0' }}>{prod.nombre}</h3>
+                    <p style={{ fontSize: '10px', color: '#34d399', margin: 0 }}>${prod.precio} | Stock: {prod.stock}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => agregarAlCarrito(prod)}
+                  style={{ backgroundColor: '#4f46e5', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+                >
+                  ➕ Agregar
+                </button>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // ── 4. VISTAS DE CHOFER Y JEFE ──
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px', fontFamily: 'sans-serif' }}>
       <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '24px', borderRadius: '16px', textAlign: 'center', maxWidth: '400px', width: '100%' }}>
-        <h2 style={{ color: '#38bdf8', marginBottom: '8px', textTransform: 'uppercase' }}>Módulo de {vistaActual}</h2>
-        <p style={{ color: '#9ca3af', fontSize: '12px', marginBottom: '20px' }}>Panel operativo activo correctamente.</p>
+        <h2 style={{ color: vistaActual === 'chofer' ? '#facc15' : '#f87171', marginBottom: '8px', textTransform: 'uppercase' }}>Módulo de {vistaActual}</h2>
+        <p style={{ color: '#9ca3af', fontSize: '12px', marginBottom: '20px' }}>Panel operativo activo y conectado al sistema central.</p>
         <button
           onClick={() => setVistaActual('login')}
           style={{ backgroundColor: '#4f46e5', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', width: '100%' }}
