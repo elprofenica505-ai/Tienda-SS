@@ -1,8 +1,5 @@
 'use client';
-import React, { useState, useRef, useEffect } from 'react';
-// Importa tus dependencias reales de Firebase si ya las tienes:
-// import { db } from '../../lib/firebase';
-// import { collection, addDoc, updateDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import React, { useState, useRef } from 'react';
 
 interface ProductoBodega {
   id: string;
@@ -16,8 +13,7 @@ interface ProductoBodega {
   imagen: string;
 }
 
-export file function ControlBodegaReal() {
-  // Estado con productos de ejemplo (aquí se conectaría con onSnapshot de Firebase)
+export default function ControlBodegaReal() {
   const [productos, setProductos] = useState<ProductoBodega[]>([
     {
       id: '1',
@@ -43,7 +39,6 @@ export file function ControlBodegaReal() {
     }
   ]);
 
-  // Estados del Formulario de Registro
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
   const [marca, setMarca] = useState('');
@@ -52,16 +47,13 @@ export file function ControlBodegaReal() {
   const [stockInicial, setStockInicial] = useState('');
   const [precio, setPrecio] = useState('');
   
-  // Captura de Cámara Nativa
   const [imagenPreview, setImagenPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Buscador y Filtro
   const [busqueda, setBusqueda] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
   const [guardando, setGuardando] = useState(false);
 
-  // Manejar foto de la cámara
   const handleCapturarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -73,7 +65,6 @@ export file function ControlBodegaReal() {
     }
   };
 
-  // Agregar nuevo producto a la base de datos
   const registrarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!codigo || !nombre || !stockInicial) {
@@ -96,12 +87,8 @@ export file function ControlBodegaReal() {
         imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80'
       };
 
-      // ── AQUÍ SE GUARDA EN FIREBASE FIRESTORE ──
-      // await addDoc(collection(db, "productos_bodega"), nuevoItem);
-
       setProductos(prev => [nuevoItem, ...prev]);
 
-      // Limpiar formulario
       setCodigo('');
       setNombre('');
       setMarca('');
@@ -110,7 +97,7 @@ export file function ControlBodegaReal() {
       setPrecio('');
       setImagenPreview(null);
 
-      alert('✅ ¡Producto registrado y sincronizado con Ventas y Gerencia!');
+      alert('✅ ¡Producto registrado exitosamente!');
     } catch (error) {
       console.error(error);
       alert('❌ Error al registrar el producto.');
@@ -119,22 +106,16 @@ export file function ControlBodegaReal() {
     }
   };
 
-  // Modificar stock rápido (+1, -5, etc.)
-  const actualizarStock = async (id: number | string, cantidadDelta: number) => {
+  const actualizarStock = (id: string, cantidadDelta: number) => {
     setProductos(prev => prev.map(prod => {
       if (prod.id === id) {
         const nuevoStock = Math.max(0, prod.stock + cantidadDelta);
-        
-        // ── AQUÍ ACTUALIZARÍAS EN FIREBASE ──
-        // await updateDoc(doc(db, "productos_bodega", id), { stock: nuevoStock });
-
         return { ...prod, stock: nuevoStock };
       }
       return prod;
     }));
   };
 
-  // Filtrado de productos
   const productosFiltrados = productos.filter(p => {
     const textoMatch = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
                        p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || 
@@ -155,17 +136,14 @@ export file function ControlBodegaReal() {
     }}>
       <div style={{ maxWidth: '650px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
-        {/* Encabezado */}
         <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '20px', padding: '16px' }}>
           <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: '0 0 4px 0' }}>📦 Tienda-SS - Control Logístico</h1>
-          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Sincronización en tiempo real con Bodega, Ventas y Gerencia.</p>
+          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Registro rápido con cámara y control de inventario.</p>
         </div>
 
-        {/* Formulario de Registro con Cámara */}
         <form onSubmit={registrarProducto} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '20px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto (Motos, TV, etc.)</h2>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto</h2>
 
-          {/* Botón de Cámara nativa */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#030712', padding: '10px', borderRadius: '12px', border: '1px solid #374151' }}>
             <input
               type="file"
@@ -190,7 +168,7 @@ export file function ControlBodegaReal() {
               >
                 📸 Tomar Foto con Cámara
               </button>
-              <span style={{ fontSize: '9px', color: '#9ca3af' }}>Reemplaza la URL por captura directa.</span>
+              <span style={{ fontSize: '9px', color: '#9ca3af' }}>Abre la cámara del celular directamente.</span>
             </div>
           </div>
 
@@ -261,11 +239,10 @@ export file function ControlBodegaReal() {
             disabled={guardando}
             style={{ backgroundColor: guardando ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', marginTop: '4px' }}
           >
-            {guardando ? 'Guardando en la Nube...' : 'Guardar Producto en Bodega 🚀'}
+            {guardando ? 'Guardando...' : 'Guardar Producto en Bodega 🚀'}
           </button>
         </form>
 
-        {/* Listado y Existencias Actuales */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias Actuales</h2>
           
@@ -314,7 +291,6 @@ export file function ControlBodegaReal() {
                 </div>
               </div>
 
-              {/* Botones de control rápido de stock */}
               <div style={{ borderTop: '1px solid #1f2937', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <span style={{ fontSize: '10px', color: '#ef4444' }}>🔻 Salida de Stock:</span>
                 <div style={{ display: 'flex', gap: '4px' }}>
