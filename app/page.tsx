@@ -1,230 +1,319 @@
 'use client';
-import React, { useState } from 'react';
-import InventarioBodega from './inventario';
-import ModuloVentas from './ventas';
-import ModuloChofer from './chofer';
+import React, { useState, useRef } from 'react';
+// Importa Firebase si lo requieres para guardar el producto real en Firestore
+// import { db } from '../lib/firebase';
+// import { collection, addDoc } from 'firebase/firestore';
 
-export default function TiendaSSApp() {
-  const [rol, setRol] = useState<string | null>(null);
-  const [usuario, setUsuario] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+interface ProductoBodega {
+  id: string;
+  codigo: string;
+  modelo: string;
+  nombre: string;
+  precio: number;
+  stock: number;
+  categoria: string;
+  imagen: string; // Aquí guardaremos la imagen en Base64 o la URL de Firebase Storage
+}
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    const userClean = usuario.trim().toLowerCase();
+export default function BodegaReal() {
+  const [productos, setProductos] = useState<ProductoBodega[]>([
+    {
+      id: '1',
+      codigo: 'TV-SON-55',
+      modelo: 'Bravia XR-55X90L',
+      nombre: 'Smart TV Sony 55"',
+      precio: 450,
+      stock: 12,
+      categoria: 'Electrodomésticos',
+      imagen: 'https://images.unsplash.com/photo-1593784991095-a205069470b6?auto=format&fit=crop&w=300&q=80'
+    }
+  ]);
 
-    if (
-      (userClean === 'jefe' || userClean === 'bodega' || userClean === 'vendedor' || userClean === 'chofer') &&
-      password === '1234'
-    ) {
-      setRol(userClean);
-    } else {
-      setError('Credenciales incorrectas. Usa clave: 1234');
+  // Estados del formulario de nuevo producto
+  const [codigo, setCodigo] = useState('');
+  const [modelo, setModelo] = useState('');
+  const [nombre, setNombre] = useState('');
+  const [precio, setPrecio] = useState('');
+  const [stock, setStock] = useState('');
+  const [categoria, setCategoria] = useState('Electrodomésticos');
+  
+  // Estado para la imagen capturada por la cámara
+  const [imagenPreview, setImagenPreview] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  
+  // Referencia para activar el input de cámara nativo oculto
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Función para capturar la foto desde la cámara del dispositivo
+  const handleCapturarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // El resultado es un string Base64 que se puede mostrar y guardar directamente
+        setImagenPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
-  if (!rol) {
-    return (
-      <main style={{
-        minHeight: '100vh',
-        backgroundColor: '#030712',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
-      }}>
-        <div style={{
-          width: '100%',
-          maxWidth: '420px',
-          backgroundColor: '#111827',
-          border: '1px solid #1f2937',
-          borderRadius: '24px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-          padding: '32px',
-          boxSizing: 'border-box'
-        }}>
-          
-          {/* Logo e Icono */}
-          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '60px',
-              height: '60px',
-              borderRadius: '18px',
-              backgroundColor: 'rgba(99, 102, 241, 0.15)',
-              border: '1px solid rgba(99, 102, 241, 0.3)',
-              color: '#818cf8',
-              fontSize: '26px',
-              marginBottom: '12px'
-            }}>
-              ⚡
-            </div>
-            <h1 style={{ color: '#ffffff', fontSize: '24px', fontWeight: 800, margin: '0 0 4px 0' }}>Tienda-SS</h1>
-            <p style={{ color: '#9ca3af', fontSize: '13px', margin: 0 }}>Sistema Logístico e Inventario Profesional</p>
-          </div>
+  const guardarProductoEnBodega = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nombre || !codigo || !precio || !stock) {
+      alert('⚠️ Por favor completa los campos obligatorios.');
+      return;
+    }
 
-          {/* Formulario */}
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {error && (
-              <div style={{
-                backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                border: '1px solid rgba(244, 63, 94, 0.3)',
-                color: '#fb7185',
-                fontSize: '12px',
-                padding: '12px',
-                borderRadius: '12px',
-                textAlign: 'center'
-              }}>
-                {error}
-              </div>
-            )}
+    setGuardando(true);
 
-            <div>
-              <label style={{ display: 'block', color: '#d1d5db', fontSize: '12px', fontWeight: 500, marginBottom: '6px' }}>
-                Usuario de acceso
-              </label>
-              <input
-                type="text"
-                placeholder="ej. bodega, vendedor, chofer, jefe"
-                value={usuario}
-                onChange={(e) => setUsuario(e.target.value)}
-                style={{
-                  width: '100%',
-                  backgroundColor: '#030712',
-                  border: '1px solid #374151',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  color: '#ffffff',
-                  boxSizing: 'border-box',
-                  outline: 'none'
-                }}
-                required
-              />
-            </div>
+    try {
+      const nuevoProducto: ProductoBodega = {
+        id: Date.now().toString(),
+        codigo,
+        modelo,
+        nombre,
+        precio: parseFloat(precio),
+        stock: parseInt(stock, 10),
+        categoria,
+        imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80' // Imagen por defecto si no toma foto
+      };
 
-            <div>
-              <label style={{ display: 'block', color: '#d1d5db', fontSize: '12px', fontWeight: 500, marginBottom: '6px' }}>
-                Contraseña
-              </label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  width: '100%',
-                  backgroundColor: '#030712',
-                  border: '1px solid #374151',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  color: '#ffffff',
-                  boxSizing: 'border-box',
-                  outline: 'none'
-                }}
-                required
-              />
-            </div>
+      // ── AQUÍ PUEDES CONECTAR CON FIREBASE FIRESTORE ──
+      // await addDoc(collection(db, "productos_bodega"), nuevoProducto);
 
-            <button
-              type="submit"
-              style={{
-                width: '100%',
-                backgroundColor: '#4f46e5',
-                color: '#ffffff',
-                fontWeight: 600,
-                borderRadius: '12px',
-                padding: '14px',
-                fontSize: '14px',
-                border: 'none',
-                cursor: 'pointer',
-                boxShadow: '0 10px 15px -3px rgba(79, 70, 229, 0.4)',
-                marginTop: '4px'
-              }}
-            >
-              Iniciar Sesión
-            </button>
-          </form>
-
-          {/* Accesos rápidos visuales y ordenados */}
-          <div style={{ borderTop: '1px solid #1f2937', marginTop: '24px', paddingTop: '16px' }}>
-            <p style={{ color: '#9ca3af', fontSize: '11px', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px', fontWeight: 600 }}>
-              Accesos rápidos (Clave: <span style={{ color: '#818cf8' }}>1234</span>)
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '10px' }}>
-                <span style={{ color: '#818cf8', fontWeight: 700, fontSize: '12px', display: 'block' }}>📦 bodega</span>
-                <span style={{ color: '#9ca3af', fontSize: '10px' }}>Inventario</span>
-              </div>
-              <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '10px' }}>
-                <span style={{ color: '#38bdf8', fontWeight: 700, fontSize: '12px', display: 'block' }}>🛒 vendedor</span>
-                <span style={{ color: '#9ca3af', fontSize: '10px' }}>Caja y Catálogo</span>
-              </div>
-              <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '10px' }}>
-                <span style={{ color: '#34d399', fontWeight: 700, fontSize: '12px', display: 'block' }}>🚚 chofer</span>
-                <span style={{ color: '#9ca3af', fontSize: '10px' }}>Rutas</span>
-              </div>
-              <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '10px' }}>
-                <span style={{ color: '#f43f5e', fontWeight: 700, fontSize: '12px', display: 'block' }}>⚡ jefe</span>
-                <span style={{ color: '#9ca3af', fontSize: '10px' }}>Administración</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </main>
-    );
-  }
+      setProductos(prev => [nuevoProducto, ...prev]);
+      
+      // Limpiar formulario
+      setCodigo('');
+      setModelo('');
+      setNombre('');
+      setPrecio('');
+      setStock('');
+      setImagenPreview(null);
+      
+      alert('✅ ¡Producto registrado exitosamente en la bodega!');
+    } catch (error) {
+      console.error("Error al guardar:", error);
+      alert('❌ Hubo un error al guardar el producto.');
+    } finally {
+      setGuardando(false);
+    }
+  };
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh', backgroundColor: '#030712' }}>
-      <div style={{ position: 'absolute', top: '16px', right: '16px', zIndex: 50 }}>
-        <button
-          onClick={() => setRol(null)}
-          style={{
-            backgroundColor: '#1f2937',
-            color: '#e5e7eb',
-            border: '1px solid #374151',
-            padding: '8px 16px',
-            borderRadius: '10px',
-            fontSize: '12px',
-            fontWeight: 500,
-            cursor: 'pointer'
-          }}
-        >
-          🚪 Cerrar Sesión
-        </button>
-      </div>
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#030712',
+      color: '#f3f4f6',
+      padding: '16px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      boxSizing: 'border-box'
+    }}>
+      <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        
+        {/* Cabecera */}
+        <div style={{
+          backgroundColor: '#111827',
+          border: '1px solid #1f2937',
+          borderRadius: '20px',
+          padding: '16px',
+        }}>
+          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: '0 0 4px 0' }}>📦 Control de Bodega - Registro con Cámara</h1>
+          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Toma fotos reales de la mercancía directo desde la cámara de tu dispositivo.</p>
+        </div>
 
-      {rol === 'bodega' && <InventarioBodega />}
-      {rol === 'vendedor' && <ModuloVentas />}
-      {rol === 'chofer' && <ModuloChofer />}
-      {rol === 'jefe' && (
-        <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ maxWidth: '500px', width: '100%', backgroundColor: '#111827', border: '1px solid #1f2937', padding: '32px', borderRadius: '20px', textAlign: 'center' }}>
-            <h1 style={{ color: '#818cf8', fontSize: '24px', fontWeight: 'bold', marginBottom: '12px' }}>Panel General de Administración</h1>
-            <p style={{ color: '#9ca3af', fontSize: '14px', lineHeight: 1.5, marginBottom: '24px' }}>
-              Bienvenido al núcleo operativo general de Tienda-SS. Supervisión general y métricas en tiempo real.
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-              <div style={{ backgroundColor: '#030712', padding: '16px', borderRadius: '12px', border: '1px solid #1f2937' }}>
-                <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#34d399', display: 'block' }}>$12,450</span>
-                <span style={{ fontSize: '11px', color: '#9ca3af' }}>Ventas Totales</span>
+        {/* Formulario de Alta de Producto */}
+        <form onSubmit={guardarProductoEnBodega} style={{
+          backgroundColor: '#111827',
+          border: '1px solid #1f2937',
+          borderRadius: '20px',
+          padding: '18px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Agregar Nuevo Artículo</h2>
+
+          {/* Captura de Imagen por Cámara Nativa */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <label style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 600 }}>Fotografía del Producto:</label>
+            
+            {/* Input oculto configurado para abrir la cámara trasera del celular o webcam en PC */}
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment" 
+              ref={fileInputRef}
+              onChange={handleCapturarFoto}
+              style={{ display: 'none' }}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '70px',
+                height: '70px',
+                borderRadius: '12px',
+                border: '1px dashed #4b5563',
+                backgroundColor: '#1f2937',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                flexShrink: 0
+              }}>
+                {imagenPreview ? (
+                  <img src={imagenPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <span style={{ fontSize: '20px' }}>📷</span>
+                )}
               </div>
-              <div style={{ backgroundColor: '#030712', padding: '16px', borderRadius: '12px', border: '1px solid #1f2937' }}>
-                <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#818cf8', display: 'block' }}>4 Rutas</span>
-                <span style={{ fontSize: '11px', color: '#9ca3af' }}>Camiones en Ruta</span>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    backgroundColor: '#4f46e5',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  📸 Abrir Cámara / Tomar Foto
+                </button>
+                <span style={{ fontSize: '10px', color: '#6b7280' }}>* En celulares abrirá la cámara principal automáticamente.</span>
               </div>
             </div>
           </div>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Código *</label>
+              <input
+                type="text"
+                placeholder="Ej. TV-SON-55"
+                value={codigo}
+                onChange={e => setCodigo(e.target.value)}
+                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Modelo</label>
+              <input
+                type="text"
+                placeholder="Ej. Bravia XR"
+                value={modelo}
+                onChange={e => setModelo(e.target.value)}
+                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Nombre del Producto *</label>
+            <input
+              type="text"
+              placeholder="Ej. Smart TV Sony 55 pulgadas"
+              value={nombre}
+              onChange={e => setNombre(e.target.value)}
+              style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Precio Unitario ($USD) *</label>
+              <input
+                type="number"
+                placeholder="0.00"
+                value={precio}
+                onChange={e => setPrecio(e.target.value)}
+                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Stock Inicial *</label>
+              <input
+                type="number"
+                placeholder="0"
+                value={stock}
+                onChange={e => setStock(e.target.value)}
+                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Categoría</label>
+            <select
+              value={categoria}
+              onChange={e => setCategoria(e.target.value)}
+              style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            >
+              <option value="Electrodomésticos">Electrodomésticos</option>
+              <option value="Muebles/Hogar">Muebles/Hogar</option>
+              <option value="Celulares">Celulares</option>
+              <option value="Herramientas">Herramientas</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={guardando}
+            style={{
+              marginTop: '8px',
+              backgroundColor: guardando ? '#374151' : '#10b981',
+              color: '#fff',
+              border: 'none',
+              padding: '12px',
+              borderRadius: '12px',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: guardando ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+            }}
+          >
+            {guardando ? 'Guardando en Base de Datos...' : 'Guardar Producto en Bodega 🚀'}
+          </button>
+        </form>
+
+        {/* Listado Rápido de Inventario en Bodega */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Inventario Registrado</h2>
+          
+          {productos.map(prod => (
+            <div key={prod.id} style={{
+              backgroundColor: '#111827',
+              border: '1px solid #1f2937',
+              borderRadius: '16px',
+              padding: '12px',
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'center'
+            }}>
+              <img
+                src={prod.imagen}
+                alt={prod.nombre}
+                style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '10px', backgroundColor: '#1f2937' }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
+                <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#fff', margin: '2px 0' }}>{prod.nombre}</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#9ca3af' }}>
+                  <span>Stock: <strong style={{ color: '#34d399' }}>{prod.stock}</strong></span>
+                  <span>Precio: <strong style={{ color: '#38bdf8' }}>${prod.precio}</strong></span>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
-      )}
+
+      </div>
     </div>
   );
 }
