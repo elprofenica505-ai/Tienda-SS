@@ -11,10 +11,10 @@ interface Producto {
 
 export default function InventarioBodega() {
   const [productos, setProductos] = useState<Producto[]>([
-    { id: 1, nombre: 'Smart TV Sony 55"', categoria: 'Electrodomésticos', stock: 12, min: 3 },
-    { id: 2, nombre: 'Cama King Size ortopédica', categoria: 'Muebles/Hogar', stock: 5, min: 2 },
-    { id: 3, nombre: 'Infinix Note 50 Pro', categoria: 'Celulares', stock: 25, min: 5 },
-    { id: 4, nombre: 'Juego de Sala Esquinero', categoria: 'Muebles/Hogar', stock: 4, min: 2 },
+    { id: 1, nombre: 'Smart TV Sony 55"', categoria: 'Electrodomésticos', stock: 12, minimo: 3 },
+    { id: 2, nombre: 'Cama King Size ortopédica', categoria: 'Muebles/Hogar', stock: 5, minimo: 2 },
+    { id: 3, nombre: 'Infinix Note 50 Pro', categoria: 'Celulares', stock: 25, minimo: 5 },
+    { id: 4, nombre: 'Juego de Sala Esquinero', categoria: 'Muebles/Hogar', stock: 4, minimo: 2 },
   ]);
 
   const [nombreNuevo, setNombreNuevo] = useState('');
@@ -30,7 +30,7 @@ export default function InventarioBodega() {
       nombre: nombreNuevo,
       categoria: categoriaNueva,
       stock: parseInt(stockNuevo),
-      min: 2,
+      minimo: 2,
     };
 
     setProductos([...productos, nuevoItem]);
@@ -124,7 +124,7 @@ export default function InventarioBodega() {
                     <td className="p-4 text-center font-bold">
                       <span
                         className={`px-3 py-1 rounded-full text-xs ${
-                          prod.stock <= prod.min
+                          prod.stock <= prod.minimo
                             ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                             : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                         }`}
