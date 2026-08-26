@@ -113,6 +113,18 @@ export default function InventarioBodega() {
   const stockCritico = productos.filter(p => p.stock <= p.minimo).length;
   const unidadesTotales = productos.reduce((acc, p) => acc + p.stock, 0);
 
+  const inputStyle = {
+    backgroundColor: '#030712',
+    border: '1px solid #374151',
+    borderRadius: '10px',
+    padding: '12px 14px',
+    fontSize: '13px',
+    color: '#ffffff',
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box' as const
+  };
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -136,8 +148,8 @@ export default function InventarioBodega() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h1 style={{ fontSize: '20px', fontWeight: 800, color: '#ffffff', margin: '0 0 2px 0' }}>📦 Bodega y Logística Tienda-SS</h1>
-              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Control avanzado de inventario y entradas masivas</p>
+              <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: '0 0 2px 0' }}>📦 Bodega y Logística Tienda-SS</h1>
+              <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Control avanzado de inventario y entradas masivas</p>
             </div>
             <span style={{
               backgroundColor: 'rgba(99, 102, 241, 0.15)',
@@ -169,78 +181,76 @@ export default function InventarioBodega() {
           </div>
         </div>
 
-        {/* Formulario Completo */}
+        {/* Formulario Completo en Columna Única (Diseño Fluido Perfecto) */}
         <div style={{
           backgroundColor: '#111827',
           border: '1px solid #1f2937',
           borderRadius: '20px',
           padding: '20px'
         }}>
-          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: '0 0 14px 0' }}>➕ Registrar Nuevo Producto (Motos, TV, etc.)</h2>
-          <form onSubmit={agregarProducto} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Código / SKU (Ej. MOT-01)"
-                value={codigo}
-                onChange={(e) => setCodigo(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-              />
-              <select
-                value={categoria}
-                onChange={(e) => setCategoria(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-              >
-                <option value="Electrodomésticos">Electrodomésticos</option>
-                <option value="Motos y Vehículos">Motos y Vehículos</option>
-                <option value="Muebles/Hogar">Muebles / Hogar</option>
-                <option value="Celulares y Tecnología">Celulares y Tech</option>
-              </select>
-            </div>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: '0 0 14px 0' }}>➕ Registrar Nuevo Producto</h2>
+          <form onSubmit={agregarProducto} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            
+            <input
+              type="text"
+              placeholder="Código / SKU (Ej. MOT-01)"
+              value={codigo}
+              onChange={(e) => setCodigo(e.target.value)}
+              style={inputStyle}
+            />
+
+            <select
+              value={categoria}
+              onChange={(e) => setCategoria(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="Electrodomésticos">Electrodomésticos</option>
+              <option value="Motos y Vehículos">Motos y Vehículos</option>
+              <option value="Muebles/Hogar">Muebles / Hogar</option>
+              <option value="Celulares y Tecnología">Celulares y Tecnología</option>
+            </select>
 
             <input
               type="text"
               placeholder="Nombre del producto (Ej. Moto Eléctrica)"
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
-              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              style={inputStyle}
               required
             />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Marca (Ej. Super Soco)"
-                value={marca}
-                onChange={(e) => setMarca(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-              />
-              <input
-                type="text"
-                placeholder="Modelo (Ej. TSX Pro)"
-                value={modelo}
-                onChange={(e) => setModelo(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-              />
-            </div>
+            <input
+              type="text"
+              placeholder="Marca (Ej. Super Soco)"
+              value={marca}
+              onChange={(e) => setMarca(e.target.value)}
+              style={inputStyle}
+            />
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
-              <input
-                type="url"
-                placeholder="URL de foto (Imagen web o link)"
-                value={imagen}
-                onChange={(e) => setImagen(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-              />
-              <input
-                type="number"
-                placeholder="Stock inicial"
-                value={stockInicial}
-                onChange={(e) => setStockInicial(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#ffffff', outline: 'none' }}
-                required
-              />
-            </div>
+            <input
+              type="text"
+              placeholder="Modelo (Ej. TSX Pro)"
+              value={modelo}
+              onChange={(e) => setModelo(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              type="url"
+              placeholder="URL de foto (Imagen web o link)"
+              value={imagen}
+              onChange={(e) => setImagen(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              type="number"
+              placeholder="Stock inicial (Ej. 10)"
+              value={stockInicial}
+              onChange={(e) => setStockInicial(e.target.value)}
+              style={inputStyle}
+              required
+            />
 
             <button
               type="submit"
@@ -249,7 +259,7 @@ export default function InventarioBodega() {
                 color: '#ffffff',
                 fontWeight: 600,
                 borderRadius: '10px',
-                padding: '12px',
+                padding: '14px',
                 fontSize: '13px',
                 border: 'none',
                 cursor: 'pointer',
@@ -277,17 +287,7 @@ export default function InventarioBodega() {
               placeholder="🔍 Buscar por nombre, marca, modelo o código..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
-              style={{
-                backgroundColor: '#030712',
-                border: '1px solid #374151',
-                borderRadius: '10px',
-                padding: '10px 14px',
-                fontSize: '12px',
-                color: '#ffffff',
-                outline: 'none',
-                width: '100%',
-                boxSizing: 'border-box'
-              }}
+              style={inputStyle}
             />
 
             {/* Selector de categoría */}
