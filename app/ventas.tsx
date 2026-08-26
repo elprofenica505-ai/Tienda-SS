@@ -67,13 +67,13 @@ export default function CajaVentas() {
         if (existe.cantidadVenta < prod.stock) {
           return prev.map(item => item.id === prod.id ? { ...item, cantidadVenta: item.cantidadVenta + 1 } : item);
         }
-        return prev; // No supera el stock
+        return prev;
       }
       return [...prev, { ...prod, cantidadVenta: 1 }];
     });
   };
 
-  const cambiarCantidad =にし (id: number, delta: number) => {
+  const cambiarCantidad = (id: number, delta: number) => {
     setCarrito(prev => prev.map(item => {
       if (item.id === id) {
         const nuevaCant = item.cantidadVenta + delta;
@@ -250,7 +250,7 @@ export default function CajaVentas() {
 
       </div>
 
-      {/* Barra Flotante de Carrito / Cobro (Aparece al seleccionar productos) */}
+      {/* Barra Flotante de Carrito / Cobro */}
       {carrito.length > 0 && (
         <div style={{
           position: 'fixed',
@@ -291,7 +291,6 @@ export default function CajaVentas() {
             </button>
           </div>
 
-          {/* Mini lista de ítems en carrito */}
           <div style={{ maxHeight: '140px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid #1f2937', paddingTop: '8px' }}>
             {carrito.map(item => (
               <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#030712', padding: '6px 10px', borderRadius: '8px' }}>
