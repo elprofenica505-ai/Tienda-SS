@@ -1,4 +1,4 @@
-'client'
+'use client';
 import React, { useState } from 'react';
 import InventarioBodega from './inventario';
 import ModuloVentas from './ventas';
