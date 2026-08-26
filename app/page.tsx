@@ -42,7 +42,7 @@ export default function TiendaSSApp() {
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
 
-  // Productos (ahora desde Firebase)
+  // Productos
   const [productos, setProductos] = useState<Producto[]>([]);
 
   // Estados Bodega
@@ -70,7 +70,7 @@ export default function TiendaSSApp() {
     { id: 3, cliente: 'Carlos Ruiz', direccion: 'Colonia Centroamérica', productos: 'Infinix Note 50 Pro', estado: 'Entregado' },
   ]);
 
-  // Cargar productos desde Firebase al iniciar
+  // Cargar productos desde Firebase
   useEffect(() => {
     const cargarProductos = async () => {
       try {
@@ -82,7 +82,6 @@ export default function TiendaSSApp() {
         setProductos(lista);
       } catch (error) {
         console.error('Error al cargar productos:', error);
-        alert('Error al conectar con Firebase. Revisa la consola.');
       } finally {
         setCargando(false);
       }
@@ -101,7 +100,7 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Cámara Bodega
+  // Cámara
   const handleCapturarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -111,21 +110,23 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Registrar producto en Firebase
+  // Registrar producto (simplificado)
   const registrarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!codigo || !nombre || !stockInicial) {
-      alert('⚠️ Faltan campos obligatorios.');
+    if (!nombre || !stockInicial) {
+      alert('⚠️ Solo necesitas Nombre y Stock.');
       return;
     }
 
     setGuardando(true);
     try {
+      const codigoAuto = codigo.trim() || `PROD-${Math.floor(1000 + Math.random() * 9000)}`;
+
       const nuevoProducto = {
-        codigo,
-        nombre,
-        marca: marca || 'Genérica',
-        modelo: modelo || 'Estándar',
+        codigo: codigoAuto,
+        nombre: nombre.trim(),
+        marca: marca.trim() || 'Sin marca',
+        modelo: modelo.trim() || 'Estándar',
         categoria,
         stock: parseInt(stockInicial, 10) || 0,
         precio: parseFloat(precio) || 0,
@@ -135,11 +136,17 @@ export default function TiendaSSApp() {
 
       const docRef = await addDoc(collection(db, 'productos'), nuevoProducto);
       
-      setProductos([{ id: docRef.id, ...nuevoProducto, stock: nuevoProducto.stock, precio: nuevoProducto.precio } as Producto, ...productos]);
+      setProductos([{ id: docRef.id, ...nuevoProducto } as Producto, ...productos]);
       
-      setCodigo(''); setNombre(''); setMarca(''); setModelo('');
-      setStockInicial(''); setPrecio(''); setImagenPreview(null);
-      alert('✅ ¡Producto guardado en Firebase!');
+      setCodigo('');
+      setNombre('');
+      setMarca('');
+      setModelo('');
+      setStockInicial('');
+      setPrecio('');
+      setImagenPreview(null);
+      
+      alert('✅ Producto agregado correctamente');
     } catch (error) {
       console.error(error);
       alert('❌ Error al guardar el producto.');
@@ -148,7 +155,7 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Actualizar stock en Firebase
+  // Actualizar stock
   const actualizarStock = async (id: string, delta: number) => {
     const producto = productos.find(p => p.id === id);
     if (!producto) return;
@@ -198,12 +205,11 @@ export default function TiendaSSApp() {
     }).filter(Boolean) as CarritoItem[]);
   };
 
-  // Procesar venta + guardar en Firebase + descontar stock
+  // Procesar venta
   const procesarVenta = async () => {
     if (carrito.length === 0) return;
 
     try {
-      // 1. Guardar la venta
       await addDoc(collection(db, 'ventas'), {
         items: carrito.map(item => ({
           id: item.id,
@@ -218,13 +224,11 @@ export default function TiendaSSApp() {
         estado: 'Completada'
       });
 
-      // 2. Descontar stock de cada producto
       for (const item of carrito) {
         const nuevoStock = Math.max(0, item.stock - item.cantidadVenta);
         await updateDoc(doc(db, 'productos', item.id), { stock: nuevoStock });
       }
 
-      // 3. Actualizar estado local
       setProductos(productos.map(p => {
         const itemVendido = carrito.find(c => c.id === p.id);
         if (itemVendido) {
@@ -236,7 +240,7 @@ export default function TiendaSSApp() {
       setCarrito([]);
       setVentaExitosa(true);
       setTimeout(() => setVentaExitosa(false), 4000);
-      alert('✅ ¡Venta guardada en Firebase y stock actualizado!');
+      alert('✅ ¡Venta guardada correctamente!');
     } catch (error) {
       console.error(error);
       alert('❌ Error al procesar la venta.');
@@ -262,7 +266,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VISTA LOGIN ==========
+  // ========== LOGIN ==========
   if (vistaActual === 'login') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', fontFamily: 'sans-serif' }}>
@@ -315,7 +319,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VISTA BODEGA ==========
+  // ========== BODEGA ==========
   if (vistaActual === 'bodega') {
     const productosFiltrados = productos.filter(p =>
       p.nombre.toLowerCase().includes(busquedaBodega.toLowerCase()) ||
@@ -326,55 +330,90 @@ export default function TiendaSSApp() {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>📦 Tienda-SS</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Módulo de Bodega · Conectado a Firebase</p>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Módulo de Bodega</p>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               🚪 Cerrar Sesión
             </button>
           </div>
 
+          {/* Formulario simplificado */}
           <form onSubmit={registrarProducto} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto</h2>
-            <input type="text" placeholder="Código / SKU" value={codigo} onChange={e => setCodigo(e.target.value)} required
-              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
-            <input type="text" placeholder="Nombre del producto" value={nombre} onChange={e => setNombre(e.target.value)} required
-              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Agregar Producto Rápido</h2>
+            
+            <input 
+              type="text" 
+              placeholder="Nombre del producto *" 
+              value={nombre} 
+              onChange={e => setNombre(e.target.value)} 
+              required
+              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '12px', fontSize: '13px', color: '#fff', outline: 'none' }} 
+            />
+
+            <input 
+              type="number" 
+              placeholder="Stock inicial *" 
+              value={stockInicial} 
+              onChange={e => setStockInicial(e.target.value)} 
+              required
+              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '12px', fontSize: '13px', color: '#fff', outline: 'none' }} 
+            />
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <input type="text" placeholder="Marca" value={marca} onChange={e => setMarca(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
-              <input type="text" placeholder="Modelo" value={modelo} onChange={e => setModelo(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+              <input 
+                type="number" 
+                placeholder="Precio (opcional)" 
+                value={precio} 
+                onChange={e => setPrecio(e.target.value)}
+                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} 
+              />
+              <select 
+                value={categoria} 
+                onChange={e => setCategoria(e.target.value)}
+                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+              >
+                <option>Electrodomésticos</option>
+                <option>Motos y Vehículos</option>
+                <option>Celulares</option>
+                <option>Muebles/Hogar</option>
+                <option>Otros</option>
+              </select>
             </div>
-            <select value={categoria} onChange={e => setCategoria(e.target.value)}
-              style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}>
-              <option>Electrodomésticos</option>
-              <option>Motos y Vehículos</option>
-              <option>Celulares</option>
-              <option>Muebles/Hogar</option>
-            </select>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <input type="number" placeholder="Stock inicial" value={stockInicial} onChange={e => setStockInicial(e.target.value)} required
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
-              <input type="number" placeholder="Precio USD" value={precio} onChange={e => setPrecio(e.target.value)}
-                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
-            </div>
-            <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handleCapturarFoto} style={{ fontSize: '12px', color: '#9ca3af' }} />
-            {imagenPreview && <img src={imagenPreview} alt="Preview" style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }} />}
-            <button type="submit" disabled={guardando}
-              style={{ backgroundColor: guardando ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
-              {guardando ? 'Guardando en Firebase...' : 'Guardar Producto 🚀'}
+
+            **Summary:**
+Opciones avanzadas (opcional)
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input type="text" placeholder="Código (se genera solo si lo dejas vacío)" value={codigo} onChange={e => setCodigo(e.target.value)}
+                  style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+                <input type="text" placeholder="Marca (opcional)" value={marca} onChange={e => setMarca(e.target.value)}
+                  style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+                <input type="text" placeholder="Modelo (opcional)" value={modelo} onChange={e => setModelo(e.target.value)}
+                  style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+                <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handleCapturarFoto} style={{ fontSize: '12px' }} />
+                {imagenPreview && <img src={imagenPreview} alt="Preview" style={{ width: '70px', height: '70px', objectFit: 'cover', borderRadius: '8px' }} />}
+              </div>
+
+            <button 
+              type="submit" 
+              disabled={guardando}
+              style={{ backgroundColor: guardando ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '13px', borderRadius: '10px', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}
+            >
+              {guardando ? 'Guardando...' : 'Agregar Producto'}
             </button>
           </form>
 
+          {/* Lista de productos */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias ({productosFiltrados.length})</h2>
             <input type="text" placeholder="🔍 Buscar..." value={busquedaBodega} onChange={e => setBusquedaBodega(e.target.value)}
               style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+            
             {productosFiltrados.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>No hay productos aún. Registra el primero.</p>
+              <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px', padding: '20px' }}>No hay productos aún. Agrega el primero.</p>
             ) : (
               productosFiltrados.map(prod => (
                 <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -400,7 +439,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VISTA VENDEDOR ==========
+  // ========== VENDEDOR ==========
   if (vistaActual === 'vendedor') {
     const catalogoFiltrado = productos.filter(p =>
       p.nombre.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
@@ -410,10 +449,11 @@ export default function TiendaSSApp() {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif', paddingBottom: carrito.length > 0 ? '140px' : '20px' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>🛒 Tienda-SS</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y Catálogo · Firebase</p>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y Catálogo</p>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               🚪 Cerrar
@@ -422,7 +462,7 @@ export default function TiendaSSApp() {
 
           {ventaExitosa && (
             <div style={{ backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid #10b981', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#34d399', fontWeight: 700 }}>
-              ✅ ¡Venta guardada en Firebase!
+              ✅ ¡Venta guardada correctamente!
             </div>
           )}
 
@@ -479,7 +519,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VISTA CHOFER ==========
+  // ========== CHOFER ==========
   if (vistaActual === 'chofer') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
@@ -535,7 +575,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VISTA JEFE ==========
+  // ========== JEFE ==========
   if (vistaActual === 'jefe') {
     const totalProductos = productos.length;
     const unidadesTotales = productos.reduce((acc, p) => acc + p.stock, 0);
@@ -548,7 +588,7 @@ export default function TiendaSSApp() {
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Tienda-SS</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Panel de Administración · Firebase</p>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Panel de Administración</p>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               🚪 Cerrar
