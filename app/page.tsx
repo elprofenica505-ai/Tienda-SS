@@ -1,104 +1,148 @@
 'use client';
-import React, { useState, useRef } from 'react';
-// Importa Firebase si lo requieres para guardar el producto real en Firestore
-// import { db } from '../lib/firebase';
-// import { collection, addDoc } from 'firebase/firestore';
+import React, { useState, useRef, useEffect } from 'react';
+// Importa tus dependencias reales de Firebase si ya las tienes:
+// import { db } from '../../lib/firebase';
+// import { collection, addDoc, updateDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 interface ProductoBodega {
   id: string;
   codigo: string;
-  modelo: string;
   nombre: string;
-  precio: number;
-  stock: number;
+  marca: string;
+  modelo: string;
   categoria: string;
-  imagen: string; // Aquí guardaremos la imagen en Base64 o la URL de Firebase Storage
+  stock: number;
+  precio: number;
+  imagen: string;
 }
 
-export default function BodegaReal() {
+export file function ControlBodegaReal() {
+  // Estado con productos de ejemplo (aquí se conectaría con onSnapshot de Firebase)
   const [productos, setProductos] = useState<ProductoBodega[]>([
     {
       id: '1',
       codigo: 'TV-SON-55',
-      modelo: 'Bravia XR-55X90L',
-      nombre: 'Smart TV Sony 55"',
-      precio: 450,
-      stock: 12,
+      nombre: 'Smart TV 4K UHD',
+      marca: 'Sony',
+      modelo: 'Bravia X80K',
       categoria: 'Electrodomésticos',
+      stock: 12,
+      precio: 450,
       imagen: 'https://images.unsplash.com/photo-1593784991095-a205069470b6?auto=format&fit=crop&w=300&q=80'
+    },
+    {
+      id: '2',
+      codigo: 'MOT-CHN-EV',
+      nombre: 'Moto Eléctrica Urbana',
+      marca: 'Super Soco',
+      modelo: 'TSX Pro 2026',
+      categoria: 'Motos y Vehículos',
+      stock: 8,
+      precio: 1250,
+      imagen: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=300&q=80'
     }
   ]);
 
-  // Estados del formulario de nuevo producto
+  // Estados del Formulario de Registro
   const [codigo, setCodigo] = useState('');
-  const [modelo, setModelo] = useState('');
   const [nombre, setNombre] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [stock, setStock] = useState('');
+  const [marca, setMarca] = useState('');
+  const [modelo, setModelo] = useState('');
   const [categoria, setCategoria] = useState('Electrodomésticos');
+  const [stockInicial, setStockInicial] = useState('');
+  const [precio, setPrecio] = useState('');
   
-  // Estado para la imagen capturada por la cámara
+  // Captura de Cámara Nativa
   const [imagenPreview, setImagenPreview] = useState<string | null>(null);
-  const [guardando, setGuardando] = useState(false);
-  
-  // Referencia para activar el input de cámara nativo oculto
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Función para capturar la foto desde la cámara del dispositivo
+  // Buscador y Filtro
+  const [busqueda, setBusqueda] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState('Todas');
+  const [guardando, setGuardando] = useState(false);
+
+  // Manejar foto de la cámara
   const handleCapturarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        // El resultado es un string Base64 que se puede mostrar y guardar directamente
         setImagenPreview(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const guardarProductoEnBodega = async (e: React.FormEvent) => {
+  // Agregar nuevo producto a la base de datos
+  const registrarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombre || !codigo || !precio || !stock) {
-      alert('⚠️ Por favor completa los campos obligatorios.');
+    if (!codigo || !nombre || !stockInicial) {
+      alert('⚠️ Faltan campos obligatorios (Código, Nombre o Stock).');
       return;
     }
 
     setGuardando(true);
 
     try {
-      const nuevoProducto: ProductoBodega = {
+      const nuevoItem: ProductoBodega = {
         id: Date.now().toString(),
         codigo,
-        modelo,
         nombre,
-        precio: parseFloat(precio),
-        stock: parseInt(stock, 10),
+        marca,
+        modelo,
         categoria,
-        imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80' // Imagen por defecto si no toma foto
+        stock: parseInt(stockInicial, 10) || 0,
+        precio: parseFloat(precio) || 0,
+        imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80'
       };
 
-      // ── AQUÍ PUEDES CONECTAR CON FIREBASE FIRESTORE ──
-      // await addDoc(collection(db, "productos_bodega"), nuevoProducto);
+      // ── AQUÍ SE GUARDA EN FIREBASE FIRESTORE ──
+      // await addDoc(collection(db, "productos_bodega"), nuevoItem);
 
-      setProductos(prev => [nuevoProducto, ...prev]);
-      
+      setProductos(prev => [nuevoItem, ...prev]);
+
       // Limpiar formulario
       setCodigo('');
-      setModelo('');
       setNombre('');
+      setMarca('');
+      setModelo('');
+      setStockInicial('');
       setPrecio('');
-      setStock('');
       setImagenPreview(null);
-      
-      alert('✅ ¡Producto registrado exitosamente en la bodega!');
+
+      alert('✅ ¡Producto registrado y sincronizado con Ventas y Gerencia!');
     } catch (error) {
-      console.error("Error al guardar:", error);
-      alert('❌ Hubo un error al guardar el producto.');
+      console.error(error);
+      alert('❌ Error al registrar el producto.');
     } finally {
       setGuardando(false);
     }
   };
+
+  // Modificar stock rápido (+1, -5, etc.)
+  const actualizarStock = async (id: number | string, cantidadDelta: number) => {
+    setProductos(prev => prev.map(prod => {
+      if (prod.id === id) {
+        const nuevoStock = Math.max(0, prod.stock + cantidadDelta);
+        
+        // ── AQUÍ ACTUALIZARÍAS EN FIREBASE ──
+        // await updateDoc(doc(db, "productos_bodega", id), { stock: nuevoStock });
+
+        return { ...prod, stock: nuevoStock };
+      }
+      return prod;
+    }));
+  };
+
+  // Filtrado de productos
+  const productosFiltrados = productos.filter(p => {
+    const textoMatch = p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || 
+                       p.codigo.toLowerCase().includes(busqueda.toLowerCase()) || 
+                       p.marca.toLowerCase().includes(busqueda.toLowerCase()) ||
+                       p.modelo.toLowerCase().includes(busqueda.toLowerCase());
+    const catMatch = categoriaFiltro === 'Todas' || p.categoria === categoriaFiltro;
+    return textoMatch && catMatch;
+  });
 
   return (
     <div style={{
@@ -109,206 +153,196 @@ export default function BodegaReal() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       boxSizing: 'border-box'
     }}>
-      <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ maxWidth: '650px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
-        {/* Cabecera */}
-        <div style={{
-          backgroundColor: '#111827',
-          border: '1px solid #1f2937',
-          borderRadius: '20px',
-          padding: '16px',
-        }}>
-          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: '0 0 4px 0' }}>📦 Control de Bodega - Registro con Cámara</h1>
-          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Toma fotos reales de la mercancía directo desde la cámara de tu dispositivo.</p>
+        {/* Encabezado */}
+        <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '20px', padding: '16px' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: 800, color: '#ffffff', margin: '0 0 4px 0' }}>📦 Tienda-SS - Control Logístico</h1>
+          <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Sincronización en tiempo real con Bodega, Ventas y Gerencia.</p>
         </div>
 
-        {/* Formulario de Alta de Producto */}
-        <form onSubmit={guardarProductoEnBodega} style={{
-          backgroundColor: '#111827',
-          border: '1px solid #1f2937',
-          borderRadius: '20px',
-          padding: '18px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px'
-        }}>
-          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Agregar Nuevo Artículo</h2>
+        {/* Formulario de Registro con Cámara */}
+        <form onSubmit={registrarProducto} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '20px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar Nuevo Producto (Motos, TV, etc.)</h2>
 
-          {/* Captura de Imagen por Cámara Nativa */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 600 }}>Fotografía del Producto:</label>
-            
-            {/* Input oculto configurado para abrir la cámara trasera del celular o webcam en PC */}
+          {/* Botón de Cámara nativa */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: '#030712', padding: '10px', borderRadius: '12px', border: '1px solid #374151' }}>
             <input
               type="file"
               accept="image/*"
-              capture="environment" 
+              capture="environment"
               ref={fileInputRef}
               onChange={handleCapturarFoto}
               style={{ display: 'none' }}
             />
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                width: '70px',
-                height: '70px',
-                borderRadius: '12px',
-                border: '1px dashed #4b5563',
-                backgroundColor: '#1f2937',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                flexShrink: 0
-              }}>
-                {imagenPreview ? (
-                  <img src={imagenPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <span style={{ fontSize: '20px' }}>📷</span>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  style={{
-                    backgroundColor: '#4f46e5',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    textAlign: 'center'
-                  }}
-                >
-                  📸 Abrir Cámara / Tomar Foto
-                </button>
-                <span style={{ fontSize: '10px', color: '#6b7280' }}>* En celulares abrirá la cámara principal automáticamente.</span>
-              </div>
+            <div style={{ width: '55px', height: '55px', borderRadius: '10px', backgroundColor: '#1f2937', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {imagenPreview ? (
+                <img src={imagenPreview} alt="Cam" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <span style={{ fontSize: '20px' }}>📷</span>
+              )}
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                style={{ backgroundColor: '#4f46e5', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                📸 Tomar Foto con Cámara
+              </button>
+              <span style={{ fontSize: '9px', color: '#9ca3af' }}>Reemplaza la URL por captura directa.</span>
             </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Código *</label>
-              <input
-                type="text"
-                placeholder="Ej. TV-SON-55"
-                value={codigo}
-                onChange={e => setCodigo(e.target.value)}
-                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Modelo</label>
-              <input
-                type="text"
-                placeholder="Ej. Bravia XR"
-                value={modelo}
-                onChange={e => setModelo(e.target.value)}
-                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Nombre del Producto *</label>
             <input
               type="text"
-              placeholder="Ej. Smart TV Sony 55 pulgadas"
-              value={nombre}
-              onChange={e => setNombre(e.target.value)}
-              style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+              placeholder="Código / SKU (Ej. MOT-01)"
+              value={codigo}
+              onChange={e => setCodigo(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            />
+            <select
+              value={categoria}
+              onChange={e => setCategoria(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            >
+              <option value="Electrodomésticos">Electrodomésticos</option>
+              <option value="Motos y Vehículos">Motos y Vehículos</option>
+              <option value="Celulares">Celulares</option>
+              <option value="Hogar">Hogar</option>
+            </select>
+          </div>
+
+          <input
+            type="text"
+            placeholder="Nombre del producto (Ej. Moto Eléctrica)"
+            value={nombre}
+            onChange={e => setNombre(e.target.value)}
+            style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
+          />
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input
+              type="text"
+              placeholder="Marca (Ej. Super Soco)"
+              value={marca}
+              onChange={e => setMarca(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            />
+            <input
+              type="text"
+              placeholder="Modelo (Ej. TSX Pro)"
+              value={modelo}
+              onChange={e => setModelo(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
             />
           </div>
 
           <div style={{ display: 'flex', gap: '10px' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Precio Unitario ($USD) *</label>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={precio}
-                onChange={e => setPrecio(e.target.value)}
-                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
-              />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Stock Inicial *</label>
-              <input
-                type="number"
-                placeholder="0"
-                value={stock}
-                onChange={e => setStock(e.target.value)}
-                style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ fontSize: '11px', color: '#9ca3af', display: 'block', marginBottom: '4px' }}>Categoría</label>
-            <select
-              value={categoria}
-              onChange={e => setCategoria(e.target.value)}
-              style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
-            >
-              <option value="Electrodomésticos">Electrodomésticos</option>
-              <option value="Muebles/Hogar">Muebles/Hogar</option>
-              <option value="Celulares">Celulares</option>
-              <option value="Herramientas">Herramientas</option>
-            </select>
+            <input
+              type="number"
+              placeholder="Stock inicial"
+              value={stockInicial}
+              onChange={e => setStockInicial(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            />
+            <input
+              type="number"
+              placeholder="Precio ($ USD)"
+              value={precio}
+              onChange={e => setPrecio(e.target.value)}
+              style={{ flex: 1, backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}
+            />
           </div>
 
           <button
             type="submit"
             disabled={guardando}
-            style={{
-              marginTop: '8px',
-              backgroundColor: guardando ? '#374151' : '#10b981',
-              color: '#fff',
-              border: 'none',
-              padding: '12px',
-              borderRadius: '12px',
-              fontSize: '13px',
-              fontWeight: 700,
-              cursor: guardando ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
-            }}
+            style={{ backgroundColor: guardando ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', marginTop: '4px' }}
           >
-            {guardando ? 'Guardando en Base de Datos...' : 'Guardar Producto en Bodega 🚀'}
+            {guardando ? 'Guardando en la Nube...' : 'Guardar Producto en Bodega 🚀'}
           </button>
         </form>
 
-        {/* Listado Rápido de Inventario en Bodega */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Inventario Registrado</h2>
+        {/* Listado y Existencias Actuales */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias Actuales</h2>
           
-          {productos.map(prod => (
-            <div key={prod.id} style={{
-              backgroundColor: '#111827',
-              border: '1px solid #1f2937',
-              borderRadius: '16px',
-              padding: '12px',
-              display: 'flex',
-              gap: '12px',
-              alignItems: 'center'
-            }}>
-              <img
-                src={prod.imagen}
-                alt={prod.nombre}
-                style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '10px', backgroundColor: '#1f2937' }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
-                <h3 style={{ fontSize: '12px', fontWeight: 700, color: '#fff', margin: '2px 0' }}>{prod.nombre}</h3>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#9ca3af' }}>
-                  <span>Stock: <strong style={{ color: '#34d399' }}>{prod.stock}</strong></span>
-                  <span>Precio: <strong style={{ color: '#38bdf8' }}>${prod.precio}</strong></span>
+          <input
+            type="text"
+            placeholder="🔍 Buscar por nombre, marca, modelo o código..."
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '12px', padding: '12px', fontSize: '12px', color: '#fff', outline: 'none', boxSizing: 'border-box', width: '100%' }}
+          />
+
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+            {['Todas', 'Electrodomésticos', 'Motos y Vehículos', 'Celulares', 'Hogar'].map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategoriaFiltro(cat)}
+                style={{
+                  backgroundColor: categoriaFiltro === cat ? '#4f46e5' : '#111827',
+                  color: categoriaFiltro === cat ? '#fff' : '#9ca3af',
+                  border: '1px solid #374151',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer'
+                }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {productosFiltrados.map(prod => (
+            <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <img src={prod.imagen} alt={prod.nombre} style={{ width: '65px', height: '65px', objectFit: 'cover', borderRadius: '10px', backgroundColor: '#1f2937' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
+                    <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 700, backgroundColor: 'rgba(52, 211, 153, 0.1)', padding: '2px 8px', borderRadius: '6px' }}>{prod.stock} unidades</span>
+                  </div>
+                  <h3 style={{ fontSize: '13px', fontWeight: 700, color: '#fff', margin: '2px 0' }}>{prod.nombre}</h3>
+                  <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Marca: <strong>{prod.marca}</strong> | Modelo: <strong>{prod.modelo}</strong></p>
                 </div>
               </div>
+
+              {/* Botones de control rápido de stock */}
+              <div style={{ borderTop: '1px solid #1f2937', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <span style={{ fontSize: '10px', color: '#ef4444' }}>🔻 Salida de Stock:</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {[-1, -5, -10, -50, -100].map(val => (
+                    <button
+                      key={val}
+                      onClick={() => actualizarStock(prod.id, val)}
+                      style={{ flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', padding: '6px 0', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      {val}
+                    </button>
+                  ))}
+                </div>
+
+                <span style={{ fontSize: '10px', color: '#10b981', marginTop: '2px' }}>➕ Entrada de Stock:</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {[1, 5, 10, 50, 100].map(val => (
+                    <button
+                      key={val}
+                      onClick={() => actualizarStock(prod.id, val)}
+                      style={{ flex: 1, backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', padding: '6px 0', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      +{val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
             </div>
           ))}
         </div>
