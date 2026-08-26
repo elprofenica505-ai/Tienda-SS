@@ -1,5 +1,14 @@
 'use client';
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  collection, 
+  getDocs, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  serverTimestamp 
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface Producto {
   id: string;
@@ -27,47 +36,14 @@ interface Entrega {
 
 export default function TiendaSSApp() {
   const [vistaActual, setVistaActual] = useState<'login' | 'bodega' | 'vendedor' | 'chofer' | 'jefe'>('login');
-  
+  const [cargando, setCargando] = useState(true);
+
   // Login
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
 
-  // Productos compartidos
-  const [productos, setProductos] = useState<Producto[]>([
-    {
-      id: '1',
-      codigo: 'TV-SON-55',
-      nombre: 'Smart TV 4K UHD',
-      marca: 'Sony',
-      modelo: 'Bravia X80K',
-      categoria: 'Electrodomésticos',
-      stock: 12,
-      precio: 450,
-      imagen: 'https://images.unsplash.com/photo-1593784991095-a205069470b6?auto=format&fit=crop&w=300&q=80'
-    },
-    {
-      id: '2',
-      codigo: 'MOT-01',
-      nombre: 'Moto Deportiva 200cc',
-      marca: 'Yamaha',
-      modelo: 'R200',
-      categoria: 'Motos y Vehículos',
-      stock: 5,
-      precio: 2400,
-      imagen: 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=300&q=80'
-    },
-    {
-      id: '3',
-      codigo: 'CEL-XI-12',
-      nombre: 'Smartphone Note 12',
-      marca: 'Xiaomi',
-      modelo: 'Redmi Note',
-      categoria: 'Celulares',
-      stock: 25,
-      precio: 210,
-      imagen: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=300&q=80'
-    }
-  ]);
+  // Productos (ahora desde Firebase)
+  const [productos, setProductos] = useState<Producto[]>([]);
 
   // Estados Bodega
   const [codigo, setCodigo] = useState('');
@@ -94,6 +70,26 @@ export default function TiendaSSApp() {
     { id: 3, cliente: 'Carlos Ruiz', direccion: 'Colonia Centroamérica', productos: 'Infinix Note 50 Pro', estado: 'Entregado' },
   ]);
 
+  // Cargar productos desde Firebase al iniciar
+  useEffect(() => {
+    const cargarProductos = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, 'productos'));
+        const lista: Producto[] = [];
+        querySnapshot.forEach((docSnap) => {
+          lista.push({ id: docSnap.id, ...docSnap.data() } as Producto);
+        });
+        setProductos(lista);
+      } catch (error) {
+        console.error('Error al cargar productos:', error);
+        alert('Error al conectar con Firebase. Revisa la consola.');
+      } finally {
+        setCargando(false);
+      }
+    };
+    cargarProductos();
+  }, []);
+
   // Login
   const handleLogin = (e?: React.FormEvent, rolForzado?: string) => {
     if (e) e.preventDefault();
@@ -115,34 +111,57 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Registrar producto
-  const registrarProducto = (e: React.FormEvent) => {
+  // Registrar producto en Firebase
+  const registrarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!codigo || !nombre || !stockInicial) {
       alert('⚠️ Faltan campos obligatorios.');
       return;
     }
+
     setGuardando(true);
-    const nuevoItem: Producto = {
-      id: Date.now().toString(),
-      codigo,
-      nombre,
-      marca,
-      modelo,
-      categoria,
-      stock: parseInt(stockInicial, 10) || 0,
-      precio: parseFloat(precio) || 0,
-      imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80'
-    };
-    setProductos([nuevoItem, ...productos]);
-    setCodigo(''); setNombre(''); setMarca(''); setModelo('');
-    setStockInicial(''); setPrecio(''); setImagenPreview(null);
-    setGuardando(false);
-    alert('✅ ¡Producto guardado con éxito!');
+    try {
+      const nuevoProducto = {
+        codigo,
+        nombre,
+        marca: marca || 'Genérica',
+        modelo: modelo || 'Estándar',
+        categoria,
+        stock: parseInt(stockInicial, 10) || 0,
+        precio: parseFloat(precio) || 0,
+        imagen: imagenPreview || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?auto=format&fit=crop&w=300&q=80',
+        creadoEn: serverTimestamp()
+      };
+
+      const docRef = await addDoc(collection(db, 'productos'), nuevoProducto);
+      
+      setProductos([{ id: docRef.id, ...nuevoProducto, stock: nuevoProducto.stock, precio: nuevoProducto.precio } as Producto, ...productos]);
+      
+      setCodigo(''); setNombre(''); setMarca(''); setModelo('');
+      setStockInicial(''); setPrecio(''); setImagenPreview(null);
+      alert('✅ ¡Producto guardado en Firebase!');
+    } catch (error) {
+      console.error(error);
+      alert('❌ Error al guardar el producto.');
+    } finally {
+      setGuardando(false);
+    }
   };
 
-  const actualizarStock = (id: string, delta: number) => {
-    setProductos(productos.map(p => p.id === id ? { ...p, stock: Math.max(0, p.stock + delta) } : p));
+  // Actualizar stock en Firebase
+  const actualizarStock = async (id: string, delta: number) => {
+    const producto = productos.find(p => p.id === id);
+    if (!producto) return;
+
+    const nuevoStock = Math.max(0, producto.stock + delta);
+    
+    try {
+      await updateDoc(doc(db, 'productos', id), { stock: nuevoStock });
+      setProductos(productos.map(p => p.id === id ? { ...p, stock: nuevoStock } : p));
+    } catch (error) {
+      console.error(error);
+      alert('Error al actualizar stock');
+    }
   };
 
   // Vendedor
@@ -179,18 +198,49 @@ export default function TiendaSSApp() {
     }).filter(Boolean) as CarritoItem[]);
   };
 
-  const procesarVenta = () => {
+  // Procesar venta + guardar en Firebase + descontar stock
+  const procesarVenta = async () => {
     if (carrito.length === 0) return;
-    let nuevosProductos = [...productos];
-    carrito.forEach(itemCar => {
-      nuevosProductos = nuevosProductos.map(p => 
-        p.id === itemCar.id ? { ...p, stock: Math.max(0, p.stock - itemCar.cantidadVenta) } : p
-      );
-    });
-    setProductos(nuevosProductos);
-    setCarrito([]);
-    setVentaExitosa(true);
-    setTimeout(() => setVentaExitosa(false), 4000);
+
+    try {
+      // 1. Guardar la venta
+      await addDoc(collection(db, 'ventas'), {
+        items: carrito.map(item => ({
+          id: item.id,
+          codigo: item.codigo,
+          nombre: item.nombre,
+          cantidad: item.cantidadVenta,
+          precio: item.precio,
+          subtotal: item.precio * item.cantidadVenta
+        })),
+        total: carrito.reduce((sum, item) => sum + (item.precio * item.cantidadVenta), 0),
+        fecha: serverTimestamp(),
+        estado: 'Completada'
+      });
+
+      // 2. Descontar stock de cada producto
+      for (const item of carrito) {
+        const nuevoStock = Math.max(0, item.stock - item.cantidadVenta);
+        await updateDoc(doc(db, 'productos', item.id), { stock: nuevoStock });
+      }
+
+      // 3. Actualizar estado local
+      setProductos(productos.map(p => {
+        const itemVendido = carrito.find(c => c.id === p.id);
+        if (itemVendido) {
+          return { ...p, stock: Math.max(0, p.stock - itemVendido.cantidadVenta) };
+        }
+        return p;
+      }));
+
+      setCarrito([]);
+      setVentaExitosa(true);
+      setTimeout(() => setVentaExitosa(false), 4000);
+      alert('✅ ¡Venta guardada en Firebase y stock actualizado!');
+    } catch (error) {
+      console.error(error);
+      alert('❌ Error al procesar la venta.');
+    }
   };
 
   const totalVenta = carrito.reduce((sum, item) => sum + (item.precio * item.cantidadVenta), 0);
@@ -199,6 +249,18 @@ export default function TiendaSSApp() {
   const cambiarEstadoEntrega = (id: number, nuevoEstado: 'Pendiente' | 'En Ruta' | 'Entregado') => {
     setEntregas(entregas.map(e => e.id === id ? { ...e, estado: nuevoEstado } : e));
   };
+
+  // Pantalla de carga
+  if (cargando) {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'sans-serif' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</div>
+          <p>Cargando Tienda-SS...</p>
+        </div>
+      </div>
+    );
+  }
 
   // ========== VISTA LOGIN ==========
   if (vistaActual === 'login') {
@@ -267,7 +329,7 @@ export default function TiendaSSApp() {
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>📦 Tienda-SS</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Módulo de Bodega</p>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Módulo de Bodega · Conectado a Firebase</p>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               🚪 Cerrar Sesión
@@ -290,4 +352,245 @@ export default function TiendaSSApp() {
               style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }}>
               <option>Electrodomésticos</option>
               <option>Motos y Vehículos</option>
-              <option>Celulares</
+              <option>Celulares</option>
+              <option>Muebles/Hogar</option>
+            </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <input type="number" placeholder="Stock inicial" value={stockInicial} onChange={e => setStockInicial(e.target.value)} required
+                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+              <input type="number" placeholder="Precio USD" value={precio} onChange={e => setPrecio(e.target.value)}
+                style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+            </div>
+            <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handleCapturarFoto} style={{ fontSize: '12px', color: '#9ca3af' }} />
+            {imagenPreview && <img src={imagenPreview} alt="Preview" style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }} />}
+            <button type="submit" disabled={guardando}
+              style={{ backgroundColor: guardando ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+              {guardando ? 'Guardando en Firebase...' : 'Guardar Producto 🚀'}
+            </button>
+          </form>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', margin: 0 }}>📋 Existencias ({productosFiltrados.length})</h2>
+            <input type="text" placeholder="🔍 Buscar..." value={busquedaBodega} onChange={e => setBusquedaBodega(e.target.value)}
+              style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
+            {productosFiltrados.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>No hay productos aún. Registra el primero.</p>
+            ) : (
+              productosFiltrados.map(prod => (
+                <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '12px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <img src={prod.imagen} alt={prod.nombre} style={{ width: '55px', height: '55px', objectFit: 'cover', borderRadius: '8px' }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
+                      <span style={{ fontSize: '10px', color: '#34d399', fontWeight: 700 }}>{prod.stock} unids</span>
+                    </div>
+                    <h3 style={{ fontSize: '13px', fontWeight: 700, margin: '2px 0' }}>{prod.nombre}</h3>
+                    <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>{prod.marca} · ${prod.precio}</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button onClick={() => actualizarStock(prod.id, -1)} style={{ backgroundColor: '#374151', color: '#fff', border: 'none', width: '28px', height: '28px', borderRadius: '6px', cursor: 'pointer' }}>−</button>
+                    <button onClick={() => actualizarStock(prod.id, 1)} style={{ backgroundColor: '#4f46e5', color: '#fff', border: 'none', width: '28px', height: '28px', borderRadius: '6px', cursor: 'pointer' }}>+</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== VISTA VENDEDOR ==========
+  if (vistaActual === 'vendedor') {
+    const catalogoFiltrado = productos.filter(p =>
+      p.nombre.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
+      p.codigo.toLowerCase().includes(busquedaVendedor.toLowerCase())
+    );
+
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif', paddingBottom: carrito.length > 0 ? '140px' : '20px' }}>
+        <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>🛒 Tienda-SS</h1>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y Catálogo · Firebase</p>
+            </div>
+            <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+              🚪 Cerrar
+            </button>
+          </div>
+
+          {ventaExitosa && (
+            <div style={{ backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid #10b981', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#34d399', fontWeight: 700 }}>
+              ✅ ¡Venta guardada en Firebase!
+            </div>
+          )}
+
+          {carrito.length > 0 && (
+            <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px' }}>
+              <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#facc15', margin: '0 0 10px' }}>🧾 Carrito ({carrito.length})</h2>
+              {carrito.map(item => (
+                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px' }}>{item.nombre}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button onClick={() => cambiarCantidadCarrito(item.id, -1)} style={{ backgroundColor: '#374151', color: '#fff', border: 'none', width: '24px', height: '24px', borderRadius: '4px', cursor: 'pointer' }}>−</button>
+                    <span style={{ fontSize: '13px', fontWeight: 700 }}>{item.cantidadVenta}</span>
+                    <button onClick={() => cambiarCantidadCarrito(item.id, 1)} style={{ backgroundColor: '#4f46e5', color: '#fff', border: 'none', width: '24px', height: '24px', borderRadius: '4px', cursor: 'pointer' }}>+</button>
+                    <span style={{ fontSize: '12px', color: '#34d399', minWidth: '50px', textAlign: 'right' }}>${(item.precio * item.cantidadVenta).toFixed(0)}</span>
+                  </div>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #374151', paddingTop: '10px', marginTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 800, fontSize: '16px' }}>Total: ${totalVenta.toFixed(0)}</span>
+                <button onClick={procesarVenta} style={{ backgroundColor: '#10b981', color: '#030712', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 800, cursor: 'pointer' }}>
+                  💳 Cobrar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <input type="text" placeholder="🔍 Buscar producto..." value={busquedaVendedor} onChange={e => setBusquedaVendedor(e.target.value)}
+            style={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '12px', fontSize: '13px', color: '#fff', outline: 'none' }} />
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {catalogoFiltrado.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>No hay productos. Agrega desde Bodega.</p>
+            ) : (
+              catalogoFiltrado.map(prod => (
+                <div key={prod.id} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flex: 1 }}>
+                    <img src={prod.imagen} alt={prod.nombre} style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '8px' }} />
+                    <div>
+                      <span style={{ fontSize: '9px', color: '#818cf8', fontWeight: 700 }}>{prod.codigo}</span>
+                      <h3 style={{ fontSize: '13px', fontWeight: 700, margin: '2px 0' }}>{prod.nombre}</h3>
+                      <p style={{ fontSize: '11px', color: '#34d399', margin: 0 }}>${prod.precio} · Stock: {prod.stock}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => agregarAlCarrito(prod)} disabled={prod.stock <= 0}
+                    style={{ backgroundColor: prod.stock <= 0 ? '#374151' : '#4f46e5', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: prod.stock <= 0 ? 'not-allowed' : 'pointer' }}>
+                    ➕
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== VISTA CHOFER ==========
+  if (vistaActual === 'chofer') {
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#facc15', margin: 0 }}>🚚 Tienda-SS</h1>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Gestión de Rutas y Entregas</p>
+            </div>
+            <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+              🚪 Cerrar
+            </button>
+          </div>
+
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', overflow: 'hidden' }}>
+            <div style={{ padding: '14px', borderBottom: '1px solid #1f2937' }}>
+              <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: 0 }}>Asignación de Envíos del Día</h2>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {entregas.map(envio => (
+                <div key={envio.id} style={{ padding: '14px', borderBottom: '1px solid #1f2937', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <h3 style={{ fontSize: '14px', fontWeight: 700, margin: 0 }}>{envio.cliente}</h3>
+                      <p style={{ fontSize: '12px', color: '#9ca3af', margin: '2px 0' }}>{envio.direccion}</p>
+                      <p style={{ fontSize: '12px', color: '#d1d5db', margin: 0 }}>{envio.productos}</p>
+                    </div>
+                    <span style={{
+                      fontSize: '11px', fontWeight: 600, padding: '4px 10px', borderRadius: '20px',
+                      backgroundColor: envio.estado === 'Pendiente' ? 'rgba(245,158,11,0.15)' : envio.estado === 'En Ruta' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
+                      color: envio.estado === 'Pendiente' ? '#fbbf24' : envio.estado === 'En Ruta' ? '#60a5fa' : '#34d399',
+                      border: `1px solid ${envio.estado === 'Pendiente' ? 'rgba(245,158,11,0.3)' : envio.estado === 'En Ruta' ? 'rgba(59,130,246,0.3)' : 'rgba(16,185,129,0.3)'}`
+                    }}>
+                      {envio.estado}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => cambiarEstadoEntrega(envio.id, 'En Ruta')}
+                      style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                      En Ruta
+                    </button>
+                    <button onClick={() => cambiarEstadoEntrega(envio.id, 'Entregado')}
+                      style={{ backgroundColor: '#059669', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>
+                      Entregado
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== VISTA JEFE ==========
+  if (vistaActual === 'jefe') {
+    const totalProductos = productos.length;
+    const unidadesTotales = productos.reduce((acc, p) => acc + p.stock, 0);
+    const valorInventario = productos.reduce((acc, p) => acc + (p.stock * p.precio), 0);
+    const stockBajo = productos.filter(p => p.stock <= 5).length;
+
+    return (
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Tienda-SS</h1>
+              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Panel de Administración · Firebase</p>
+            </div>
+            <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+              🚪 Cerrar
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '16px', textAlign: 'center' }}>
+              <span style={{ fontSize: '24px', fontWeight: 800, color: '#fff', display: 'block' }}>{totalProductos}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af' }}>Productos</span>
+            </div>
+            <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '16px', textAlign: 'center' }}>
+              <span style={{ fontSize: '24px', fontWeight: 800, color: '#34d399', display: 'block' }}>{unidadesTotales}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af' }}>Unidades</span>
+            </div>
+            <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '16px', textAlign: 'center' }}>
+              <span style={{ fontSize: '24px', fontWeight: 800, color: '#818cf8', display: 'block' }}>${valorInventario.toLocaleString()}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af' }}>Valor Inventario</span>
+            </div>
+            <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '16px', textAlign: 'center' }}>
+              <span style={{ fontSize: '24px', fontWeight: 800, color: stockBajo > 0 ? '#f87171' : '#34d399', display: 'block' }}>{stockBajo}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af' }}>Stock Bajo</span>
+            </div>
+          </div>
+
+          <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '16px' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#fff', margin: '0 0 12px' }}>Resumen de Inventario</h2>
+            {productos.length === 0 ? (
+              <p style={{ color: '#9ca3af', fontSize: '13px' }}>No hay productos registrados.</p>
+            ) : (
+              productos.map(p => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1f2937' }}>
+                  <span style={{ fontSize: '13px' }}>{p.nombre}</span>
+                  <span style={{ fontSize: '13px', color: p.stock <= 5 ? '#f87171' : '#34d399', fontWeight: 600 }}>{p.stock} unids</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
