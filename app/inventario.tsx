@@ -20,6 +20,7 @@ export default function InventarioBodega() {
   const [nombreNuevo, setNombreNuevo] = useState('');
   const [categoriaNueva, setCategoriaNueva] = useState('Electrodomésticos');
   const [stockNuevo, setStockNuevo] = useState('');
+  const [busqueda, setBusqueda] = useState('');
 
   const agregarProducto = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,108 +51,259 @@ export default function InventarioBodega() {
     );
   };
 
-  return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex justify-between items-center border-b border-slate-800 pb-4">
-          <div>
-            <h1 className="text-2xl font-bold">📦 Control de Inventario - Bodega Tienda-SS</h1>
-            <p className="text-slate-400 text-sm">Gestión de entradas, salidas y existencias en tiempo real</p>
-          </div>
-          <span className="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full text-xs font-semibold">
-            Rol: Bodeguero
-          </span>
-        </header>
+  const productosFiltrados = productos.filter(p => 
+    p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+    p.categoria.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
-        {/* Formulario de Ingreso de Nuevo Producto */}
-        <div className="bg-slate-800 border border-slate-700 p-5 rounded-xl shadow-lg">
-          <h2 className="text-lg font-semibold mb-4 text-indigo-300">Registrar Nueva Mercadería</h2>
-          <form onSubmit={agregarProducto} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+  const totalProductos = productos.length;
+  const stockCritico = productos.filter(p => p.stock <= p.minimo).length;
+  const unidadesTotales = productos.reduce((acc, p) => acc + p.stock, 0);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#030712',
+      color: '#f3f4f6',
+      padding: '20px 16px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+      boxSizing: 'border-box'
+    }}>
+      <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        
+        {/* Cabecera limpia */}
+        <div style={{
+          backgroundColor: '#111827',
+          border: '1px solid #1f2937',
+          borderRadius: '20px',
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ fontSize: '20px', fontWeight: 800, color: '#ffffff', margin: '0 0 2px 0' }}>📦 Bodega Tienda-SS</h1>
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Gestión de inventario y existencias</p>
+            </div>
+            <span style={{
+              backgroundColor: 'rgba(99, 102, 241, 0.15)',
+              color: '#818cf8',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              padding: '4px 10px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600
+            }}>
+              Bodeguero
+            </span>
+          </div>
+
+          {/* Tarjetas de Métricas */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+            <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', display: 'block' }}>{totalProductos}</span>
+              <span style={{ fontSize: '10px', color: '#9ca3af' }}>Items</span>
+            </div>
+            <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#34d399', display: 'block' }}>{unidadesTotales}</span>
+              <span style={{ fontSize: '10px', color: '#9ca3af' }}>Total Unidades</span>
+            </div>
+            <div style={{ backgroundColor: '#030712', border: '1px solid #1f2937', padding: '10px', borderRadius: '12px', textAlign: 'center' }}>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: stockCritico > 0 ? '#fb7185' : '#34d399', display: 'block' }}>{stockCritico}</span>
+              <span style={{ fontSize: '10px', color: '#9ca3af' }}>Críticos</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Sección Registrar Producto */}
+        <div style={{
+          backgroundColor: '#111827',
+          border: '1px solid #1f2937',
+          borderRadius: '20px',
+          padding: '20px'
+        }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#818cf8', margin: '0 0 12px 0' }}>➕ Registrar Nueva Mercadería</h2>
+          <form onSubmit={agregarProducto} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <input
               type="text"
-              placeholder="Nombre del producto (ej. Colchón, Tele...)"
+              placeholder="Nombre del producto (ej. Refrigeradora)"
               value={nombreNuevo}
               onChange={(e) => setNombreNuevo(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-indigo-500"
+              style={{
+                backgroundColor: '#030712',
+                border: '1px solid #374151',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                fontSize: '13px',
+                color: '#ffffff',
+                outline: 'none',
+                boxSizing: 'border-box',
+                width: '100%'
+              }}
               required
             />
-            <select
-              value={categoriaNueva}
-              onChange={(e) => setCategoriaNueva(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-indigo-500"
-            >
-              <option value="Electrodomésticos">Electrodomésticos</option>
-              <option value="Muebles/Hogar">Muebles / Hogar</option>
-              <option value="Celulares">Celulares y Tecnología</option>
-            </select>
-            <input
-              type="number"
-              placeholder="Stock inicial"
-              value={stockNuevo}
-              onChange={(e) => setStockNuevo(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-indigo-500"
-              required
-            />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <select
+                value={categoriaNueva}
+                onChange={(e) => setCategoriaNueva(e.target.value)}
+                style={{
+                  backgroundColor: '#030712',
+                  border: '1px solid #374151',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  fontSize: '12px',
+                  color: '#ffffff',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  width: '100%'
+                }}
+              >
+                <option value="Electrodomésticos">Electrodomésticos</option>
+                <option value="Muebles/Hogar">Muebles / Hogar</option>
+                <option value="Celulares">Celulares / Tech</option>
+              </select>
+              <input
+                type="number"
+                placeholder="Stock inicial"
+                value={stockNuevo}
+                onChange={(e) => setStockNuevo(e.target.value)}
+                style={{
+                  backgroundColor: '#030712',
+                  border: '1px solid #374151',
+                  borderRadius: '12px',
+                  padding: '12px',
+                  fontSize: '13px',
+                  color: '#ffffff',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  width: '100%'
+                }}
+                required
+              />
+            </div>
             <button
               type="submit"
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg p-3 transition text-sm shadow-md"
+              style={{
+                backgroundColor: '#4f46e5',
+                color: '#ffffff',
+                fontWeight: 600,
+                borderRadius: '12px',
+                padding: '12px',
+                fontSize: '13px',
+                border: 'none',
+                cursor: 'pointer',
+                marginTop: '4px',
+                boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)'
+              }}
             >
-              Agregar a Bodega
+              Guardar en Bodega
             </button>
           </form>
         </div>
 
-        {/* Tabla de Inventario Actual */}
-        <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-lg overflow-hidden">
-          <div className="p-4 border-b border-slate-700">
-            <h2 className="text-lg font-semibold">Existencias en Stock</h2>
+        {/* Listado de Productos Estilo Tarjetas Móviles */}
+        <div style={{
+          backgroundColor: '#111827',
+          border: '1px solid #1f2937',
+          borderRadius: '20px',
+          padding: '20px'
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+            <h2 style={{ fontSize: '14px', fontWeight: 700, color: '#ffffff', margin: 0 }}>📋 Existencias Actuales</h2>
+            <input
+              type="text"
+              placeholder="🔍 Buscar producto en bodega..."
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              style={{
+                backgroundColor: '#030712',
+                border: '1px solid #374151',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                fontSize: '12px',
+                color: '#ffffff',
+                outline: 'none',
+                boxSizing: 'border-box',
+                width: '100%'
+              }}
+            />
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-900/60 text-slate-400 text-xs uppercase tracking-wider">
-                  <th className="p-4">Producto</th>
-                  <th className="p-4">Categoría</th>
-                  <th className="p-4 text-center">Stock Actual</th>
-                  <th className="p-4 text-center">Acciones de Stock</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700 text-sm">
-                {productos.map((prod) => (
-                  <tr key={prod.id} className="hover:bg-slate-750 transition">
-                    <td className="p-4 font-medium text-white">{prod.nombre}</td>
-                    <td className="p-4 text-slate-400">{prod.categoria}</td>
-                    <td className="p-4 text-center font-bold">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs ${
-                          prod.stock <= prod.minimo
-                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                        }`}
-                      >
-                        {prod.stock} unidades
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {productosFiltrados.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px', padding: '20px' }}>Sin resultados.</p>
+            ) : (
+              productosFiltrados.map((prod) => {
+                const esCritico = prod.stock <= prod.minimo;
+                return (
+                  <div key={prod.id} style={{
+                    backgroundColor: '#030712',
+                    border: '1px solid #1f2937',
+                    borderRadius: '14px',
+                    padding: '14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <span style={{ fontSize: '14px', fontWeight: 700, color: '#ffffff', display: 'block', marginBottom: '2px' }}>
+                          {prod.nombre}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#9ca3af' }}>{prod.categoria}</span>
+                      </div>
+                      <span style={{
+                        backgroundColor: esCritico ? 'rgba(244, 63, 94, 0.15)' : 'rgba(52, 211, 153, 0.15)',
+                        color: esCritico ? '#fb7185' : '#34d399',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: 700
+                      }}>
+                        {prod.stock} unids {esCritico && '⚠️'}
                       </span>
-                    </td>
-                    <td className="p-4 text-center space-x-2">
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', paddingTop: '4px', borderTop: '1px solid #1f2937' }}>
                       <button
                         onClick={() => ajustarStock(prod.id, -1)}
-                        className="bg-rose-600/80 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg text-xs transition shadow"
+                        style={{
+                          backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                          color: '#fb7185',
+                          border: '1px solid rgba(244, 63, 94, 0.3)',
+                          padding: '8px',
+                          borderRadius: '10px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
                       >
-                        ➖ Salida
+                        ➖ Salida (-1)
                       </button>
                       <button
                         onClick={() => ajustarStock(prod.id, 1)}
-                        className="bg-emerald-600/80 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs transition shadow"
+                        style={{
+                          backgroundColor: 'rgba(52, 211, 153, 0.15)',
+                          color: '#34d399',
+                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          padding: '8px',
+                          borderRadius: '10px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
                       >
-                        ➕ Entrada
+                        ➕ Entrada (+1)
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
+
       </div>
     </div>
   );
