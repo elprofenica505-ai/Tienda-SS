@@ -45,8 +45,11 @@ interface Entrega {
   estado: 'Pendiente' | 'En Ruta' | 'Entregado';
 }
 
+type Vista = 'login' | 'bodega' | 'vendedor' | 'chofer' | 'jefe';
+
 export default function TiendaSSApp() {
-  const [vistaActual, setVistaActual] = useState<'login' | 'bodega' | 'vendedor' | 'chofer' | 'jefe'>('login');
+  const [vistaActual, setVistaActual] = useState<Vista>('login');
+  const [vistaAnterior, setVistaAnterior] = useState<Vista | null>(null);
   const [cargando, setCargando] = useState(true);
 
   const [usuario, setUsuario] = useState('');
@@ -87,6 +90,23 @@ export default function TiendaSSApp() {
     { id: 2, cliente: 'María Gómez', direccion: 'Villa El Carmen', productos: 'Cama King Size', estado: 'En Ruta' },
     { id: 3, cliente: 'Carlos Ruiz', direccion: 'Colonia Centroamérica', productos: 'Infinix Note 50 Pro', estado: 'Entregado' },
   ]);
+
+  // Función para navegar guardando la vista anterior
+  const irA = (nuevaVista: Vista) => {
+    if (nuevaVista !== vistaActual) {
+      setVistaAnterior(vistaActual);
+      setVistaActual(nuevaVista);
+    }
+  };
+
+  const volverAtras = () => {
+    if (vistaAnterior) {
+      setVistaActual(vistaAnterior);
+      setVistaAnterior(null);
+    } else {
+      setVistaActual('login');
+    }
+  };
 
   useEffect(() => {
     const cargar = async () => {
@@ -159,7 +179,8 @@ export default function TiendaSSApp() {
     if (e) e.preventDefault();
     const rol = rolForzado || usuario.toLowerCase().trim();
     if (['bodega', 'vendedor', 'chofer', 'jefe'].includes(rol)) {
-      setVistaActual(rol as any);
+      setVistaAnterior(null);
+      setVistaActual(rol as Vista);
     } else {
       alert('⚠️ Usa los accesos rápidos');
     }
@@ -369,6 +390,28 @@ export default function TiendaSSApp() {
     setEntregas(entregas.map(e => e.id === id ? { ...e, estado: nuevoEstado } : e));
   };
 
+  // Botón Volver reutilizable
+  const BotonVolver = () => (
+    <button 
+      onClick={volverAtras}
+      style={{ 
+        backgroundColor: '#1f2937', 
+        border: '1px solid #374151', 
+        borderRadius: '10px', 
+        padding: '8px 14px', 
+        color: '#d1d5db', 
+        fontWeight: 600, 
+        fontSize: '12px', 
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px'
+      }}
+    >
+      ← Volver
+    </button>
+  );
+
   if (cargando) {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'sans-serif' }}>
@@ -421,16 +464,19 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== JEFE (solo él puede ir a Inventario y Ventas) ==========
+  // ========== JEFE ==========
   if (vistaActual === 'jefe') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h1 style={{ fontSize: '16px', fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Dashboard</h1>
-              <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Resumen del negocio</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {vistaAnterior && <BotonVolver />}
+              <div>
+                <h1 style={{ fontSize: '16px', fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Dashboard</h1>
+                <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Resumen del negocio</p>
+              </div>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
@@ -500,13 +546,12 @@ export default function TiendaSSApp() {
             </div>
           </div>
 
-          {/* Solo el JEFE tiene estos botones */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-            <button onClick={() => setVistaActual('bodega')}
+            <button onClick={() => irA('bodega')}
               style={{ backgroundColor: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: '12px', padding: '14px', color: '#a5b4fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
               📦 Inventario
             </button>
-            <button onClick={() => setVistaActual('vendedor')}
+            <button onClick={() => irA('vendedor')}
               style={{ backgroundColor: '#0c4a6e', border: '1px solid #0ea5e9', borderRadius: '12px', padding: '14px', color: '#7dd3fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
               🛒 Ventas
             </button>
@@ -516,7 +561,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== BODEGA (solo su módulo) ==========
+  // ========== BODEGA ==========
   if (vistaActual === 'bodega') {
     const productosFiltrados = productos.filter(p => {
       const matchBusqueda = p.nombre.toLowerCase().includes(busquedaBodega.toLowerCase()) ||
@@ -531,9 +576,12 @@ export default function TiendaSSApp() {
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h1 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>📦 Inventario</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>{productos.length} productos · {stockBajoLista.length} con stock bajo</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <BotonVolver />
+              <div>
+                <h1 style={{ fontSize: '15px', fontWeight: 800, margin: 0 }}>📦 Inventario</h1>
+                <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>{productos.length} productos · {stockBajoLista.length} con stock bajo</p>
+              </div>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
@@ -573,7 +621,6 @@ export default function TiendaSSApp() {
               </select>
             </div>
 
-            {/* Botón simple en vez de details/summary */}
             <button type="button" onClick={() => setMostrarMasOpciones(!mostrarMasOpciones)}
               style={{ backgroundColor: 'transparent', border: 'none', color: '#9ca3af', fontSize: '12px', fontWeight: 600, textAlign: 'left', padding: '4px 0', cursor: 'pointer' }}>
               {mostrarMasOpciones ? '▾ Ocultar opciones' : '▸ Más opciones'}
@@ -682,7 +729,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VENDEDOR (solo su módulo) ==========
+  // ========== VENDEDOR ==========
   if (vistaActual === 'vendedor') {
     const catalogoFiltrado = productos.filter(p =>
       p.nombre.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
@@ -694,9 +741,12 @@ export default function TiendaSSApp() {
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>🛒 Ventas</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y catálogo</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <BotonVolver />
+              <div>
+                <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>🛒 Ventas</h1>
+                <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Caja y catálogo</p>
+              </div>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
@@ -761,9 +811,12 @@ export default function TiendaSSApp() {
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: '700px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#facc15', margin: 0 }}>🚚 Rutas</h1>
-              <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Entregas del día</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <BotonVolver />
+              <div>
+                <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#facc15', margin: 0 }}>🚚 Rutas</h1>
+                <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>Entregas del día</p>
+              </div>
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
