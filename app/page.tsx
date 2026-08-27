@@ -74,6 +74,7 @@ export default function TiendaSSApp() {
   const [ajustandoId, setAjustandoId] = useState<string | null>(null);
   const [ajusteTipo, setAjusteTipo] = useState<'entrada' | 'salida' | 'correccion'>('entrada');
   const [ajusteCantidad, setAjusteCantidad] = useState('');
+  const [mostrarMasOpciones, setMostrarMasOpciones] = useState(false);
 
   // Vendedor
   const [carrito, setCarrito] = useState<CarritoItem[]>([]);
@@ -184,6 +185,7 @@ export default function TiendaSSApp() {
     setCosto('');
     setImagenPreview(null);
     setEditandoId(null);
+    setMostrarMasOpciones(false);
   };
 
   const guardarProducto = async (e: React.FormEvent) => {
@@ -240,6 +242,7 @@ export default function TiendaSSApp() {
     setPrecio(String(prod.precio));
     setCosto(String(prod.costo));
     setImagenPreview(prod.imagen);
+    setMostrarMasOpciones(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -418,7 +421,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== JEFE ==========
+  // ========== JEFE (solo él puede ir a Inventario y Ventas) ==========
   if (vistaActual === 'jefe') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
@@ -497,7 +500,7 @@ export default function TiendaSSApp() {
             </div>
           </div>
 
-          {/* Navegación */}
+          {/* Solo el JEFE tiene estos botones */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <button onClick={() => setVistaActual('bodega')}
               style={{ backgroundColor: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: '12px', padding: '14px', color: '#a5b4fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
@@ -513,7 +516,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== BODEGA ==========
+  // ========== BODEGA (solo su módulo) ==========
   if (vistaActual === 'bodega') {
     const productosFiltrados = productos.filter(p => {
       const matchBusqueda = p.nombre.toLowerCase().includes(busquedaBodega.toLowerCase()) ||
@@ -534,18 +537,6 @@ export default function TiendaSSApp() {
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
-            </button>
-          </div>
-
-          {/* Navegación */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => setVistaActual('jefe')}
-              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#f87171', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-              ⚡ Dashboard
-            </button>
-            <button onClick={() => setVistaActual('vendedor')}
-              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#38bdf8', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-              🛒 Ventas
             </button>
           </div>
 
@@ -582,11 +573,14 @@ export default function TiendaSSApp() {
               </select>
             </div>
 
-            **Summary:**
+            {/* Botón simple en vez de details/summary */}
+            <button type="button" onClick={() => setMostrarMasOpciones(!mostrarMasOpciones)}
+              style={{ backgroundColor: 'transparent', border: 'none', color: '#9ca3af', fontSize: '12px', fontWeight: 600, textAlign: 'left', padding: '4px 0', cursor: 'pointer' }}>
+              {mostrarMasOpciones ? '▾ Ocultar opciones' : '▸ Más opciones'}
+            </button>
 
-                ▸ Más opciones
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+            {mostrarMasOpciones && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <input type="text" placeholder="Código (auto si vacío)" value={codigo} onChange={e => setCodigo(e.target.value)}
                   style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
                 <input type="text" placeholder="Marca" value={marca} onChange={e => setMarca(e.target.value)}
@@ -594,6 +588,7 @@ export default function TiendaSSApp() {
                 <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handleCapturarFoto} style={{ fontSize: '12px' }} />
                 {imagenPreview && <img src={imagenPreview} alt="Preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px' }} />}
               </div>
+            )}
 
             <div style={{ display: 'flex', gap: '8px' }}>
               <button type="submit" disabled={guardando}
@@ -687,7 +682,7 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== VENDEDOR ==========
+  // ========== VENDEDOR (solo su módulo) ==========
   if (vistaActual === 'vendedor') {
     const catalogoFiltrado = productos.filter(p =>
       p.nombre.toLowerCase().includes(busquedaVendedor.toLowerCase()) ||
@@ -705,18 +700,6 @@ export default function TiendaSSApp() {
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
-            </button>
-          </div>
-
-          {/* Navegación */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={() => setVistaActual('jefe')}
-              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#f87171', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-              ⚡ Dashboard
-            </button>
-            <button onClick={() => setVistaActual('bodega')}
-              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#818cf8', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
-              📦 Inventario
             </button>
           </div>
 
