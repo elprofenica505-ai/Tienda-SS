@@ -6,11 +6,7 @@ import {
   addDoc, 
   updateDoc, 
   doc, 
-  serverTimestamp,
-  query,
-  where,
-  orderBy,
-  limit
+  serverTimestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -53,11 +49,9 @@ export default function TiendaSSApp() {
   const [vistaActual, setVistaActual] = useState<'login' | 'bodega' | 'vendedor' | 'chofer' | 'jefe'>('login');
   const [cargando, setCargando] = useState(true);
 
-  // Login
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
 
-  // Datos
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
 
@@ -80,7 +74,6 @@ export default function TiendaSSApp() {
   const [ajustandoId, setAjustandoId] = useState<string | null>(null);
   const [ajusteTipo, setAjusteTipo] = useState<'entrada' | 'salida' | 'correccion'>('entrada');
   const [ajusteCantidad, setAjusteCantidad] = useState('');
-  const [ajusteMotivo, setAjusteMotivo] = useState('');
 
   // Vendedor
   const [carrito, setCarrito] = useState<CarritoItem[]>([]);
@@ -94,7 +87,6 @@ export default function TiendaSSApp() {
     { id: 3, cliente: 'Carlos Ruiz', direccion: 'Colonia Centroamérica', productos: 'Infinix Note 50 Pro', estado: 'Entregado' },
   ]);
 
-  // Cargar datos
   useEffect(() => {
     const cargar = async () => {
       try {
@@ -133,7 +125,6 @@ export default function TiendaSSApp() {
     cargar();
   }, []);
 
-  // Helpers Dashboard
   const hoy = new Date();
   const esHoy = (fecha: any) => {
     if (!fecha) return false;
@@ -147,7 +138,6 @@ export default function TiendaSSApp() {
   const ticketPromedio = ticketsHoy > 0 ? totalVentasHoy / ticketsHoy : 0;
   const stockBajoLista = productos.filter(p => p.stock <= p.stockMinimo);
 
-  // Top productos vendidos hoy
   const topProductosHoy: { nombre: string; cantidad: number; total: number }[] = [];
   const mapaTop: Record<string, { nombre: string; cantidad: number; total: number }> = {};
   ventasHoy.forEach(v => {
@@ -164,7 +154,6 @@ export default function TiendaSSApp() {
     .slice(0, 5)
     .forEach(p => topProductosHoy.push(p));
 
-  // Login
   const handleLogin = (e?: React.FormEvent, rolForzado?: string) => {
     if (e) e.preventDefault();
     const rol = rolForzado || usuario.toLowerCase().trim();
@@ -197,7 +186,6 @@ export default function TiendaSSApp() {
     setEditandoId(null);
   };
 
-  // Guardar o editar producto
   const guardarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombre || (!editandoId && !stockInicial)) {
@@ -208,13 +196,12 @@ export default function TiendaSSApp() {
     setGuardando(true);
     try {
       const codigoAuto = codigo.trim() || `PROD-${Math.floor(1000 + Math.random() * 9000)}`;
-      const data = {
+      const data: any = {
         codigo: codigoAuto,
         nombre: nombre.trim(),
         marca: marca.trim() || 'Sin marca',
         modelo: modelo.trim() || 'Estándar',
         categoria,
-        stock: editandoId ? undefined : (parseInt(stockInicial, 10) || 0),
         stockMinimo: parseInt(stockMinimo, 10) || 5,
         precio: parseFloat(precio) || 0,
         costo: parseFloat(costo) || 0,
@@ -223,17 +210,14 @@ export default function TiendaSSApp() {
       };
 
       if (editandoId) {
-        const { stock, ...updateData } = data as any;
-        await updateDoc(doc(db, 'productos', editandoId), updateData);
-        setProductos(productos.map(p => p.id === editandoId ? { ...p, ...updateData, stock: p.stock } : p));
+        await updateDoc(doc(db, 'productos', editandoId), data);
+        setProductos(productos.map(p => p.id === editandoId ? { ...p, ...data } : p));
         alert('✅ Producto actualizado');
       } else {
-        const docRef = await addDoc(collection(db, 'productos'), {
-          ...data,
-          stock: parseInt(stockInicial, 10) || 0,
-          creadoEn: serverTimestamp()
-        });
-        setProductos([{ id: docRef.id, ...data, stock: parseInt(stockInicial, 10) || 0 } as Producto, ...productos]);
+        data.stock = parseInt(stockInicial, 10) || 0;
+        data.creadoEn = serverTimestamp();
+        const docRef = await addDoc(collection(db, 'productos'), data);
+        setProductos([{ id: docRef.id, ...data } as Producto, ...productos]);
         alert('✅ Producto agregado');
       }
       limpiarFormulario();
@@ -259,7 +243,6 @@ export default function TiendaSSApp() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Ajustar stock
   const aplicarAjuste = async () => {
     if (!ajustandoId || !ajusteCantidad) return;
     const prod = productos.find(p => p.id === ajustandoId);
@@ -274,14 +257,13 @@ export default function TiendaSSApp() {
     let nuevoStock = prod.stock;
     if (ajusteTipo === 'entrada') nuevoStock += cantidad;
     else if (ajusteTipo === 'salida') nuevoStock = Math.max(0, prod.stock - cantidad);
-    else nuevoStock = cantidad; // corrección
+    else nuevoStock = cantidad;
 
     try {
       await updateDoc(doc(db, 'productos', ajustandoId), { stock: nuevoStock });
       setProductos(productos.map(p => p.id === ajustandoId ? { ...p, stock: nuevoStock } : p));
       setAjustandoId(null);
       setAjusteCantidad('');
-      setAjusteMotivo('');
       alert('✅ Stock actualizado');
     } catch (error) {
       console.error(error);
@@ -301,7 +283,6 @@ export default function TiendaSSApp() {
     }
   };
 
-  // Vendedor
   const agregarAlCarrito = (prod: Producto) => {
     if (prod.stock <= 0) {
       alert('⚠️ Sin stock');
@@ -364,7 +345,6 @@ export default function TiendaSSApp() {
         return vendido ? { ...p, stock: Math.max(0, p.stock - vendido.cantidadVenta) } : p;
       }));
 
-      // Recargar ventas para el dashboard
       const ventasSnap = await getDocs(collection(db, 'ventas'));
       const listaVentas: Venta[] = [];
       ventasSnap.forEach((d) => listaVentas.push({ id: d.id, ...d.data() } as Venta));
@@ -438,13 +418,12 @@ export default function TiendaSSApp() {
     );
   }
 
-  // ========== JEFE - DASHBOARD ==========
+  // ========== JEFE ==========
   if (vistaActual === 'jefe') {
     return (
       <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           
-          {/* Header */}
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '16px', fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Dashboard</h1>
@@ -455,7 +434,6 @@ export default function TiendaSSApp() {
             </button>
           </div>
 
-          {/* KPIs del día */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '14px' }}>
               <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Ventas hoy</p>
@@ -475,7 +453,6 @@ export default function TiendaSSApp() {
             </div>
           </div>
 
-          {/* Alerta stock bajo */}
           {stockBajoLista.length > 0 && (
             <div style={{ backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '14px', padding: '12px' }}>
               <p style={{ fontSize: '13px', fontWeight: 700, color: '#f87171', margin: '0 0 8px' }}>⚠️ Productos con stock bajo</p>
@@ -485,11 +462,9 @@ export default function TiendaSSApp() {
                   <span style={{ color: '#f87171', fontWeight: 700 }}>{p.stock} / min {p.stockMinimo}</span>
                 </div>
               ))}
-              {stockBajoLista.length > 5 && <p style={{ fontSize: '11px', color: '#9ca3af', margin: '6px 0 0' }}>+{stockBajoLista.length - 5} más</p>}
             </div>
           )}
 
-          {/* Top vendidos */}
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '14px' }}>
             <p style={{ fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>🏆 Más vendidos hoy</p>
             {topProductosHoy.length === 0 ? (
@@ -504,7 +479,6 @@ export default function TiendaSSApp() {
             )}
           </div>
 
-          {/* Resumen inventario */}
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '14px', padding: '14px' }}>
             <p style={{ fontSize: '13px', fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>📦 Inventario</p>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
@@ -523,15 +497,15 @@ export default function TiendaSSApp() {
             </div>
           </div>
 
-          {/* Accesos rápidos */}
+          {/* Navegación */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <button onClick={() => setVistaActual('bodega')}
               style={{ backgroundColor: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: '12px', padding: '14px', color: '#a5b4fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
-              📦 Ir a Inventario
+              📦 Inventario
             </button>
             <button onClick={() => setVistaActual('vendedor')}
               style={{ backgroundColor: '#0c4a6e', border: '1px solid #0ea5e9', borderRadius: '12px', padding: '14px', color: '#7dd3fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
-              🛒 Ir a Ventas
+              🛒 Ventas
             </button>
           </div>
         </div>
@@ -563,7 +537,18 @@ export default function TiendaSSApp() {
             </button>
           </div>
 
-          {/* Formulario */}
+          {/* Navegación */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => setVistaActual('jefe')}
+              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#f87171', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+              ⚡ Dashboard
+            </button>
+            <button onClick={() => setVistaActual('vendedor')}
+              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#38bdf8', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+              🛒 Ventas
+            </button>
+          </div>
+
           <form onSubmit={guardarProducto} style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <h2 style={{ fontSize: '13px', fontWeight: 700, color: '#818cf8', margin: 0 }}>
               {editandoId ? '✏️ Editar producto' : '➕ Agregar producto'}
@@ -598,7 +583,9 @@ export default function TiendaSSApp() {
             </div>
 
             **Summary:**
-Más opciones
+
+                ▸ Más opciones
+              
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
                 <input type="text" placeholder="Código (auto si vacío)" value={codigo} onChange={e => setCodigo(e.target.value)}
                   style={{ backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '12px', color: '#fff', outline: 'none' }} />
@@ -622,7 +609,6 @@ Más opciones
             </div>
           </form>
 
-          {/* Filtros */}
           <div style={{ display: 'flex', gap: '8px' }}>
             <input type="text" placeholder="🔍 Buscar..." value={busquedaBodega} onChange={e => setBusquedaBodega(e.target.value)}
               style={{ flex: 1, backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '10px', padding: '10px', fontSize: '13px', color: '#fff', outline: 'none' }} />
@@ -632,7 +618,6 @@ Más opciones
             </button>
           </div>
 
-          {/* Lista */}
           {productosFiltrados.length === 0 ? (
             <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: '13px', padding: '20px' }}>No hay productos</p>
           ) : (
@@ -669,7 +654,6 @@ Más opciones
                     style={{ backgroundColor: '#374151', color: '#fff', border: 'none', width: '32px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>−</button>
                 </div>
 
-                {/* Panel de ajuste */}
                 {ajustandoId === prod.id && (
                   <div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#030712', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', gap: '6px' }}>
@@ -711,8 +695,9 @@ Más opciones
     );
 
     return (
-      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif', paddingBottom: carrito.length > 0 ? '20px' : '20px' }}>
+      <div style={{ minHeight: '100vh', backgroundColor: '#030712', color: '#f3f4f6', padding: '12px', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: '600px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          
           <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', borderRadius: '16px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8', margin: 0 }}>🛒 Ventas</h1>
@@ -720,6 +705,18 @@ Más opciones
             </div>
             <button onClick={() => setVistaActual('login')} style={{ backgroundColor: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
               Cerrar
+            </button>
+          </div>
+
+          {/* Navegación */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={() => setVistaActual('jefe')}
+              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#f87171', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+              ⚡ Dashboard
+            </button>
+            <button onClick={() => setVistaActual('bodega')}
+              style={{ flex: 1, backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#818cf8', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}>
+              📦 Inventario
             </button>
           </div>
 
