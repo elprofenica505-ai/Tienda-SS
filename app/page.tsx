@@ -1,26 +1,17 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   collection, getDocs, addDoc, updateDoc, doc, serverTimestamp
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
-const USUARIOS = [
-  { id: 'u1', usuario: 'jefe',   password: '1234', nombre: 'Dueño',  rol: 'jefe' as const },
-  { id: 'u2', usuario: 'carlos', password: '1234', nombre: 'Carlos', rol: 'vendedor' as const },
-  { id: 'u3', usuario: 'maria',  password: '1234', nombre: 'María',  rol: 'vendedor' as const },
-  { id: 'u4', usuario: 'luis',   password: '1234', nombre: 'Luis',   rol: 'bodega' as const },
-  { id: 'u5', usuario: 'pedro',  password: '1234', nombre: 'Pedro',  rol: 'chofer' as const },
-];
-
-type Rol = 'jefe' | 'vendedor' | 'bodega' | 'chofer';
 type Vista =
   | 'login' | 'jefe_home' | 'jefe_ventas' | 'jefe_inventario'
   | 'vendedor_home' | 'vendedor_ticket'
   | 'bodega_home' | 'bodega_ajuste'
   | 'chofer_home';
 
-interface Usuario { id: string; usuario: string; nombre: string; rol: Rol; }
 interface Producto {
   id: string; codigo: string; nombre: string; stock: number; stockMinimo: number;
   precio: number; costo: number; imagen: string; categoria: string;
@@ -40,10 +31,12 @@ export default function TiendaSS() {
   const [user, setUser] = useState<Usuario | null>(null);
   const [vista, setVista] = useState<Vista>('login');
   const [historial, setHistorial] = useState<Vista[]>([]);
-  const [cargando, setCargando] = useState(true);
+  const [cargandoSesion, setCargandoSesion] = useState(true);
 
-  const [userInput, setUserInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
   const [passInput, setPassInput] = useState('');
+  const [errorLogin, setErrorLogin] = useState('');
+  const [cargandoLogin, setCargandoLogin] = useState(false);
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
@@ -89,7 +82,27 @@ export default function TiendaSS() {
     setVista(prev);
   };
 
+  // Escucha la sesión real de Firebase (login persistente)
   useEffect(() => {
+    const unsub = escucharSesion((u) => {
+      setUser(u);
+      setCargandoSesion(false);
+      setHistorial([]);
+      if (u) {
+        if (u.rol === 'jefe') setVista('jefe_home');
+        else if (u.rol === 'vendedor') setVista('vendedor_home');
+        else if (u.rol === 'bodega') setVista('bodega_home');
+        else setVista('chofer_home');
+      } else {
+        setVista('login');
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Carga productos y ventas SOLO cuando hay usuario autenticado
+  useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
         const ps = await getDocs(collection(db, 'productos'));
@@ -116,11 +129,9 @@ export default function TiendaSS() {
         setVentas(lv);
       } catch (e) {
         console.error(e);
-      } finally {
-        setCargando(false);
       }
     })();
-  }, []);
+  }, [user]);
 
   const hoy = new Date();
   const esHoy = (f: any) => {
@@ -150,34 +161,27 @@ export default function TiendaSS() {
     porPago[m] = (porPago[m] || 0) + (v.total || 0);
   });
 
-  const login = (e?: React.FormEvent) => {
+  const manejarLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const u = USUARIOS.find(x => x.usuario === userInput.toLowerCase().trim() && x.password === passInput);
-    if (!u) { alert('Usuario o clave incorrectos'); return; }
-    const usr: Usuario = { id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol };
-    setUser(usr);
-    setHistorial([]);
-    if (u.rol === 'jefe') setVista('jefe_home');
-    else if (u.rol === 'vendedor') setVista('vendedor_home');
-    else if (u.rol === 'bodega') setVista('bodega_home');
-    else setVista('chofer_home');
-    setUserInput(''); setPassInput('');
+    setErrorLogin('');
+    setCargandoLogin(true);
+    try {
+      await loginFirebase(emailInput.trim(), passInput);
+      setEmailInput('');
+      setPassInput('');
+    } catch (err: any) {
+      setErrorLogin(
+        err?.message?.includes('desactivado')
+          ? err.message
+          : 'Correo o contraseña incorrectos'
+      );
+    } finally {
+      setCargandoLogin(false);
+    }
   };
 
-  const loginRapido = (usuario: string) => {
-    const u = USUARIOS.find(x => x.usuario === usuario)!;
-    setUser({ id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol });
-    setHistorial([]);
-    if (u.rol === 'jefe') setVista('jefe_home');
-    else if (u.rol === 'vendedor') setVista('vendedor_home');
-    else if (u.rol === 'bodega') setVista('bodega_home');
-    else setVista('chofer_home');
-  };
-
-  const cerrar = () => {
-    setUser(null);
-    setVista('login');
-    setHistorial([]);
+  const cerrar = async () => {
+    await cerrarSesion();
     setCarrito([]);
     setUltimaVenta(null);
   };
@@ -313,13 +317,13 @@ export default function TiendaSS() {
   );
 
   const btnCerrar = (
-    <button onClick={cerrar} style={{
+    <button onClick={() => cerrar()} style={{
       background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)',
       padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer'
     }}>Cerrar</button>
   );
 
-  if (cargando) {
+  if (cargandoSesion) {
     return (
       <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: 'sans-serif' }}>
         <div style={{ textAlign: 'center' }}><div style={{ fontSize: 32, marginBottom: 8 }}>⚡</div><p>Cargando Tienda-SS...</p></div>
@@ -335,30 +339,20 @@ export default function TiendaSS() {
           <div style={{ textAlign: 'center' }}>
             <div style={{ width: 50, height: 50, background: '#1f2937', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#facc15', fontSize: 24, border: '1px solid #374151', margin: '0 auto 8px' }}>⚡</div>
             <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Tienda-SS</h1>
-            <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>Sistema de control · Demo</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: '4px 0 0' }}>Sistema de control</p>
           </div>
-          <form onSubmit={login} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input placeholder="Usuario" value={userInput} onChange={e => setUserInput(e.target.value)}
+          <form onSubmit={manejarLogin} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input placeholder="Correo" type="email" value={emailInput} onChange={e => setEmailInput(e.target.value)}
               style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 12, color: '#fff', fontSize: 13, outline: 'none' }} />
             <input type="password" placeholder="Contraseña" value={passInput} onChange={e => setPassInput(e.target.value)}
               style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 12, color: '#fff', fontSize: 13, outline: 'none' }} />
-            <button type="submit" style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 12, borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-              Iniciar sesión
+            {errorLogin && (
+              <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>{errorLogin}</p>
+            )}
+            <button type="submit" disabled={cargandoLogin} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 12, borderRadius: 12, fontWeight: 700, fontSize: 14, cursor: cargandoLogin ? 'not-allowed' : 'pointer', opacity: cargandoLogin ? 0.7 : 1 }}>
+              {cargandoLogin ? 'Entrando...' : 'Iniciar sesión'}
             </button>
           </form>
-          <div style={{ borderTop: '1px solid #1f2937', paddingTop: 14 }}>
-            <p style={{ fontSize: 10, color: '#6b7280', textAlign: 'center', marginBottom: 8 }}>ACCESOS RÁPIDOS · clave 1234</p>
-            {USUARIOS.map(u => (
-              <button key={u.id} onClick={() => loginRapido(u.usuario)}
-                style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: '10px 12px', marginBottom: 6, display: 'flex', justifyContent: 'space-between', cursor: 'pointer' }}>
-                <span style={{ textAlign: 'left' }}>
-                  <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#fff' }}>{u.nombre}</span>
-                  <span style={{ fontSize: 11, color: '#9ca3af' }}>{u.usuario} · {u.rol}</span>
-                </span>
-                <span style={{ color: '#818cf8', fontSize: 12 }}>Entrar →</span>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
     );
@@ -402,7 +396,7 @@ export default function TiendaSS() {
           <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
             <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>👥 Ventas por vendedor</p>
             {porVendedor.length === 0 ? (
-              <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin ventas hoy. Entra como Carlos o María y vende.</p>
+              <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin ventas hoy.</p>
             ) : porVendedor.map((v, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1f2937' }}>
                 <div>
