@@ -7,8 +7,8 @@ import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
 type Vista =
-  | 'login' | 'jefe_home' | 'jefe_ventas' | 'jefe_inventario'
-  | 'vendedor_home' | 'vendedor_ticket'
+  | 'login' | 'jefe_home' | 'jefe_ventas' | 'jefe_inventario' | 'jefe_cajas'
+  | 'vendedor_home' | 'vendedor_ticket' | 'vendedor_cerrar_caja'
   | 'bodega_home' | 'bodega_ajuste'
   | 'chofer_home';
 
@@ -20,11 +20,24 @@ interface CarritoItem extends Producto { cantidad: number; }
 interface Venta {
   id: string; total: number; items: any[]; fecha: any; estado: string;
   medioPago: string; vendedorId: string; vendedorNombre: string;
-  recibido?: number; vuelto?: number;
+  recibido?: number; vuelto?: number; turnoId?: string;
 }
 interface Entrega {
   id: number; cliente: string; direccion: string; productos: string;
   estado: 'Pendiente' | 'En Ruta' | 'Entregado'; choferId: string;
+}
+interface Turno {
+  id: string;
+  vendedorId: string;
+  vendedorNombre: string;
+  montoInicial: number;
+  fechaApertura: any;
+  estado: 'abierto' | 'cerrado';
+  montoContado?: number;
+  totalVentasEfectivo?: number;
+  totalEsperado?: number;
+  diferencia?: number;
+  fechaCierre?: any;
 }
 
 export default function TiendaSS() {
@@ -40,6 +53,7 @@ export default function TiendaSS() {
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [turnos, setTurnos] = useState<Turno[]>([]);
 
   // Vendedor
   const [carrito, setCarrito] = useState<CarritoItem[]>([]);
@@ -47,6 +61,8 @@ export default function TiendaSS() {
   const [medioPago, setMedioPago] = useState<'Efectivo' | 'Tarjeta' | 'Transferencia' | 'Mixto'>('Efectivo');
   const [montoRecibido, setMontoRecibido] = useState('');
   const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
+  const [montoAperturaInput, setMontoAperturaInput] = useState('');
+  const [montoContadoInput, setMontoContadoInput] = useState('');
 
   // Bodega
   const [nombreProd, setNombreProd] = useState('');
@@ -82,7 +98,6 @@ export default function TiendaSS() {
     setVista(prev);
   };
 
-  // Escucha la sesión real de Firebase (login persistente)
   useEffect(() => {
     const unsub = escucharSesion((u) => {
       setUser(u);
@@ -100,7 +115,6 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
-  // Carga productos y ventas SOLO cuando hay usuario autenticado
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -127,6 +141,11 @@ export default function TiendaSS() {
         const lv: Venta[] = [];
         vs.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
         setVentas(lv);
+
+        const ts = await getDocs(collection(db, 'turnos'));
+        const lt: Turno[] = [];
+        ts.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
+        setTurnos(lt);
       } catch (e) {
         console.error(e);
       }
@@ -160,6 +179,16 @@ export default function TiendaSS() {
     const m = v.medioPago || 'Otros';
     porPago[m] = (porPago[m] || 0) + (v.total || 0);
   });
+
+  // Turno abierto del vendedor actual
+  const turnoAbierto = user?.rol === 'vendedor'
+    ? turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto')
+    : undefined;
+
+  const ventasEfectivoTurno = turnoAbierto
+    ? ventas.filter(v => v.turnoId === turnoAbierto.id && v.medioPago === 'Efectivo')
+        .reduce((s, v) => s + (v.total || 0), 0)
+    : 0;
 
   const manejarLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -212,6 +241,10 @@ export default function TiendaSS() {
 
   const cobrar = async () => {
     if (!user || carrito.length === 0) return;
+    if (user.rol === 'vendedor' && !turnoAbierto) {
+      alert('Debes abrir caja antes de vender');
+      return;
+    }
     if (medioPago === 'Efectivo' && (!montoRecibido || parseFloat(montoRecibido) < totalCarrito)) {
       alert('El monto recibido debe ser mayor o igual al total');
       return;
@@ -230,6 +263,7 @@ export default function TiendaSS() {
         vendedorNombre: user.nombre,
         recibido: medioPago === 'Efectivo' ? parseFloat(montoRecibido) : totalCarrito,
         vuelto: medioPago === 'Efectivo' ? vuelto : 0,
+        turnoId: turnoAbierto ? turnoAbierto.id : null,
       };
       const ref = await addDoc(collection(db, 'ventas'), data);
 
@@ -256,6 +290,56 @@ export default function TiendaSS() {
     } catch (e) {
       console.error(e);
       alert('Error al cobrar');
+    }
+  };
+
+  const abrirCaja = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (montoAperturaInput === '') { alert('Ingresa el monto con el que abres caja'); return; }
+    try {
+      const data = {
+        vendedorId: user.id,
+        vendedorNombre: user.nombre,
+        montoInicial: parseFloat(montoAperturaInput) || 0,
+        fechaApertura: serverTimestamp(),
+        estado: 'abierto' as const,
+      };
+      const ref = await addDoc(collection(db, 'turnos'), data);
+      setTurnos([...turnos, { id: ref.id, ...data, fechaApertura: new Date() } as Turno]);
+      setMontoAperturaInput('');
+    } catch (e) {
+      console.error(e);
+      alert('Error al abrir caja');
+    }
+  };
+
+  const cerrarCaja = async () => {
+    if (!turnoAbierto) return;
+    if (montoContadoInput === '') { alert('Ingresa el monto contado en caja'); return; }
+    const contado = parseFloat(montoContadoInput) || 0;
+    const totalEsperado = turnoAbierto.montoInicial + ventasEfectivoTurno;
+    const diferencia = contado - totalEsperado;
+    try {
+      await updateDoc(doc(db, 'turnos', turnoAbierto.id), {
+        estado: 'cerrado',
+        montoContado: contado,
+        totalVentasEfectivo: ventasEfectivoTurno,
+        totalEsperado,
+        diferencia,
+        fechaCierre: serverTimestamp(),
+      });
+      setTurnos(turnos.map(t => t.id === turnoAbierto.id ? {
+        ...t, estado: 'cerrado', montoContado: contado,
+        totalVentasEfectivo: ventasEfectivoTurno, totalEsperado, diferencia
+      } : t));
+      setMontoContadoInput('');
+      alert(diferencia === 0 ? 'Caja cuadrada perfectamente ✅' : `Caja cerrada. Diferencia: $${diferencia.toFixed(0)}`);
+      setVista('vendedor_home');
+      setHistorial([]);
+    } catch (e) {
+      console.error(e);
+      alert('Error al cerrar caja');
     }
   };
 
@@ -440,6 +524,9 @@ export default function TiendaSS() {
               📦 Inventario
             </button>
           </div>
+          <button onClick={() => irA('jefe_cajas')} style={{ background: '#3f1d0f', border: '1px solid #ea580c', borderRadius: 12, padding: 14, color: '#fdba74', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            💰 Cierres de caja
+          </button>
         </div>
       </div>
     );
@@ -507,6 +594,114 @@ export default function TiendaSS() {
     );
   }
 
+  // ========== JEFE CIERRES DE CAJA ==========
+  if (vista === 'jefe_cajas') {
+    const turnosOrdenados = turnos.slice().sort((a, b) => {
+      const fa = a.fechaApertura?.toDate ? a.fechaApertura.toDate() : new Date(a.fechaApertura || 0);
+      const fb = b.fechaApertura?.toDate ? b.fechaApertura.toDate() : new Date(b.fechaApertura || 0);
+      return fb.getTime() - fa.getTime();
+    });
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {btnVolver}
+              <div>
+                <h1 style={{ fontSize: 15, fontWeight: 800, color: '#fdba74', margin: 0 }}>💰 Cierres de caja</h1>
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{turnosOrdenados.length} turno(s)</p>
+              </div>
+            </div>
+            {btnCerrar}
+          </div>
+          {turnosOrdenados.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay turnos registrados</p>
+          ) : turnosOrdenados.map(t => (
+            <div key={t.id} style={{ background: '#111827', border: `1px solid ${t.estado === 'cerrado' && t.diferencia !== 0 ? 'rgba(239,68,68,0.4)' : '#1f2937'}`, borderRadius: 14, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>{t.vendedorNombre}</span>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                  background: t.estado === 'abierto' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
+                  color: t.estado === 'abierto' ? '#60a5fa' : '#34d399'
+                }}>{t.estado === 'abierto' ? 'Abierta' : 'Cerrada'}</span>
+              </div>
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Monto inicial: ${t.montoInicial?.toLocaleString()}</p>
+              {t.estado === 'cerrado' && (
+                <>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Ventas efectivo: ${t.totalVentasEfectivo?.toLocaleString()}</p>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Esperado: ${t.totalEsperado?.toLocaleString()} · Contado: ${t.montoContado?.toLocaleString()}</p>
+                  <p style={{ fontSize: 13, fontWeight: 800, margin: '6px 0 0', color: t.diferencia === 0 ? '#34d399' : '#f87171' }}>
+                    Diferencia: ${t.diferencia?.toLocaleString()}
+                  </p>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ========== VENDEDOR: ABRIR CAJA ==========
+  if (vista === 'vendedor_home' && !turnoAbierto) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: 'sans-serif' }}>
+        <div style={{ width: '100%', maxWidth: 400, background: '#111827', border: '1px solid #1f2937', borderRadius: 24, padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h1 style={{ fontSize: 17, fontWeight: 800, color: '#facc15', margin: 0 }}>🔓 Abrir caja</h1>
+            {btnCerrar}
+          </div>
+          <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
+            {user.nombre}, antes de vender, cuenta el efectivo que tienes en caja ahora mismo e ingrésalo.
+          </p>
+          <form onSubmit={abrirCaja} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input type="number" placeholder="Monto inicial en efectivo" value={montoAperturaInput} onChange={e => setMontoAperturaInput(e.target.value)}
+              style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 12, color: '#fff', fontSize: 14, outline: 'none' }} />
+            <button type="submit" style={{ background: '#10b981', color: '#030712', border: 'none', padding: 12, borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+              Abrir caja y empezar a vender
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== VENDEDOR: CERRAR CAJA ==========
+  if (vista === 'vendedor_cerrar_caja' && turnoAbierto) {
+    const totalEsperado = turnoAbierto.montoInicial + ventasEfectivoTurno;
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: 400, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {btnVolver}
+            {btnCerrar}
+          </div>
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
+            <h1 style={{ fontSize: 16, fontWeight: 800, color: '#facc15', margin: '0 0 12px' }}>🔒 Cerrar caja</h1>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+              <span>Monto inicial</span><span>${turnoAbierto.montoInicial.toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+              <span>Ventas en efectivo</span><span>${ventasEfectivoTurno.toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 800, borderTop: '1px solid #374151', paddingTop: 8, marginTop: 4 }}>
+              <span>Esperado en caja</span><span>${totalEsperado.toLocaleString()}</span>
+            </div>
+          </div>
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ fontSize: 13, margin: 0 }}>Cuenta el efectivo físico y escribe cuánto contaste:</p>
+            <input type="number" placeholder="Monto contado" value={montoContadoInput} onChange={e => setMontoContadoInput(e.target.value)}
+              style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 12, color: '#fff', fontSize: 14, outline: 'none' }} />
+            <button onClick={cerrarCaja} style={{ background: '#f59e0b', color: '#030712', border: 'none', padding: 12, borderRadius: 12, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+              Confirmar cierre de caja
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ========== VENDEDOR HOME ==========
   if (vista === 'vendedor_home') {
     const cat = productos.filter(p =>
@@ -524,7 +719,16 @@ export default function TiendaSS() {
                 <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre}</p>
               </div>
             </div>
-            {btnCerrar}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => irA('vendedor_cerrar_caja')} style={{ background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                🔒 Cerrar caja
+              </button>
+              {btnCerrar}
+            </div>
+          </div>
+
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: '8px 12px', fontSize: 11, color: '#9ca3af' }}>
+            Caja abierta con ${turnoAbierto?.montoInicial.toLocaleString()} · Efectivo vendido: ${ventasEfectivoTurno.toLocaleString()}
           </div>
 
           {carrito.length > 0 && (
