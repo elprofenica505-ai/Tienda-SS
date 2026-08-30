@@ -2,12 +2,11 @@ import * as admin from 'firebase-admin';
 
 function getFirebaseAdminApp() {
   if (admin.apps.length > 0) {
-    return admin.apps[0];
+    return admin.apps[0] as admin.app.App;
   }
 
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
   if (!raw) {
-    // Durante el build de Vercel si no está disponible todavía, evitamos que rompa
     throw new Error("Falta la variable FIREBASE_SERVICE_ACCOUNT_KEY");
   }
 
