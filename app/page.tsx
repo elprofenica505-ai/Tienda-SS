@@ -12,7 +12,7 @@ type Vista =
   | 'bodega_home' | 'bodega_ajuste' | 'bodega_compra' | 'bodega_historial_compras'
   | 'chofer_home';
 
-type JefeSeccion = 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'proximamente';
+type JefeSeccion = 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'proximamente';
 
 interface Producto {
   id: string; codigo: string; nombre: string; stock: number; stockMinimo: number;
@@ -47,6 +47,13 @@ interface CompraItem {
 interface Compra {
   id: string; proveedor: string; fecha: any; items: CompraItem[]; total: number; creadoPor: string;
 }
+interface UsuarioSistema {
+  id: string;
+  email: string;
+  password?: string;
+  rol: string;
+  activo?: boolean;
+}
 
 const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
   { key: 'inicio', label: 'Inicio', icon: '🏠' },
@@ -59,7 +66,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
   { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
-  { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼', proximamente: true },
+  { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
   { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
 ];
 
@@ -80,6 +87,12 @@ export default function TiendaSS() {
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]);
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
+
+  // Estados para la gestión de usuarios en el Panel del Jefe
+  const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
+  const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
+  const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
 
   // Jefe: panel nuevo
   const [menuAbierto, setMenuAbierto] = useState(false);
@@ -153,6 +166,19 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
+  const cargarUsuariosSistema = async () => {
+    try {
+      const usSnapshot = await getDocs(collection(db, 'usuarios'));
+      const listaUs: UsuarioSistema[] = [];
+      usSnapshot.forEach(d => {
+        listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema);
+      });
+      setUsuariosSistema(listaUs);
+    } catch (e) {
+      console.error("Error al cargar usuarios:", e);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -189,11 +215,48 @@ export default function TiendaSS() {
         const lc: Compra[] = [];
         cs.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
         setCompras(lc);
+
+        await cargarUsuariosSistema();
       } catch (e) {
         console.error(e);
       }
     })();
   }, [user]);
+
+  const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevoEmailUsuario || !nuevoPassUsuario) {
+      alert('Ingresa el correo y la contraseña');
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'usuarios'), {
+        email: nuevoEmailUsuario.trim(),
+        password: nuevoPassUsuario,
+        rol: nuevoRolUsuario,
+        activo: true,
+      });
+      setNuevoEmailUsuario('');
+      setNuevoPassUsuario('');
+      setNuevoRolUsuario('vendedor');
+      alert('¡Usuario registrado con éxito en Firestore!');
+      await cargarUsuariosSistema();
+    } catch (error) {
+      console.error("Error al registrar usuario:", error);
+      alert('Error al registrar el usuario');
+    }
+  };
+
+  const cambiarEstadoUsuario = async (id: string, estadoActual: boolean) => {
+    try {
+      const usuarioRef = doc(db, 'usuarios', id);
+      await updateDoc(usuarioRef, { activo: !estadoActual });
+      await cargarUsuariosSistema();
+    } catch (error) {
+      console.error("Error al cambiar estado:", error);
+      alert('No se pudo actualizar el estado');
+    }
+  };
 
   const hoy = new Date();
   const esHoy = (f: any) => {
@@ -204,7 +267,6 @@ export default function TiendaSS() {
   const ventasHoy = ventas.filter(v => esHoy(v.fecha));
   const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || 0), 0);
   const ticketsHoy = ventasHoy.length;
-  const ticketProm = ticketsHoy ? totalHoy / ticketsHoy : 0;
   const stockBajo = productos.filter(p => p.stock <= p.stockMinimo);
 
   const utilidadHoy = ventasHoy.reduce((s, v) => {
@@ -215,16 +277,6 @@ export default function TiendaSS() {
     }, 0);
     return s + u;
   }, 0);
-
-  const porVendedor: { nombre: string; total: number; tickets: number }[] = [];
-  const mapV: Record<string, { nombre: string; total: number; tickets: number }> = {};
-  ventasHoy.forEach(v => {
-    const k = v.vendedorId || 'x';
-    if (!mapV[k]) mapV[k] = { nombre: v.vendedorNombre || 'Sin nombre', total: 0, tickets: 0 };
-    mapV[k].total += v.total || 0;
-    mapV[k].tickets++;
-  });
-  Object.values(mapV).sort((a, b) => b.total - a.total).forEach(x => porVendedor.push(x));
 
   const porPago: Record<string, number> = {};
   ventasHoy.forEach(v => {
@@ -860,6 +912,71 @@ export default function TiendaSS() {
                 </div>
               ))}
               {turnos.length === 0 && <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay turnos registrados</p>}
+            </div>
+          )}
+
+          {jefeSeccion === 'usuarios' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧑‍💼 Gestión de Usuarios</p>
+              
+              {/* Formulario para registrar un nuevo usuario */}
+              <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar nuevo empleado</p>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Correo electrónico</label>
+                  <input type="email" value={nuevoEmailUsuario} onChange={e => setNuevoEmailUsuario(e.target.value)} required
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Contraseña</label>
+                  <input type="text" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)} required
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Rol asignado</label>
+                  <select value={nuevoRolUsuario} onChange={e => setNuevoRolUsuario(e.target.value)}
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}>
+                    <option value="vendedor">Vendedor</option>
+                    <option value="bodega">Bodega</option>
+                    <option value="chofer">Chofer</option>
+                    <option value="jefe">Jefe</option>
+                  </select>
+                </div>
+                <button type="submit" style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
+                  Guardar Empleado
+                </button>
+              </form>
+
+              {/* Lista de usuarios registrados */}
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#a5b4fc', margin: '0 0 10px' }}>Empleados Registrados</p>
+                {usuariosSistema.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#9ca3af', padding: 10 }}>No hay usuarios en la base de datos</p>
+                ) : (
+                  usuariosSistema.map(u => {
+                    const estaActivo = u.activo !== false;
+                    return (
+                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f2937', paddingBottom: 10, marginBottom: 10 }}>
+                        <div>
+                          <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{u.email}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+                            Rol: <span style={{ textTransform: 'uppercase', color: '#facc15' }}>{u.rol}</span> · Estado: <span style={{ color: estaActivo ? '#34d399' : '#f87171', fontWeight: 700 }}>{estaActivo ? 'Activo' : 'Inactivo'}</span>
+                          </p>
+                        </div>
+                        <button onClick={() => cambiarEstadoUsuario(u.id, estaActivo)}
+                          style={{
+                            background: estaActivo ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                            color: estaActivo ? '#f87171' : '#34d399',
+                            border: `1px solid ${estaActivo ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                            padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                          }}>
+                          {estaActivo ? 'Desactivar' : 'Activar'}
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
 
