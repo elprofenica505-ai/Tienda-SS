@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, getDocs } from 'firebase/firestore';
 
 interface Producto {
   id: string;
@@ -19,20 +19,22 @@ interface CategoriaDoc {
   nombre: string;
 }
 
+const CATEGORIAS_INICIALES = [
+  'Abarrotes',
+  'Bebidas',
+  'Limpieza',
+  'Electrodomésticos',
+  'Equipos tecnológicos',
+  'Otros',
+];
+
 export default function ProductosAdmin() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [categoriasObjs, setCategoriasObjs] = useState<CategoriaDoc[]>([]);
-  const [categoriasEstaticas] = useState<string[]>([
-    'Abarrotes',
-    'Bebidas',
-    'Limpieza',
-    'Electrodomésticos',
-    'Equipos tecnológicos',
-    'Otros',
-  ]);
+  
   const [nombre, setNombre] = useState('');
   const [codigo, setCodigo] = useState('');
-  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Abarrotes');
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
   const [nuevaCategoriaInput, setNuevaCategoriaInput] = useState('');
   const [precio, setPrecio] = useState('');
   const [stock, setStock] = useState('');
@@ -49,12 +51,25 @@ export default function ProductosAdmin() {
       setProductos(lista);
     });
 
-    const unsubscribeCategorias = onSnapshot(collection(db, 'categorias'), (snapshot) => {
+    const unsubscribeCategorias = onSnapshot(collection(db, 'categorias'), async (snapshot) => {
+      if (snapshot.empty) {
+        for (const catInicial of CATEGORIAS_INICIALES) {
+          await addDoc(collection(db, 'categorias'), { nombre: catInicial });
+        }
+        return;
+      }
+
       const listaCats: CategoriaDoc[] = snapshot.docs.map((docItem) => ({
         id: docItem.id,
         nombre: docItem.data().nombre as string,
       }));
+
+      listaCats.sort((a, b) => a.nombre.localeCompare(b.nombre));
       setCategoriasObjs(listaCats);
+
+      if (listaCats.length > 0 && !categoriaSeleccionada) {
+        setCategoriaSeleccionada(listaCats[0].nombre);
+      }
     });
 
     return () => {
@@ -63,12 +78,6 @@ export default function ProductosAdmin() {
     };
   }, []);
 
-  // Combinar categorías predeterminadas + las creadas en Firestore sin duplicados
-  const todasLasCategorias = Array.from(
-    new Set([...categoriasEstaticas, ...categoriasObjs.map((c) => c.nombre)])
-  );
-
-  // Función para generar un código único de 8 dígitos
   const generarCodigoUnico = async () => {
     const codigosExistentes = new Set(productos.map((p) => p.codigo));
     try {
@@ -92,7 +101,6 @@ export default function ProductosAdmin() {
     setCodigo(nuevoCodigo);
   };
 
-  // Comprimir imagen automáticamente para Firestore
   const handleImagenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -138,13 +146,14 @@ export default function ProductosAdmin() {
 
     if (categoriaSeleccionada === 'NUEVA') {
       if (!nuevaCategoriaInput.trim()) {
-        alert('Escribe el nombre de la nueva categoría');
+        alert('Por favor escribe el nombre de la nueva categoría');
         return;
       }
       categoriaFinal = nuevaCategoriaInput.trim();
       try {
-        // Validar si ya existe en Firestore para no duplicar registro en la colección
-        const existe = categoriasObjs.some((c) => c.nombre.toLowerCase() === categoriaFinal.toLowerCase());
+        const existe = categoriasObjs.some(
+          (c) => c.nombre.toLowerCase() === categoriaFinal.toLowerCase()
+        );
         if (!existe) {
           await addDoc(collection(db, 'categorias'), { nombre: categoriaFinal });
         }
@@ -154,7 +163,7 @@ export default function ProductosAdmin() {
     }
 
     if (!nombre || !precio || !stock || !codigo) {
-      alert('Por favor completa todos los campos obligatorios, incluyendo el código.');
+      alert('Por favor completa todos los campos obligatorios.');
       return;
     }
 
@@ -181,10 +190,10 @@ export default function ProductosAdmin() {
       setStock('');
       setImagen('');
       setNuevaCategoriaInput('');
-      setCategoriaSeleccionada(todasLasCategorias[0] || 'Abarrotes');
+      setCategoriaSeleccionada(categoriasObjs[0]?.nombre || 'Abarrotes');
       alert('¡Producto registrado con éxito!');
     } catch (error: any) {
-      console.error('Error detallado al agregar producto:', error);
+      console.error('Error al agregar producto:', error);
       alert(`Hubo un error al registrar el producto: ${error.message || error}`);
     } finally {
       setLoading(false);
@@ -197,13 +206,13 @@ export default function ProductosAdmin() {
     }
   };
 
-  // Función para eliminar categoría personalizada de Firestore
   const eliminarCategoria = async (catId: string, nombreCat: string) => {
-    if (confirm(`¿Estás seguro de eliminar la categoría "${nombreCat}"? Los productos existentes con esta categoría no se borrarán, pero dejará de aparecer en la lista.`)) {
+    if (confirm(`¿Eliminar la categoría "${nombreCat}"? Ya no aparecerá en el menú de categorías.`)) {
       try {
         await deleteDoc(doc(db, 'categorias', catId));
         if (categoriaSeleccionada === nombreCat) {
-          setCategoriaSeleccionada('Abarrotes');
+          const restantes = categoriasObjs.filter((c) => c.id !== catId);
+          setCategoriaSeleccionada(restantes[0]?.nombre || '');
         }
       } catch (error) {
         console.error('Error al eliminar categoría:', error);
@@ -217,7 +226,6 @@ export default function ProductosAdmin() {
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '480px', margin: '0 auto' }}>
       
-      {/* Tarjetas Superiores Estilo Dashboard */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
           <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '4px', textTransform: 'uppercase' }}>Valor a costo</p>
@@ -229,21 +237,18 @@ export default function ProductosAdmin() {
         </div>
       </div>
 
-      {/* Formulario de Registro Estilizado con Foto y Código */}
       <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '18px' }}>📦</span>
-            <div>
-              <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#ffffff', margin: 0 }}>Registrar Nuevo Producto</h3>
-              <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Control directo al inventario con código y foto</p>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+          <span style={{ fontSize: '18px' }}>📦</span>
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#ffffff', margin: 0 }}>Registrar Nuevo Producto</h3>
+            <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>Control directo al inventario con código y foto</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
-          {/* Captura de Foto */}
+          {/* Fotografía - Selector libre habilitado para Cámara o Galería */}
           <div>
             <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>Fotografía del producto</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -259,7 +264,6 @@ export default function ProductosAdmin() {
                 <input
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={handleImagenChange}
                   style={{ display: 'none' }}
                 />
@@ -267,7 +271,6 @@ export default function ProductosAdmin() {
             </div>
           </div>
 
-          {/* Nombre */}
           <div>
             <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '4px' }}>Nombre del producto</label>
             <input
@@ -280,7 +283,6 @@ export default function ProductosAdmin() {
             />
           </div>
 
-          {/* Código / SKU */}
           <div>
             <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '4px' }}>Código de producto / SKU</label>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -302,7 +304,6 @@ export default function ProductosAdmin() {
             </div>
           </div>
 
-          {/* Precio y Stock */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '4px' }}>Precio ($)</label>
@@ -329,7 +330,6 @@ export default function ProductosAdmin() {
             </div>
           </div>
 
-          {/* Categoría Selector + Botón Administrar */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label style={{ fontSize: '11px', color: '#9ca3af' }}>Categoría</label>
@@ -347,23 +347,22 @@ export default function ProductosAdmin() {
               onChange={(e) => setCategoriaSeleccionada(e.target.value)}
               style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#ffffff', fontSize: '13px', outline: 'none' }}
             >
-              {todasLasCategorias.map((cat, idx) => (
-                <option key={idx} value={cat} style={{ backgroundColor: '#111827', color: '#ffffff' }}>
-                  {cat}
+              {categoriasObjs.map((cat) => (
+                <option key={cat.id} value={cat.nombre} style={{ backgroundColor: '#111827', color: '#ffffff' }}>
+                  {cat.nombre}
                 </option>
               ))}
               <option value="NUEVA" style={{ backgroundColor: '#111827', color: '#34d399' }}>➕ Agregar nueva categoría...</option>
             </select>
           </div>
 
-          {/* Panel Desplegable para Administrar / Eliminar Categorías Personalizadas */}
           {mostrarModalCategorias && (
             <div style={{ backgroundColor: '#030712', border: '1px solid #374151', padding: '12px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Categorías personalizadas creadas:</p>
+              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Lista completa de categorías activas:</p>
               {categoriasObjs.length === 0 ? (
-                <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>No hay categorías personalizadas aún. (Las predeterminadas del sistema no se pueden eliminar).</p>
+                <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>No hay categorías registradas.</p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '120px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
                   {categoriasObjs.map((cat) => (
                     <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: '6px 10px', borderRadius: '8px' }}>
                       <span style={{ fontSize: '12px', color: '#ffffff' }}>{cat.nombre}</span>
@@ -372,7 +371,7 @@ export default function ProductosAdmin() {
                         onClick={() => eliminarCategoria(cat.id, cat.nombre)}
                         style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
                       >
-                        🗑️ Eliminar
+                        🗑️ Borrar
                       </button>
                     </div>
                   ))}
@@ -389,7 +388,7 @@ export default function ProductosAdmin() {
                 value={nuevaCategoriaInput}
                 onChange={(e) => setNuevaCategoriaInput(e.target.value)}
                 style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #34d399', borderRadius: '10px', padding: '10px', color: '#ffffff', fontSize: '13px', outline: 'none' }}
-                placeholder="Ej. Línea Blanca"
+                placeholder="Ej. Utensilios, Ropa, etc."
               />
             </div>
           )}
@@ -404,7 +403,6 @@ export default function ProductosAdmin() {
         </form>
       </div>
 
-      {/* Lista de Productos */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <h3 style={{ fontSize: '13px', fontWeight: 'bold', color: '#d1d5db', margin: '0 4px' }}>Inventario Activo ({productos.length})</h3>
         
