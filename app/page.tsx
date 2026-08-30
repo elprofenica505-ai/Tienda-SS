@@ -1,9 +1,10 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import {
-  collection, getDocs, addDoc, updateDoc, doc, serverTimestamp
+  collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, setDoc, deleteDoc
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { db, auth } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
 type Vista =
@@ -50,7 +51,7 @@ interface Compra {
 interface UsuarioSistema {
   id: string;
   email: string;
-  password?: string;
+  nombre?: string;
   rol: string;
   activo?: boolean;
 }
@@ -92,6 +93,7 @@ export default function TiendaSS() {
   // Estados para la gestión de usuarios en el Panel del Jefe
   const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
   const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
+  const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
   const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
 
   // Jefe: panel nuevo
@@ -225,25 +227,42 @@ export default function TiendaSS() {
 
   const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nuevoEmailUsuario || !nuevoPassUsuario) {
-      alert('Ingresa el correo y la contraseña');
+    if (!nuevoEmailUsuario || !nuevoPassUsuario || !nuevoNombreUsuario.trim()) {
+      alert('Ingresa nombre, correo y contraseña');
       return;
     }
     try {
-      await addDoc(collection(db, 'usuarios'), {
-        email: nuevoEmailUsuario.trim(),
-        password: nuevoPassUsuario,
+      // 1. Crear usuario en Firebase Authentication
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        nuevoEmailUsuario.trim().toLowerCase(),
+        nuevoPassUsuario
+      );
+      const uid = cred.user.uid;
+
+      // 2. Crear perfil en Firestore usando el UID como ID del documento
+      await setDoc(doc(db, 'usuarios', uid), {
+        email: nuevoEmailUsuario.trim().toLowerCase(),
+        nombre: nuevoNombreUsuario.trim(),
         rol: nuevoRolUsuario,
         activo: true,
       });
+
       setNuevoEmailUsuario('');
       setNuevoPassUsuario('');
+      setNuevoNombreUsuario('');
       setNuevoRolUsuario('vendedor');
-      alert('¡Usuario registrado con éxito en Firestore!');
+      alert('¡Usuario registrado correctamente!');
       await cargarUsuariosSistema();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al registrar usuario:", error);
-      alert('Error al registrar el usuario');
+      if (error.code === 'auth/email-already-in-use') {
+        alert('Ese correo ya está registrado');
+      } else if (error.code === 'auth/weak-password') {
+        alert('La contraseña debe tener al menos 6 caracteres');
+      } else {
+        alert('Error al registrar el usuario: ' + (error.message || ''));
+      }
     }
   };
 
@@ -255,6 +274,21 @@ export default function TiendaSS() {
     } catch (error) {
       console.error("Error al cambiar estado:", error);
       alert('No se pudo actualizar el estado');
+    }
+  };
+
+  const eliminarUsuario = async (id: string, email: string) => {
+    if (!confirm(`¿Estás seguro de eliminar permanentemente a ${email}?\n\nEsta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      // Borra el perfil de Firestore (el usuario ya no podrá iniciar sesión)
+      await deleteDoc(doc(db, 'usuarios', id));
+      await cargarUsuariosSistema();
+      alert('Usuario eliminado correctamente');
+    } catch (error) {
+      console.error("Error al eliminar usuario:", error);
+      alert('No se pudo eliminar el usuario');
     }
   };
 
@@ -923,13 +957,19 @@ export default function TiendaSS() {
               <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar nuevo empleado</p>
                 <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Nombre completo</label>
+                  <input type="text" value={nuevoNombreUsuario} onChange={e => setNuevoNombreUsuario(e.target.value)} required
+                    placeholder="Ej: Carlos Pérez"
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
                   <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Correo electrónico</label>
                   <input type="email" value={nuevoEmailUsuario} onChange={e => setNuevoEmailUsuario(e.target.value)} required
                     style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Contraseña</label>
-                  <input type="text" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)} required
+                  <input type="password" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)} required
                     style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div>
@@ -956,22 +996,36 @@ export default function TiendaSS() {
                   usuariosSistema.map(u => {
                     const estaActivo = u.activo !== false;
                     return (
-                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f2937', paddingBottom: 10, marginBottom: 10 }}>
-                        <div>
-                          <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{u.email}</p>
+                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f2937', paddingBottom: 10, marginBottom: 10, gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{u.nombre || u.email}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+                            {u.email}
+                          </p>
                           <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
                             Rol: <span style={{ textTransform: 'uppercase', color: '#facc15' }}>{u.rol}</span> · Estado: <span style={{ color: estaActivo ? '#34d399' : '#f87171', fontWeight: 700 }}>{estaActivo ? 'Activo' : 'Inactivo'}</span>
                           </p>
                         </div>
-                        <button onClick={() => cambiarEstadoUsuario(u.id, estaActivo)}
-                          style={{
-                            background: estaActivo ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
-                            color: estaActivo ? '#f87171' : '#34d399',
-                            border: `1px solid ${estaActivo ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
-                            padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer'
-                          }}>
-                          {estaActivo ? 'Desactivar' : 'Activar'}
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <button onClick={() => cambiarEstadoUsuario(u.id, estaActivo)}
+                            style={{
+                              background: estaActivo ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                              color: estaActivo ? '#f87171' : '#34d399',
+                              border: `1px solid ${estaActivo ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                              padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
+                            }}>
+                            {estaActivo ? 'Desactivar' : 'Activar'}
+                          </button>
+                          <button onClick={() => eliminarUsuario(u.id, u.email)}
+                            style={{
+                              background: 'rgba(239,68,68,0.25)',
+                              color: '#fca5a5',
+                              border: '1px solid rgba(239,68,68,0.5)',
+                              padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
+                            }}>
+                            Eliminar
+                          </button>
+                        </div>
                       </div>
                     );
                   })
