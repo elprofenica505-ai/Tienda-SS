@@ -3,14 +3,16 @@ import React, { useState, useEffect } from 'react';
 import {
   collection, getDocs, addDoc, updateDoc, doc, serverTimestamp
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
 type Vista =
-  | 'login' | 'jefe_home' | 'jefe_ventas' | 'jefe_inventario' | 'jefe_cajas'
+  | 'login' | 'jefe_home'
   | 'vendedor_home' | 'vendedor_ticket' | 'vendedor_cerrar_caja'
-  | 'bodega_home' | 'bodega_ajuste'
+  | 'bodega_home' | 'bodega_ajuste' | 'bodega_compra' | 'bodega_historial_compras'
   | 'chofer_home';
+
+type JefeSeccion = 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'proximamente';
 
 interface Producto {
   id: string; codigo: string; nombre: string; stock: number; stockMinimo: number;
@@ -39,6 +41,36 @@ interface Turno {
   diferencia?: number;
   fechaCierre?: any;
 }
+interface CompraItem {
+  productoId: string; nombre: string; cantidad: number; costoUnitario: number; subtotal: number;
+}
+interface Compra {
+  id: string; proveedor: string; fecha: any; items: CompraItem[]; total: number; creadoPor: string;
+}
+interface UsuarioSistema {
+  id: string;
+  email: string;
+  nombre?: string;
+  rol: string;
+  activo?: boolean;
+}
+
+const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
+  { key: 'inicio', label: 'Inicio', icon: '🏠' },
+  { key: 'ventas', label: 'Ventas', icon: '🧾' },
+  { key: 'inventario', label: 'Inventario', icon: '📦' },
+  { key: 'compras', label: 'Compras', icon: '🚚' },
+  { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
+  { key: 'proveedores', label: 'Proveedores', icon: '🏭', proximamente: true },
+  { key: 'creditos', label: 'Créditos / fiados', icon: '💳', proximamente: true },
+  { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
+  { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
+  { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
+  { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
+  { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
+];
+
+const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
 export default function TiendaSS() {
   const [user, setUser] = useState<Usuario | null>(null);
@@ -54,6 +86,20 @@ export default function TiendaSS() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [turnos, setTurnos] = useState<Turno[]>([]);
+  const [compras, setCompras] = useState<Compra[]>([]);
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
+  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
+
+  // Estados para la gestión de usuarios en el Panel del Jefe
+  const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
+  const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
+  const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
+  const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
+
+  // Jefe: panel nuevo
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion>('inicio');
+  const [proximamenteNombre, setProximamenteNombre] = useState('');
 
   // Vendedor
   const [carrito, setCarrito] = useState<CarritoItem[]>([]);
@@ -64,7 +110,7 @@ export default function TiendaSS() {
   const [montoAperturaInput, setMontoAperturaInput] = useState('');
   const [montoContadoInput, setMontoContadoInput] = useState('');
 
-  // Bodega
+  // Bodega - productos
   const [nombreProd, setNombreProd] = useState('');
   const [stockIni, setStockIni] = useState('');
   const [precioProd, setPrecioProd] = useState('');
@@ -73,6 +119,13 @@ export default function TiendaSS() {
   const [ajusteId, setAjusteId] = useState<string | null>(null);
   const [ajusteCant, setAjusteCant] = useState('');
   const [ajusteTipo, setAjusteTipo] = useState<'entrada' | 'salida' | 'merma'>('entrada');
+
+  // Compras (usado por Bodega y por Jefe)
+  const [proveedorInput, setProveedorInput] = useState('');
+  const [compraItems, setCompraItems] = useState<CompraItem[]>([]);
+  const [prodSeleccionadoId, setProdSeleccionadoId] = useState('');
+  const [cantCompraInput, setCantCompraInput] = useState('');
+  const [costoCompraInput, setCostoCompraInput] = useState('');
 
   const [entregas, setEntregas] = useState<Entrega[]>([
     { id: 1, cliente: 'Juan Pérez', direccion: 'Reparto Schick', productos: 'TV Samsung 55"', estado: 'Pendiente', choferId: 'u5' },
@@ -115,6 +168,19 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
+  const cargarUsuariosSistema = async () => {
+    try {
+      const usSnapshot = await getDocs(collection(db, 'usuarios'));
+      const listaUs: UsuarioSistema[] = [];
+      usSnapshot.forEach(d => {
+        listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema);
+      });
+      setUsuariosSistema(listaUs);
+    } catch (e) {
+      console.error("Error al cargar usuarios:", e);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -146,11 +212,87 @@ export default function TiendaSS() {
         const lt: Turno[] = [];
         ts.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
         setTurnos(lt);
+
+        const cs = await getDocs(collection(db, 'compras'));
+        const lc: Compra[] = [];
+        cs.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
+        setCompras(lc);
+
+        await cargarUsuariosSistema();
       } catch (e) {
         console.error(e);
       }
     })();
   }, [user]);
+
+  // Llama a la API segura de usuarios (Admin SDK en el servidor)
+  const llamarApiUsuarios = async (method: 'POST' | 'PATCH' | 'DELETE', body: any) => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('No hay sesión activa');
+    const res = await fetch('/api/usuarios', {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error en la operación');
+    return data;
+  };
+
+  const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nuevoEmailUsuario || !nuevoPassUsuario || !nuevoNombreUsuario.trim()) {
+      alert('Ingresa nombre, correo y contraseña');
+      return;
+    }
+    setGuardandoUsuario(true);
+    try {
+      await llamarApiUsuarios('POST', {
+        nombre: nuevoNombreUsuario.trim(),
+        email: nuevoEmailUsuario.trim().toLowerCase(),
+        password: nuevoPassUsuario,
+        rol: nuevoRolUsuario,
+      });
+      setNuevoEmailUsuario('');
+      setNuevoPassUsuario('');
+      setNuevoNombreUsuario('');
+      setNuevoRolUsuario('vendedor');
+      alert('¡Usuario registrado correctamente!');
+      await cargarUsuariosSistema();
+    } catch (error: any) {
+      console.error("Error al registrar usuario:", error);
+      alert('Error al registrar el usuario: ' + (error.message || ''));
+    } finally {
+      setGuardandoUsuario(false);
+    }
+  };
+
+  const cambiarEstadoUsuario = async (id: string, estadoActual: boolean) => {
+    try {
+      await llamarApiUsuarios('PATCH', { uid: id, activo: !estadoActual });
+      await cargarUsuariosSistema();
+    } catch (error: any) {
+      console.error("Error al cambiar estado:", error);
+      alert('No se pudo actualizar el estado: ' + (error.message || ''));
+    }
+  };
+
+  const eliminarUsuario = async (id: string, email: string) => {
+    if (!confirm(`¿Estás seguro de eliminar permanentemente a ${email}?\n\nEsta acción no se puede deshacer.`)) {
+      return;
+    }
+    try {
+      await llamarApiUsuarios('DELETE', { uid: id });
+      await cargarUsuariosSistema();
+      alert('Usuario eliminado correctamente');
+    } catch (error: any) {
+      console.error("Error al eliminar usuario:", error);
+      alert('No se pudo eliminar el usuario: ' + (error.message || ''));
+    }
+  };
 
   const hoy = new Date();
   const esHoy = (f: any) => {
@@ -161,18 +303,16 @@ export default function TiendaSS() {
   const ventasHoy = ventas.filter(v => esHoy(v.fecha));
   const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || 0), 0);
   const ticketsHoy = ventasHoy.length;
-  const ticketProm = ticketsHoy ? totalHoy / ticketsHoy : 0;
   const stockBajo = productos.filter(p => p.stock <= p.stockMinimo);
 
-  const porVendedor: { nombre: string; total: number; tickets: number }[] = [];
-  const mapV: Record<string, { nombre: string; total: number; tickets: number }> = {};
-  ventasHoy.forEach(v => {
-    const k = v.vendedorId || 'x';
-    if (!mapV[k]) mapV[k] = { nombre: v.vendedorNombre || 'Sin nombre', total: 0, tickets: 0 };
-    mapV[k].total += v.total || 0;
-    mapV[k].tickets++;
-  });
-  Object.values(mapV).sort((a, b) => b.total - a.total).forEach(x => porVendedor.push(x));
+  const utilidadHoy = ventasHoy.reduce((s, v) => {
+    const u = (v.items || []).reduce((s2: number, it: any) => {
+      const p = productos.find(pp => pp.id === it.id);
+      const costo = p ? p.costo : 0;
+      return s2 + (it.precio - costo) * it.cantidad;
+    }, 0);
+    return s + u;
+  }, 0);
 
   const porPago: Record<string, number> = {};
   ventasHoy.forEach(v => {
@@ -180,7 +320,20 @@ export default function TiendaSS() {
     porPago[m] = (porPago[m] || 0) + (v.total || 0);
   });
 
-  // Turno abierto del vendedor actual
+  const ventasPorMes = (() => {
+    const arr: { label: string; total: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      const total = ventas.filter(v => {
+        const f = v.fecha?.toDate ? v.fecha.toDate() : new Date(v.fecha || 0);
+        return f.getFullYear() === d.getFullYear() && f.getMonth() === d.getMonth();
+      }).reduce((s, v) => s + (v.total || 0), 0);
+      arr.push({ label: MESES[d.getMonth()], total });
+    }
+    return arr;
+  })();
+  const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
+
   const turnoAbierto = user?.rol === 'vendedor'
     ? turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto')
     : undefined;
@@ -189,6 +342,9 @@ export default function TiendaSS() {
     ? ventas.filter(v => v.turnoId === turnoAbierto.id && v.medioPago === 'Efectivo')
         .reduce((s, v) => s + (v.total || 0), 0)
     : 0;
+
+  const turnosAbiertosAhora = turnos.filter(t => t.estado === 'abierto');
+  const cierresConDiferencia = turnos.filter(t => t.estado === 'cerrado' && t.diferencia !== 0);
 
   const manejarLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -213,6 +369,7 @@ export default function TiendaSS() {
     await cerrarSesion();
     setCarrito([]);
     setUltimaVenta(null);
+    setMenuAbierto(false);
   };
 
   const agregarCarrito = (p: Producto) => {
@@ -393,6 +550,77 @@ export default function TiendaSS() {
     }
   };
 
+  const agregarItemCompra = () => {
+    const p = productos.find(x => x.id === prodSeleccionadoId);
+    if (!p) { alert('Elige un producto'); return; }
+    const cant = parseInt(cantCompraInput);
+    const costo = parseFloat(costoCompraInput);
+    if (!cant || cant <= 0) { alert('Cantidad inválida'); return; }
+    if (isNaN(costo) || costo < 0) { alert('Costo inválido'); return; }
+    setCompraItems([...compraItems, {
+      productoId: p.id, nombre: p.nombre, cantidad: cant, costoUnitario: costo, subtotal: cant * costo
+    }]);
+    setProdSeleccionadoId(''); setCantCompraInput(''); setCostoCompraInput('');
+  };
+
+  const quitarItemCompra = (idx: number) => {
+    setCompraItems(compraItems.filter((_, i) => i !== idx));
+  };
+
+  const totalCompra = compraItems.reduce((s, i) => s + i.subtotal, 0);
+
+  const registrarCompra = async () => {
+    if (compraItems.length === 0) { alert('Agrega al menos un producto'); return; }
+    try {
+      const data = {
+        proveedor: proveedorInput.trim() || 'Proveedor sin nombre',
+        fecha: serverTimestamp(),
+        items: compraItems,
+        total: totalCompra,
+        creadoPor: user?.nombre || '',
+      };
+      await addDoc(collection(db, 'compras'), data);
+
+      for (const item of compraItems) {
+        const p = productos.find(x => x.id === item.productoId);
+        if (!p) continue;
+        const nuevoStock = p.stock + item.cantidad;
+        const nuevoCosto = p.stock > 0
+          ? ((p.costo * p.stock) + (item.costoUnitario * item.cantidad)) / nuevoStock
+          : item.costoUnitario;
+        await updateDoc(doc(db, 'productos', item.productoId), {
+          stock: nuevoStock,
+          costo: nuevoCosto,
+        });
+      }
+
+      const ps = await getDocs(collection(db, 'productos'));
+      const lista: Producto[] = [];
+      ps.forEach(d => {
+        const x = d.data();
+        lista.push({
+          id: d.id, codigo: x.codigo || '', nombre: x.nombre || '', stock: x.stock || 0,
+          stockMinimo: x.stockMinimo ?? 5, precio: x.precio || 0, costo: x.costo || 0,
+          imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
+          categoria: x.categoria || 'Otros',
+        });
+      });
+      setProductos(lista);
+
+      const cs = await getDocs(collection(db, 'compras'));
+      const lc: Compra[] = [];
+      cs.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
+      setCompras(lc);
+
+      setProveedorInput('');
+      setCompraItems([]);
+      alert('Compra registrada. Stock y costo actualizados.');
+    } catch (e) {
+      console.error(e);
+      alert('Error al registrar la compra');
+    }
+  };
+
   const btnVolver = (
     <button onClick={volver} style={{
       background: '#1f2937', border: '1px solid #374151', borderRadius: 10,
@@ -442,202 +670,379 @@ export default function TiendaSS() {
     );
   }
 
-  // ========== JEFE HOME ==========
+  // ========== PANEL DEL JEFE (nuevo, con menú tipo sidebar) ==========
   if (vista === 'jefe_home') {
+    const seleccionar = (item: typeof MENU_ITEMS[number]) => {
+      if (item.proximamente) {
+        setProximamenteNombre(item.label);
+        setJefeSeccion('proximamente');
+      } else {
+        setJefeSeccion(item.key as JefeSeccion);
+      }
+      setMenuAbierto(false);
+    };
+
     return (
-      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {historial.length > 0 && btnVolver}
-              <div>
-                <h1 style={{ fontSize: 16, fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Centro de control</h1>
-                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre}</p>
-              </div>
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif' }}>
+        {/* Encabezado */}
+        <div style={{ position: 'sticky', top: 0, zIndex: 20, background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => setMenuAbierto(true)} style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 10, width: 36, height: 36, color: '#fff', fontSize: 16, cursor: 'pointer' }}>☰</button>
+            <div>
+              <p style={{ fontSize: 15, fontWeight: 800, color: '#f87171', margin: 0 }}>⚡ Panel del Jefe</p>
+              <p style={{ fontSize: 10, color: '#9ca3af', margin: 0 }}>{user.nombre}</p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: 9, color: '#9ca3af', margin: 0 }}>Hoy</p>
+              <p style={{ fontSize: 13, fontWeight: 800, color: '#34d399', margin: 0 }}>${totalHoy.toLocaleString()}</p>
             </div>
             {btnCerrar}
           </div>
+        </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-              <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Ventas hoy</p>
-              <p style={{ fontSize: 22, fontWeight: 800, color: '#34d399', margin: '4px 0 0' }}>${totalHoy.toLocaleString()}</p>
-            </div>
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-              <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Tickets</p>
-              <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0' }}>{ticketsHoy}</p>
-            </div>
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-              <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Ticket prom.</p>
-              <p style={{ fontSize: 22, fontWeight: 800, color: '#818cf8', margin: '4px 0 0' }}>${ticketProm.toFixed(0)}</p>
-            </div>
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-              <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Stock bajo</p>
-              <p style={{ fontSize: 22, fontWeight: 800, color: stockBajo.length ? '#f87171' : '#34d399', margin: '4px 0 0' }}>{stockBajo.length}</p>
+        {/* Menú deslizable */}
+        {menuAbierto && (
+          <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 30, display: 'flex' }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: 260, background: '#111827', borderRight: '1px solid #1f2937', height: '100%', padding: 16, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <p style={{ fontWeight: 800, fontSize: 15, margin: 0 }}>Tienda-SS</p>
+                <button onClick={() => setMenuAbierto(false)} style={{ background: 'transparent', border: 'none', color: '#9ca3af', fontSize: 18, cursor: 'pointer' }}>✕</button>
+              </div>
+              {MENU_ITEMS.map(item => (
+                <button key={item.key} onClick={() => seleccionar(item)}
+                  style={{
+                    width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10,
+                    background: jefeSeccion === item.key ? '#1e1b4b' : 'transparent',
+                    border: 'none', borderRadius: 10, padding: '10px 12px', marginBottom: 4,
+                    color: item.proximamente ? '#6b7280' : '#f3f4f6', fontSize: 13, fontWeight: 600, cursor: 'pointer'
+                  }}>
+                  <span>{item.icon}</span>
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.proximamente && <span style={{ fontSize: 9, color: '#6b7280' }}>Próx.</span>}
+                </button>
+              ))}
             </div>
           </div>
+        )}
 
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-            <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>👥 Ventas por vendedor</p>
-            {porVendedor.length === 0 ? (
-              <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin ventas hoy.</p>
-            ) : porVendedor.map((v, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1f2937' }}>
-                <div>
-                  <span style={{ fontWeight: 700 }}>{v.nombre}</span>
-                  <span style={{ display: 'block', fontSize: 11, color: '#9ca3af' }}>{v.tickets} ticket(s)</span>
+        {/* Contenido */}
+        <div style={{ padding: 12, maxWidth: 600, margin: '0 auto' }}>
+
+          {jefeSeccion === 'inicio' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Ventas hoy</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: '#34d399', margin: '4px 0 0' }}>${totalHoy.toLocaleString()}</p>
                 </div>
-                <span style={{ fontWeight: 800, color: '#34d399' }}>${v.total.toLocaleString()}</span>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Utilidad hoy</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: '#818cf8', margin: '4px 0 0' }}>${utilidadHoy.toFixed(0)}</p>
+                </div>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Stock bajo</p>
+                  <p style={{ fontSize: 20, fontWeight: 800, color: stockBajo.length ? '#f87171' : '#34d399', margin: '4px 0 0' }}>{stockBajo.length}</p>
+                </div>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Cobros pendientes</p>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: '#6b7280', margin: '4px 0 0' }}>Próximamente</p>
+                </div>
               </div>
-            ))}
-          </div>
 
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-            <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>💳 Por forma de pago</p>
-            {Object.keys(porPago).length === 0 ? (
-              <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin datos</p>
-            ) : Object.entries(porPago).map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13 }}>
-                <span>{k}</span>
-                <span style={{ fontWeight: 700, color: '#818cf8' }}>${v.toLocaleString()}</span>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 12px' }}>📊 Ventas de los últimos 6 meses</p>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 100 }}>
+                  {ventasPorMes.map((m, i) => (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <div style={{ width: '100%', height: `${Math.max(4, (m.total / maxMes) * 90)}px`, background: '#4f46e5', borderRadius: 4 }} />
+                      <span style={{ fontSize: 9, color: '#9ca3af' }}>{m.label}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
 
-          {stockBajo.length > 0 && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: 12 }}>
-              <p style={{ fontSize: 13, fontWeight: 700, color: '#f87171', margin: '0 0 8px' }}>⚠️ Stock bajo</p>
-              {stockBajo.slice(0, 5).map(p => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
-                  <span>{p.nombre}</span>
-                  <span style={{ color: '#f87171', fontWeight: 700 }}>{p.stock}/{p.stockMinimo}</span>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>⚠️ Alertas</p>
+                {stockBajo.length === 0 && cierresConDiferencia.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin alertas por ahora.</p>
+                ) : (
+                  <>
+                    {stockBajo.slice(0, 4).map(p => (
+                      <p key={p.id} style={{ fontSize: 12, color: '#f87171', margin: '4px 0' }}>📦 {p.nombre}: quedan {p.stock} (mín. {p.stockMinimo})</p>
+                    ))}
+                    {cierresConDiferencia.slice(0, 3).map(t => (
+                      <p key={t.id} style={{ fontSize: 12, color: '#f87171', margin: '4px 0' }}>💰 Caja de {t.vendedorNombre} no cuadró: ${t.diferencia?.toFixed(0)}</p>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button onClick={() => setJefeSeccion('ventas')} style={{ background: '#0c4a6e', border: '1px solid #0ea5e9', borderRadius: 12, padding: 14, color: '#7dd3fc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>🧾 Ver ventas</button>
+                <button onClick={() => setJefeSeccion('inventario')} style={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 12, padding: 14, color: '#a5b4fc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>📦 Inventario</button>
+                <button onClick={() => setJefeSeccion('compras')} style={{ background: '#052e2b', border: '1px solid #0d9488', borderRadius: 12, padding: 14, color: '#5eead4', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>🚚 Nueva compra</button>
+                <button onClick={() => setJefeSeccion('cajas')} style={{ background: '#3f1d0f', border: '1px solid #ea580c', borderRadius: 12, padding: 14, color: '#fdba74', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>💰 Cierres de caja</button>
+              </div>
+
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>🕒 Movimientos recientes</p>
+                {ventas.slice().reverse().slice(0, 5).map(v => (
+                  <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #1f2937', fontSize: 12 }}>
+                    <span>{v.vendedorNombre} · {v.medioPago}</span>
+                    <span style={{ color: '#34d399', fontWeight: 700 }}>${(v.total || 0).toLocaleString()}</span>
+                  </div>
+                ))}
+                {ventas.length === 0 && <p style={{ fontSize: 12, color: '#9ca3af' }}>Sin movimientos todavía.</p>}
+              </div>
+
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 10px' }}>🗄️ Cajas abiertas ahora</p>
+                {turnosAbiertosAhora.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#9ca3af' }}>Ninguna caja abierta.</p>
+                ) : turnosAbiertosAhora.map(t => (
+                  <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 12 }}>
+                    <span>{t.vendedorNombre}</span>
+                    <span>Inicial: ${t.montoInicial.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {jefeSeccion === 'ventas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧾 Ventas del día</p>
+              <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{ticketsHoy} tickets · ${totalHoy.toLocaleString()}</p>
+              {Object.keys(porPago).length > 0 && (
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, margin: '0 0 8px' }}>💳 Por forma de pago</p>
+                  {Object.entries(porPago).map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+                      <span>{k}</span><span style={{ fontWeight: 700, color: '#818cf8' }}>${v.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {ventasHoy.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>No hay ventas hoy</p>
+              ) : ventasHoy.slice().reverse().map(v => (
+                <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700 }}>{v.vendedorNombre || '—'}</span>
+                    <span style={{ fontWeight: 800, color: '#34d399' }}>${(v.total || 0).toLocaleString()}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>{v.medioPago} · {(v.items || []).length} producto(s)</p>
                 </div>
               ))}
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <button onClick={() => irA('jefe_ventas')} style={{ background: '#0c4a6e', border: '1px solid #0ea5e9', borderRadius: 12, padding: 14, color: '#7dd3fc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              🧾 Ver ventas
-            </button>
-            <button onClick={() => irA('jefe_inventario')} style={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 12, padding: 14, color: '#a5b4fc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-              📦 Inventario
-            </button>
-          </div>
-          <button onClick={() => irA('jefe_cajas')} style={{ background: '#3f1d0f', border: '1px solid #ea580c', borderRadius: 12, padding: 14, color: '#fdba74', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            💰 Cierres de caja
-          </button>
-        </div>
-      </div>
-    );
-  }
+          {jefeSeccion === 'inventario' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>📦 Inventario</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Valor a costo</p>
+                  <p style={{ fontSize: 16, fontWeight: 800, color: '#fbbf24', margin: '4px 0 0' }}>${productos.reduce((s, p) => s + p.costo * p.stock, 0).toLocaleString()}</p>
+                </div>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Valor a venta</p>
+                  <p style={{ fontSize: 16, fontWeight: 800, color: '#34d399', margin: '4px 0 0' }}>${productos.reduce((s, p) => s + p.precio * p.stock, 0).toLocaleString()}</p>
+                </div>
+              </div>
+              {productos.map(p => (
+                <div key={p.id} style={{ background: '#111827', border: `1px solid ${p.stock <= p.stockMinimo ? 'rgba(239,68,68,0.4)' : '#1f2937'}`, borderRadius: 14, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <div>
+                    <p style={{ fontWeight: 700, margin: 0 }}>{p.nombre}</p>
+                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>Venta ${p.precio} · Costo ${p.costo.toFixed(2)} · Mín {p.stockMinimo}</p>
+                    <p style={{ fontSize: 11, color: '#818cf8', margin: '2px 0 0' }}>Margen: ${(p.precio - p.costo).toFixed(2)}/u</p>
+                  </div>
+                  <span style={{ fontWeight: 800, color: p.stock <= p.stockMinimo ? '#f87171' : '#34d399' }}>{p.stock} un</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-  // ========== JEFE VENTAS ==========
-  if (vista === 'jefe_ventas') {
-    return (
-      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {btnVolver}
-              <div>
-                <h1 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧾 Ventas del día</h1>
-                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{ticketsHoy} tickets · ${totalHoy.toLocaleString()}</p>
+          {jefeSeccion === 'compras' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🚚 Registrar compra</p>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Proveedor</p>
+                <input placeholder="Nombre del proveedor" value={proveedorInput} onChange={e => setProveedorInput(e.target.value)}
+                  style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
               </div>
-            </div>
-            {btnCerrar}
-          </div>
-          {ventasHoy.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>No hay ventas hoy</p>
-          ) : ventasHoy.slice().reverse().map(v => (
-            <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontWeight: 700 }}>{v.vendedorNombre || '—'}</span>
-                <span style={{ fontWeight: 800, color: '#34d399' }}>${(v.total || 0).toLocaleString()}</span>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>Agregar producto</p>
+                <select value={prodSeleccionadoId} onChange={e => setProdSeleccionadoId(e.target.value)}
+                  style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }}>
+                  <option value="">Selecciona un producto...</option>
+                  {productos.map(p => (<option key={p.id} value={p.id}>{p.nombre} (stock: {p.stock})</option>))}
+                </select>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <input type="number" placeholder="Cantidad" value={cantCompraInput} onChange={e => setCantCompraInput(e.target.value)}
+                    style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
+                  <input type="number" placeholder="Costo unitario" value={costoCompraInput} onChange={e => setCostoCompraInput(e.target.value)}
+                    style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
+                </div>
+                <button onClick={agregarItemCompra} style={{ background: '#0d9488', color: '#fff', border: 'none', padding: 10, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Agregar a la compra</button>
               </div>
-              <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>
-                {v.medioPago} · {(v.items || []).length} producto(s)
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ========== JEFE INVENTARIO ==========
-  if (vista === 'jefe_inventario') {
-    return (
-      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {btnVolver}
-              <div>
-                <h1 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>📦 Inventario</h1>
-                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{productos.length} productos</p>
-              </div>
-            </div>
-            {btnCerrar}
-          </div>
-          {productos.map(p => (
-            <div key={p.id} style={{ background: '#111827', border: `1px solid ${p.stock <= p.stockMinimo ? 'rgba(239,68,68,0.4)' : '#1f2937'}`, borderRadius: 14, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
-              <div>
-                <p style={{ fontWeight: 700, margin: 0 }}>{p.nombre}</p>
-                <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>${p.precio} · Mín {p.stockMinimo}</p>
-              </div>
-              <span style={{ fontWeight: 800, color: p.stock <= p.stockMinimo ? '#f87171' : '#34d399' }}>{p.stock} un</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // ========== JEFE CIERRES DE CAJA ==========
-  if (vista === 'jefe_cajas') {
-    const turnosOrdenados = turnos.slice().sort((a, b) => {
-      const fa = a.fechaApertura?.toDate ? a.fechaApertura.toDate() : new Date(a.fechaApertura || 0);
-      const fb = b.fechaApertura?.toDate ? b.fechaApertura.toDate() : new Date(b.fechaApertura || 0);
-      return fb.getTime() - fa.getTime();
-    });
-    return (
-      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {btnVolver}
-              <div>
-                <h1 style={{ fontSize: 15, fontWeight: 800, color: '#fdba74', margin: 0 }}>💰 Cierres de caja</h1>
-                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{turnosOrdenados.length} turno(s)</p>
-              </div>
-            </div>
-            {btnCerrar}
-          </div>
-          {turnosOrdenados.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay turnos registrados</p>
-          ) : turnosOrdenados.map(t => (
-            <div key={t.id} style={{ background: '#111827', border: `1px solid ${t.estado === 'cerrado' && t.diferencia !== 0 ? 'rgba(239,68,68,0.4)' : '#1f2937'}`, borderRadius: 14, padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontWeight: 700 }}>{t.vendedorNombre}</span>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                  background: t.estado === 'abierto' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)',
-                  color: t.estado === 'abierto' ? '#60a5fa' : '#34d399'
-                }}>{t.estado === 'abierto' ? 'Abierta' : 'Cerrada'}</span>
-              </div>
-              <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Monto inicial: ${t.montoInicial?.toLocaleString()}</p>
-              {t.estado === 'cerrado' && (
-                <>
-                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Ventas efectivo: ${t.totalVentasEfectivo?.toLocaleString()}</p>
-                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Esperado: ${t.totalEsperado?.toLocaleString()} · Contado: ${t.montoContado?.toLocaleString()}</p>
-                  <p style={{ fontSize: 13, fontWeight: 800, margin: '6px 0 0', color: t.diferencia === 0 ? '#34d399' : '#f87171' }}>
-                    Diferencia: ${t.diferencia?.toLocaleString()}
-                  </p>
-                </>
+              {compraItems.length > 0 && (
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
+                  {compraItems.map((it, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 13 }}>
+                      <span>{it.nombre} x{it.cantidad} (${it.costoUnitario} c/u)</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: '#34d399', fontWeight: 700 }}>${it.subtotal.toFixed(0)}</span>
+                        <button onClick={() => quitarItemCompra(idx)} style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none', width: 24, height: 24, borderRadius: 4, cursor: 'pointer' }}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16 }}>
+                    <span>Total</span><span>${totalCompra.toFixed(0)}</span>
+                  </div>
+                  <button onClick={registrarCompra} style={{ width: '100%', marginTop: 10, background: '#10b981', color: '#030712', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                    ✅ Registrar compra
+                  </button>
+                </div>
+              )}
+              {compras.length > 0 && (
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: '#a5b4fc', margin: '0 0 10px' }}>Historial de compras</p>
+                  {compras.slice().reverse().slice(0, 10).map(c => (
+                    <div key={c.id} style={{ borderBottom: '1px solid #1f2937', paddingBottom: 8, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>{c.proveedor}</span>
+                        <span style={{ color: '#34d399', fontWeight: 700 }}>${(c.total || 0).toLocaleString()}</span>
+                      </div>
+                      <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>Por {c.creadoPor}</p>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-          ))}
+          )}
+
+          {jefeSeccion === 'cajas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>💰 Cierres de caja</p>
+              {turnos.slice().sort((a, b) => {
+                const fa = a.fechaApertura?.toDate ? a.fechaApertura.toDate() : new Date(a.fechaApertura || 0);
+                const fb = b.fechaApertura?.toDate ? b.fechaApertura.toDate() : new Date(b.fechaApertura || 0);
+                return fb.getTime() - fa.getTime();
+              }).map(t => (
+                <div key={t.id} style={{ background: '#111827', border: `1px solid ${t.estado === 'cerrado' && t.diferencia !== 0 ? 'rgba(239,68,68,0.4)' : '#1f2937'}`, borderRadius: 14, padding: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700 }}>{t.vendedorNombre}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: t.estado === 'abierto' ? 'rgba(59,130,246,0.15)' : 'rgba(16,185,129,0.15)', color: t.estado === 'abierto' ? '#60a5fa' : '#34d399' }}>
+                      {t.estado === 'abierto' ? 'Abierta' : 'Cerrada'}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Inicial: ${t.montoInicial?.toLocaleString()}</p>
+                  {t.estado === 'cerrado' && (
+                    <p style={{ fontSize: 13, fontWeight: 800, margin: '6px 0 0', color: t.diferencia === 0 ? '#34d399' : '#f87171' }}>
+                      Diferencia: ${t.diferencia?.toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              ))}
+              {turnos.length === 0 && <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay turnos registrados</p>}
+            </div>
+          )}
+
+          {jefeSeccion === 'usuarios' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧑‍💼 Gestión de Usuarios</p>
+
+              {/* Formulario para registrar un nuevo usuario */}
+              <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar nuevo empleado</p>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Nombre completo</label>
+                  <input type="text" value={nuevoNombreUsuario} onChange={e => setNuevoNombreUsuario(e.target.value)} required
+                    placeholder="Ej: Carlos Pérez"
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Correo electrónico</label>
+                  <input type="email" value={nuevoEmailUsuario} onChange={e => setNuevoEmailUsuario(e.target.value)} required
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Contraseña</label>
+                  <input type="password" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)} required
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Rol asignado</label>
+                  <select value={nuevoRolUsuario} onChange={e => setNuevoRolUsuario(e.target.value)}
+                    style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}>
+                    <option value="vendedor">Vendedor</option>
+                    <option value="bodega">Bodega</option>
+                    <option value="chofer">Chofer</option>
+                    <option value="jefe">Jefe</option>
+                  </select>
+                </div>
+                <button type="submit" disabled={guardandoUsuario} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: guardandoUsuario ? 'not-allowed' : 'pointer', marginTop: 4, opacity: guardandoUsuario ? 0.7 : 1 }}>
+                  {guardandoUsuario ? 'Guardando...' : 'Guardar Empleado'}
+                </button>
+              </form>
+
+              {/* Lista de usuarios registrados */}
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#a5b4fc', margin: '0 0 10px' }}>Empleados Registrados</p>
+                {usuariosSistema.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#9ca3af', padding: 10 }}>No hay usuarios en la base de datos</p>
+                ) : (
+                  usuariosSistema.map(u => {
+                    const estaActivo = u.activo !== false;
+                    return (
+                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f2937', paddingBottom: 10, marginBottom: 10, gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{u.nombre || u.email}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+                            {u.email}
+                          </p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+                            Rol: <span style={{ textTransform: 'uppercase', color: '#facc15' }}>{u.rol}</span> · Estado: <span style={{ color: estaActivo ? '#34d399' : '#f87171', fontWeight: 700 }}>{estaActivo ? 'Activo' : 'Inactivo'}</span>
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <button onClick={() => cambiarEstadoUsuario(u.id, estaActivo)}
+                            style={{
+                              background: estaActivo ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)',
+                              color: estaActivo ? '#f87171' : '#34d399',
+                              border: `1px solid ${estaActivo ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                              padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
+                            }}>
+                            {estaActivo ? 'Desactivar' : 'Activar'}
+                          </button>
+                          <button onClick={() => eliminarUsuario(u.id, u.email)}
+                            style={{
+                              background: 'rgba(239,68,68,0.25)',
+                              color: '#fca5a5',
+                              border: '1px solid rgba(239,68,68,0.5)',
+                              padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
+                            }}>
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {jefeSeccion === 'proximamente' && (
+            <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+              <p style={{ fontSize: 40, margin: '0 0 12px' }}>🚧</p>
+              <p style={{ fontSize: 16, fontWeight: 800, margin: '0 0 6px' }}>{proximamenteNombre}</p>
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Este módulo está en construcción. Lo vamos a agregar en un próximo paso.</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -840,7 +1245,7 @@ export default function TiendaSS() {
     );
   }
 
-  // ========== BODEGA ==========
+  // ========== BODEGA HOME ==========
   if (vista === 'bodega_home') {
     const filtrados = productos.filter(p =>
       p.nombre.toLowerCase().includes(busquedaBod.toLowerCase())
@@ -857,6 +1262,15 @@ export default function TiendaSS() {
               </div>
             </div>
             {btnCerrar}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <button onClick={() => irA('bodega_compra')} style={{ background: '#052e2b', border: '1px solid #0d9488', borderRadius: 12, padding: 14, color: '#5eead4', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              🚚 Nueva compra
+            </button>
+            <button onClick={() => irA('bodega_historial_compras')} style={{ background: '#1e1b4b', border: '1px solid #4f46e5', borderRadius: 12, padding: 14, color: '#a5b4fc', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              📋 Historial compras
+            </button>
           </div>
 
           <form onSubmit={guardarProducto} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -882,7 +1296,7 @@ export default function TiendaSS() {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div>
                   <p style={{ fontWeight: 700, margin: 0 }}>{p.nombre}</p>
-                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>${p.precio} · Mín {p.stockMinimo}</p>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0 0' }}>Venta ${p.precio} · Costo ${p.costo.toFixed(2)} · Mín {p.stockMinimo}</p>
                 </div>
                 <span style={{ fontWeight: 800, color: p.stock <= p.stockMinimo ? '#f87171' : '#34d399' }}>{p.stock}</span>
               </div>
@@ -905,6 +1319,108 @@ export default function TiendaSS() {
                   <button onClick={aplicarAjuste} style={{ background: '#059669', color: '#fff', border: 'none', padding: 8, borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>Aplicar</button>
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ========== BODEGA: NUEVA COMPRA ==========
+  if (vista === 'bodega_compra') {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {btnVolver}
+              <h1 style={{ fontSize: 15, fontWeight: 800, color: '#5eead4', margin: 0 }}>🚚 Nueva compra</h1>
+            </div>
+            {btnCerrar}
+          </div>
+
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Proveedor</p>
+            <input placeholder="Nombre del proveedor" value={proveedorInput} onChange={e => setProveedorInput(e.target.value)}
+              style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
+          </div>
+
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>Agregar producto a la compra</p>
+            <select value={prodSeleccionadoId} onChange={e => setProdSeleccionadoId(e.target.value)}
+              style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }}>
+              <option value="">Selecciona un producto...</option>
+              {productos.map(p => (
+                <option key={p.id} value={p.id}>{p.nombre} (stock actual: {p.stock})</option>
+              ))}
+            </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <input type="number" placeholder="Cantidad comprada" value={cantCompraInput} onChange={e => setCantCompraInput(e.target.value)}
+                style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
+              <input type="number" placeholder="Costo unitario" value={costoCompraInput} onChange={e => setCostoCompraInput(e.target.value)}
+                style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
+            </div>
+            <button onClick={agregarItemCompra} style={{ background: '#0d9488', color: '#fff', border: 'none', padding: 10, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>
+              Agregar a la compra
+            </button>
+          </div>
+
+          {compraItems.length > 0 && (
+            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#facc15', margin: '0 0 10px' }}>Productos en esta compra</p>
+              {compraItems.map((it, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 13 }}>
+                  <span>{it.nombre} x{it.cantidad} (${it.costoUnitario} c/u)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#34d399', fontWeight: 700 }}>${it.subtotal.toFixed(0)}</span>
+                    <button onClick={() => quitarItemCompra(idx)} style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none', width: 24, height: 24, borderRadius: 4, cursor: 'pointer' }}>✕</button>
+                  </div>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 16 }}>
+                <span>Total compra</span><span>${totalCompra.toFixed(0)}</span>
+              </div>
+              <button onClick={registrarCompra} style={{ width: '100%', marginTop: 10, background: '#10b981', color: '#030712', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                ✅ Registrar compra y actualizar stock/costo
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ========== BODEGA: HISTORIAL COMPRAS ==========
+  if (vista === 'bodega_historial_compras') {
+    const comprasOrdenadas = compras.slice().sort((a, b) => {
+      const fa = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha || 0);
+      const fb = b.fecha?.toDate ? b.fecha.toDate() : new Date(b.fecha || 0);
+      return fb.getTime() - fa.getTime();
+    });
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {btnVolver}
+              <h1 style={{ fontSize: 15, fontWeight: 800, color: '#a5b4fc', margin: 0 }}>📋 Historial de compras</h1>
+            </div>
+            {btnCerrar}
+          </div>
+          {comprasOrdenadas.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay compras registradas</p>
+          ) : comprasOrdenadas.map(c => (
+            <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>{c.proveedor}</span>
+                <span style={{ fontWeight: 800, color: '#34d399' }}>${(c.total || 0).toLocaleString()}</span>
+              </div>
+              {(c.items || []).map((it, i) => (
+                <p key={i} style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>
+                  {it.nombre} x{it.cantidad} · ${it.costoUnitario}/u
+                </p>
+              ))}
+              <p style={{ fontSize: 11, color: '#6b7280', margin: '6px 0 0' }}>Registrado por: {c.creadoPor}</p>
             </div>
           ))}
         </div>

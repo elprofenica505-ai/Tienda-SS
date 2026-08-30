@@ -34,8 +34,8 @@ export async function obtenerPerfil(uid: string): Promise<Usuario> {
   const data = snap.data();
   return {
     id: uid,
-    email: data.email,
-    nombre: data.nombre,
+    email: data.email || "",
+    nombre: data.nombre || data.email || "Sin nombre",
     rol: data.rol,
     activo: data.activo !== false,
   };
@@ -47,7 +47,10 @@ export function cerrarSesion() {
 
 export function escucharSesion(callback: (usuario: Usuario | null) => void) {
   return onAuthStateChanged(auth, async (fbUser: FirebaseUser | null) => {
-    if (!fbUser) { callback(null); return; }
+    if (!fbUser) {
+      callback(null);
+      return;
+    }
     try {
       const perfil = await obtenerPerfil(fbUser.uid);
       callback(perfil);
