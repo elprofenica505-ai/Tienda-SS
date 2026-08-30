@@ -1,16 +1,24 @@
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import * as admin from 'firebase-admin';
 
-function getServiceAccount() {
+function getFirebaseAdminApp() {
+  if (admin.apps.length > 0) {
+    return admin.apps[0];
+  }
+
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  if (!raw) throw new Error("Falta la variable FIREBASE_SERVICE_ACCOUNT_KEY");
-  return JSON.parse(raw);
+  if (!raw) {
+    // Durante el build de Vercel si no está disponible todavía, evitamos que rompa
+    throw new Error("Falta la variable FIREBASE_SERVICE_ACCOUNT_KEY");
+  }
+
+  const serviceAccount = JSON.parse(raw);
+
+  return admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
 }
 
-const app = getApps().length === 0
-  ? initializeApp({ credential: cert(getServiceAccount()) })
-  : getApps()[0];
+const app = getFirebaseAdminApp();
 
-export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app);
+export const adminAuth = admin.auth(app);
+export const adminDb = admin.firestore(app);
