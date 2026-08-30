@@ -43,6 +43,7 @@ export default function ProductosAdmin() {
   const [mostrarModalCategorias, setMostrarModalCategorias] = useState(false);
 
   useEffect(() => {
+    // 1. Escuchar productos
     const unsubscribeProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
       const lista: Producto[] = snapshot.docs.map((docItem) => ({
         id: docItem.id,
@@ -51,6 +52,7 @@ export default function ProductosAdmin() {
       setProductos(lista);
     });
 
+    // 2. Escuchar categorías y asegurar iniciales si está vacío
     const unsubscribeCategorias = onSnapshot(collection(db, 'categorias'), async (snapshot) => {
       if (snapshot.empty) {
         for (const catInicial of CATEGORIAS_INICIALES) {
@@ -78,6 +80,69 @@ export default function ProductosAdmin() {
     };
   }, []);
 
+  // Combinar categorías de Firestore + las usadas en productos existentes (para que ninguna se pierda)
+  const categoriasDeProductos = productos.map((p) => p.categoria).filter(Boolean);
+  const todasLasCategoriasMap = new Map<string, string>();
+  
+  // Agregar primero las de Firestore
+  categoriasObjs.forEach((c) => todasLasCategoriasMap.set(c.nombre.toLowerCase(), c.nombre));
+  // Agregar las de los productos activos por si acaso no estaban en la colección
+  categoriasDeProductos.forEach((cat) => {
+    if (!todasLasCategoriasMap.has(cat.toLowerCase())) {
+      todasLasCategoriasMap.set(cat.toLowerCase(), cat);
+    }
+  });
+
+  const listaCategoriasFinal = Array.from(todasLasCategoriasMap.values()).sort();
+
+  // Función para comprimir imagen a menos de 1MB
+  const procesarYComprimirImagen = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 500;
+        const MAX_HEIGHT = 500;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        // Calidad 0.7 asegura un peso inferior a 1MB optimizado para Firestore
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setImagen(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleTomarFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) procesarYComprimirImagen(file);
+  };
+
+  const handleCargarGaleria = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) procesarYComprimirImagen(file);
+  };
+
   const generarCodigoUnico = async () => {
     const codigosExistentes = new Set(productos.map((p) => p.codigo));
     try {
@@ -101,45 +166,6 @@ export default function ProductosAdmin() {
     setCodigo(nuevoCodigo);
   };
 
-  const handleImagenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 400;
-        const MAX_HEIGHT = 400;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-        setImagen(dataUrl);
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let categoriaFinal = categoriaSeleccionada;
@@ -151,10 +177,10 @@ export default function ProductosAdmin() {
       }
       categoriaFinal = nuevaCategoriaInput.trim();
       try {
-        const existe = categoriasObjs.some(
+        const existeEnDb = categoriasObjs.some(
           (c) => c.nombre.toLowerCase() === categoriaFinal.toLowerCase()
         );
-        if (!existe) {
+        if (!existeEnDb) {
           await addDoc(collection(db, 'categorias'), { nombre: categoriaFinal });
         }
       } catch (err) {
@@ -190,7 +216,7 @@ export default function ProductosAdmin() {
       setStock('');
       setImagen('');
       setNuevaCategoriaInput('');
-      setCategoriaSeleccionada(categoriasObjs[0]?.nombre || 'Abarrotes');
+      setCategoriaSeleccionada(listaCategoriasFinal[0] || 'Abarrotes');
       alert('¡Producto registrado con éxito!');
     } catch (error: any) {
       console.error('Error al agregar producto:', error);
@@ -206,13 +232,20 @@ export default function ProductosAdmin() {
     }
   };
 
-  const eliminarCategoria = async (catId: string, nombreCat: string) => {
-    if (confirm(`¿Eliminar la categoría "${nombreCat}"? Ya no aparecerá en el menú de categorías.`)) {
+  // Función para borrar categoría de Firestore
+  const eliminarCategoria = async (nombreCat: string) => {
+    if (confirm(`¿Estás seguro de eliminar la categoría "${nombreCat}"?`)) {
       try {
-        await deleteDoc(doc(db, 'categorias', catId));
+        // Buscar si existe en la colección de categorías de Firestore para borrarla
+        const catEncontrada = categoriasObjs.find(
+          (c) => c.nombre.toLowerCase() === nombreCat.toLowerCase()
+        );
+        if (catEncontrada) {
+          await deleteDoc(doc(db, 'categorias', catEncontrada.id));
+        }
+        alert(`Categoría "${nombreCat}" eliminada con éxito.`);
         if (categoriaSeleccionada === nombreCat) {
-          const restantes = categoriasObjs.filter((c) => c.id !== catId);
-          setCategoriaSeleccionada(restantes[0]?.nombre || '');
+          setCategoriaSeleccionada('Abarrotes');
         }
       } catch (error) {
         console.error('Error al eliminar categoría:', error);
@@ -226,6 +259,7 @@ export default function ProductosAdmin() {
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '480px', margin: '0 auto' }}>
       
+      {/* Tarjetas Superiores */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
           <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '4px', textTransform: 'uppercase' }}>Valor a costo</p>
@@ -237,6 +271,7 @@ export default function ProductosAdmin() {
         </div>
       </div>
 
+      {/* Formulario de Registro */}
       <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
           <span style={{ fontSize: '18px' }}>📦</span>
@@ -248,10 +283,10 @@ export default function ProductosAdmin() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
-          {/* Fotografía - Selector libre habilitado para Cámara o Galería */}
+          {/* FOTO: Dos botones separados (Cámara y Galería) */}
           <div>
-            <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>Fotografía del producto</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>Fotografía del producto (Comprimida automáticamente)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '56px', height: '56px', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
                 {imagen ? (
                   <img src={imagen} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -259,15 +294,31 @@ export default function ProductosAdmin() {
                   <span style={{ fontSize: '20px' }}>📷</span>
                 )}
               </div>
-              <label style={{ flex: 1, backgroundColor: '#1f2937', color: '#ffffff', textAlign: 'center', padding: '10px', borderRadius: '10px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', border: '1px solid #374151' }}>
-                Tomar foto / Cargar archivo
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImagenChange}
-                  style={{ display: 'none' }}
-                />
-              </label>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                {/* Botón 1: Cámara */}
+                <label style={{ backgroundColor: '#1f2937', color: '#34d399', textAlign: 'center', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', border: '1px solid #374151' }}>
+                  📸 Tomar foto con cámara
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleTomarFoto}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+
+                {/* Botón 2: Galería */}
+                <label style={{ backgroundColor: '#1f2937', color: '#ffffff', textAlign: 'center', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: '500', cursor: 'pointer', border: '1px solid #374151' }}>
+                  📁 Cargar desde galería
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleCargarGaleria}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
             </div>
           </div>
 
@@ -330,6 +381,7 @@ export default function ProductosAdmin() {
             </div>
           </div>
 
+          {/* Selector de Categoría + Botón Gestionar */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label style={{ fontSize: '11px', color: '#9ca3af' }}>Categoría</label>
@@ -347,36 +399,33 @@ export default function ProductosAdmin() {
               onChange={(e) => setCategoriaSeleccionada(e.target.value)}
               style={{ width: '100%', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', padding: '10px', color: '#ffffff', fontSize: '13px', outline: 'none' }}
             >
-              {categoriasObjs.map((cat) => (
-                <option key={cat.id} value={cat.nombre} style={{ backgroundColor: '#111827', color: '#ffffff' }}>
-                  {cat.nombre}
+              {listaCategoriasFinal.map((cat, idx) => (
+                <option key={idx} value={cat} style={{ backgroundColor: '#111827', color: '#ffffff' }}>
+                  {cat}
                 </option>
               ))}
               <option value="NUEVA" style={{ backgroundColor: '#111827', color: '#34d399' }}>➕ Agregar nueva categoría...</option>
             </select>
           </div>
 
+          {/* Panel de Gestión y Borrado de Categorías */}
           {mostrarModalCategorias && (
             <div style={{ backgroundColor: '#030712', border: '1px solid #374151', padding: '12px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Lista completa de categorías activas:</p>
-              {categoriasObjs.length === 0 ? (
-                <p style={{ fontSize: '11px', color: '#6b7280', margin: 0 }}>No hay categorías registradas.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-                  {categoriasObjs.map((cat) => (
-                    <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: '6px 10px', borderRadius: '8px' }}>
-                      <span style={{ fontSize: '12px', color: '#ffffff' }}>{cat.nombre}</span>
-                      <button
-                        type="button"
-                        onClick={() => eliminarCategoria(cat.id, cat.nombre)}
-                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
-                      >
-                        🗑️ Borrar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Categorías disponibles (Con botón de borrar):</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
+                {listaCategoriasFinal.map((cat, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: '6px 10px', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '12px', color: '#ffffff' }}>{cat}</span>
+                    <button
+                      type="button"
+                      onClick={() => eliminarCategoria(cat)}
+                      style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      🗑️ Borrar
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -403,6 +452,7 @@ export default function ProductosAdmin() {
         </form>
       </div>
 
+      {/* Lista de Productos */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <h3 style={{ fontSize: '13px', fontWeight: 'bold', color: '#d1d5db', margin: '0 4px' }}>Inventario Activo ({productos.length})</h3>
         
