@@ -1,9 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import {
-  collection, getDocs, addDoc, updateDoc, doc, serverTimestamp, setDoc, deleteDoc
+  collection, getDocs, addDoc, updateDoc, doc, serverTimestamp
 } from 'firebase/firestore';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { db, auth } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
@@ -89,6 +88,7 @@ export default function TiendaSS() {
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]);
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
+  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
 
   // Estados para la gestión de usuarios en el Panel del Jefe
   const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
@@ -225,29 +225,37 @@ export default function TiendaSS() {
     })();
   }, [user]);
 
+  // Llama a la API segura de usuarios (Admin SDK en el servidor)
+  const llamarApiUsuarios = async (method: 'POST' | 'PATCH' | 'DELETE', body: any) => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('No hay sesión activa');
+    const res = await fetch('/api/usuarios', {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error en la operación');
+    return data;
+  };
+
   const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoEmailUsuario || !nuevoPassUsuario || !nuevoNombreUsuario.trim()) {
       alert('Ingresa nombre, correo y contraseña');
       return;
     }
+    setGuardandoUsuario(true);
     try {
-      // 1. Crear usuario en Firebase Authentication
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        nuevoEmailUsuario.trim().toLowerCase(),
-        nuevoPassUsuario
-      );
-      const uid = cred.user.uid;
-
-      // 2. Crear perfil en Firestore usando el UID como ID del documento
-      await setDoc(doc(db, 'usuarios', uid), {
-        email: nuevoEmailUsuario.trim().toLowerCase(),
+      await llamarApiUsuarios('POST', {
         nombre: nuevoNombreUsuario.trim(),
+        email: nuevoEmailUsuario.trim().toLowerCase(),
+        password: nuevoPassUsuario,
         rol: nuevoRolUsuario,
-        activo: true,
       });
-
       setNuevoEmailUsuario('');
       setNuevoPassUsuario('');
       setNuevoNombreUsuario('');
@@ -256,24 +264,19 @@ export default function TiendaSS() {
       await cargarUsuariosSistema();
     } catch (error: any) {
       console.error("Error al registrar usuario:", error);
-      if (error.code === 'auth/email-already-in-use') {
-        alert('Ese correo ya está registrado');
-      } else if (error.code === 'auth/weak-password') {
-        alert('La contraseña debe tener al menos 6 caracteres');
-      } else {
-        alert('Error al registrar el usuario: ' + (error.message || ''));
-      }
+      alert('Error al registrar el usuario: ' + (error.message || ''));
+    } finally {
+      setGuardandoUsuario(false);
     }
   };
 
   const cambiarEstadoUsuario = async (id: string, estadoActual: boolean) => {
     try {
-      const usuarioRef = doc(db, 'usuarios', id);
-      await updateDoc(usuarioRef, { activo: !estadoActual });
+      await llamarApiUsuarios('PATCH', { uid: id, activo: !estadoActual });
       await cargarUsuariosSistema();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al cambiar estado:", error);
-      alert('No se pudo actualizar el estado');
+      alert('No se pudo actualizar el estado: ' + (error.message || ''));
     }
   };
 
@@ -282,13 +285,12 @@ export default function TiendaSS() {
       return;
     }
     try {
-      // Borra el perfil de Firestore (el usuario ya no podrá iniciar sesión)
-      await deleteDoc(doc(db, 'usuarios', id));
+      await llamarApiUsuarios('DELETE', { uid: id });
       await cargarUsuariosSistema();
       alert('Usuario eliminado correctamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al eliminar usuario:", error);
-      alert('No se pudo eliminar el usuario');
+      alert('No se pudo eliminar el usuario: ' + (error.message || ''));
     }
   };
 
@@ -952,7 +954,7 @@ export default function TiendaSS() {
           {jefeSeccion === 'usuarios' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧑‍💼 Gestión de Usuarios</p>
-              
+
               {/* Formulario para registrar un nuevo usuario */}
               <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <p style={{ fontSize: 13, fontWeight: 700, color: '#818cf8', margin: 0 }}>➕ Registrar nuevo empleado</p>
@@ -982,8 +984,8 @@ export default function TiendaSS() {
                     <option value="jefe">Jefe</option>
                   </select>
                 </div>
-                <button type="submit" style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>
-                  Guardar Empleado
+                <button type="submit" disabled={guardandoUsuario} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: guardandoUsuario ? 'not-allowed' : 'pointer', marginTop: 4, opacity: guardandoUsuario ? 0.7 : 1 }}>
+                  {guardandoUsuario ? 'Guardando...' : 'Guardar Empleado'}
                 </button>
               </form>
 
