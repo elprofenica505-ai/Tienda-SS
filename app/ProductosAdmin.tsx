@@ -58,17 +58,19 @@ export default function ProductosAdmin() {
   // Función para generar un código único de 8 dígitos validando que no exista en Firestore
   const generarCodigoUnico = async () => {
     const codigosExistentes = new Set(productos.map((p) => p.codigo));
-    // También consultamos directo a firestore por seguridad
-    const snapshot = await getDocs(collection(db, 'productos'));
-    snapshot.docs.forEach((d) => {
-      const data = d.data();
-      if (data.codigo) codigosExistentes.add(data.codigo);
-    });
+    try {
+      const snapshot = await getDocs(collection(db, 'productos'));
+      snapshot.docs.forEach((d) => {
+        const data = d.data();
+        if (data.codigo) codigosExistentes.add(data.codigo);
+      });
+    } catch (e) {
+      console.error(e);
+    }
 
     let nuevoCodigo = '';
     let intentos = 0;
     do {
-      // Generar número aleatorio de 8 dígitos
       nuevoCodigo = Math.floor(10000000 + Math.random() * 90000000).toString();
       intentos++;
       if (intentos > 50) break;
@@ -77,16 +79,45 @@ export default function ProductosAdmin() {
     setCodigo(nuevoCodigo);
   };
 
-  // Manejar captura o carga de imagen desde el dispositivo (convertida a Base64)
+  // Comprimir imagen automáticamente para que no exceda el límite de Firestore
   const handleImagenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagen(reader.result as string);
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 400;
+        const MAX_HEIGHT = 400;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        // Comprimir a JPEG con calidad 0.7 para que pese pocos KB
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setImagen(dataUrl);
       };
-      reader.readAsDataURL(file);
-    }
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,7 +145,6 @@ export default function ProductosAdmin() {
       return;
     }
 
-    // Validar duplicado exacto de código antes de guardar
     const codigoDuplicado = productos.some((p) => p.codigo === codigo);
     if (codigoDuplicado) {
       alert('¡El código ingresado ya pertenece a otro producto! Genera uno nuevo.');
@@ -140,9 +170,9 @@ export default function ProductosAdmin() {
       setNuevaCategoriaInput('');
       setCategoriaSeleccionada(categorias[0] || 'Abarrotes');
       alert('¡Producto registrado con éxito!');
-    } catch (error) {
-      console.error('Error al agregar producto:', error);
-      alert('Hubo un error al registrar el producto');
+    } catch (error: any) {
+      console.error('Error detallado al agregar producto:', error);
+      alert(`Hubo un error al registrar el producto: ${error.message || error}`);
     } finally {
       setLoading(false);
     }
@@ -350,7 +380,7 @@ export default function ProductosAdmin() {
 
               <button
                 onClick={() => eliminarProducto(prod.id, prod.nombre)}
-                style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: 'none', padding: '10px', borderRadius: '10px', cursor: 'pointer', fontSize: '14px', flexShrink: 0 }}
+                style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: 'none', padding: '10px', borderRadius: '10px', cursor: 'pointer', fontSize: '14px', flexShrink: '0' }}
                 title="Eliminar producto"
               >
                 🗑️
