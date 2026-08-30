@@ -12,6 +12,7 @@ interface Producto {
   stock: number;
   codigo: string;
   imagen?: string;
+  costo?: number;
 }
 
 interface CategoriaDoc {
@@ -43,16 +44,23 @@ export default function ProductosAdmin() {
   const [mostrarModalCategorias, setMostrarModalCategorias] = useState(false);
 
   useEffect(() => {
-    // 1. Escuchar productos
     const unsubscribeProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
-      const lista: Producto[] = snapshot.docs.map((docItem) => ({
-        id: docItem.id,
-        ...docItem.data(),
-      })) as Producto[];
+      const lista: Producto[] = snapshot.docs.map((docItem) => {
+        const data = docItem.data();
+        return {
+          id: docItem.id,
+          nombre: data.nombre || '',
+          categoria: data.categoria || 'Otros',
+          precio: Number(data.precio) || 0,
+          stock: Number(data.stock) || 0,
+          codigo: data.codigo || '',
+          imagen: data.imagen || '',
+          costo: Number(data.costo) || 0,
+        };
+      });
       setProductos(lista);
     });
 
-    // 2. Escuchar categorías y asegurar iniciales si está vacío
     const unsubscribeCategorias = onSnapshot(collection(db, 'categorias'), async (snapshot) => {
       if (snapshot.empty) {
         for (const catInicial of CATEGORIAS_INICIALES) {
@@ -80,13 +88,9 @@ export default function ProductosAdmin() {
     };
   }, []);
 
-  // Combinar categorías de Firestore + las usadas en productos existentes (para que ninguna se pierda)
   const categoriasDeProductos = productos.map((p) => p.categoria).filter(Boolean);
   const todasLasCategoriasMap = new Map<string, string>();
-  
-  // Agregar primero las de Firestore
   categoriasObjs.forEach((c) => todasLasCategoriasMap.set(c.nombre.toLowerCase(), c.nombre));
-  // Agregar las de los productos activos por si acaso no estaban en la colección
   categoriasDeProductos.forEach((cat) => {
     if (!todasLasCategoriasMap.has(cat.toLowerCase())) {
       todasLasCategoriasMap.set(cat.toLowerCase(), cat);
@@ -95,7 +99,6 @@ export default function ProductosAdmin() {
 
   const listaCategoriasFinal = Array.from(todasLasCategoriasMap.values()).sort();
 
-  // Función para comprimir imagen a menos de 1MB
   const procesarYComprimirImagen = (file: File) => {
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -124,7 +127,6 @@ export default function ProductosAdmin() {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
 
-        // Calidad 0.7 asegura un peso inferior a 1MB optimizado para Firestore
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         setImagen(dataUrl);
       };
@@ -208,6 +210,7 @@ export default function ProductosAdmin() {
         precio: parseFloat(precio),
         stock: parseInt(stock),
         imagen: imagen || '',
+        costo: 0,
         createdAt: new Date(),
       });
       setNombre('');
@@ -232,11 +235,9 @@ export default function ProductosAdmin() {
     }
   };
 
-  // Función para borrar categoría de Firestore
   const eliminarCategoria = async (nombreCat: string) => {
     if (confirm(`¿Estás seguro de eliminar la categoría "${nombreCat}"?`)) {
       try {
-        // Buscar si existe en la colección de categorías de Firestore para borrarla
         const catEncontrada = categoriasObjs.find(
           (c) => c.nombre.toLowerCase() === nombreCat.toLowerCase()
         );
@@ -254,16 +255,18 @@ export default function ProductosAdmin() {
     }
   };
 
+  // Cálculo unificado y exacto para las tarjetas de arriba
+  const valorTotalCosto = productos.reduce((acc, p) => acc + (p.costo || 0) * p.stock, 0);
   const valorTotalVenta = productos.reduce((acc, p) => acc + p.precio * p.stock, 0);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '480px', margin: '0 auto' }}>
       
-      {/* Tarjetas Superiores */}
+      {/* Tarjetas Superiores sincronizadas reactivamente */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
         <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
           <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '4px', textTransform: 'uppercase' }}>Valor a costo</p>
-          <p style={{ fontSize: '20px', fontWeight: 'bold', color: '#ffffff' }}>$0</p>
+          <p style={{ fontSize: '20px', fontWeight: 'bold', color: '#ffffff' }}>${valorTotalCosto.toLocaleString()}</p>
         </div>
         <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
           <p style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '4px', textTransform: 'uppercase' }}>Valor a venta</p>
@@ -271,7 +274,6 @@ export default function ProductosAdmin() {
         </div>
       </div>
 
-      {/* Formulario de Registro */}
       <div style={{ backgroundColor: '#111827', border: '1px solid #1f2937', padding: '16px', borderRadius: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
           <span style={{ fontSize: '18px' }}>📦</span>
@@ -283,9 +285,8 @@ export default function ProductosAdmin() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
-          {/* FOTO: Dos botones separados (Cámara y Galería) */}
           <div>
-            <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>Fotografía del producto (Comprimida automáticamente)</label>
+            <label style={{ display: 'block', fontSize: '11px', color: '#9ca3af', marginBottom: '6px' }}>Fotografía del producto (Comprimida)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '56px', height: '56px', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
                 {imagen ? (
@@ -296,27 +297,13 @@ export default function ProductosAdmin() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-                {/* Botón 1: Cámara */}
                 <label style={{ backgroundColor: '#1f2937', color: '#34d399', textAlign: 'center', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', border: '1px solid #374151' }}>
                   📸 Tomar foto con cámara
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleTomarFoto}
-                    style={{ display: 'none' }}
-                  />
+                  <input type="file" accept="image/*" capture="environment" onChange={handleTomarFoto} style={{ display: 'none' }} />
                 </label>
-
-                {/* Botón 2: Galería */}
                 <label style={{ backgroundColor: '#1f2937', color: '#ffffff', textAlign: 'center', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: '500', cursor: 'pointer', border: '1px solid #374151' }}>
                   📁 Cargar desde galería
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleCargarGaleria}
-                    style={{ display: 'none' }}
-                  />
+                  <input type="file" accept="image/*" onChange={handleCargarGaleria} style={{ display: 'none' }} />
                 </label>
               </div>
             </div>
@@ -381,7 +368,6 @@ export default function ProductosAdmin() {
             </div>
           </div>
 
-          {/* Selector de Categoría + Botón Gestionar */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <label style={{ fontSize: '11px', color: '#9ca3af' }}>Categoría</label>
@@ -408,10 +394,9 @@ export default function ProductosAdmin() {
             </select>
           </div>
 
-          {/* Panel de Gestión y Borrado de Categorías */}
           {mostrarModalCategorias && (
             <div style={{ backgroundColor: '#030712', border: '1px solid #374151', padding: '12px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Categorías disponibles (Con botón de borrar):</p>
+              <p style={{ fontSize: '11px', fontWeight: 'bold', color: '#d1d5db', margin: 0 }}>Categorías disponibles:</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
                 {listaCategoriasFinal.map((cat, idx) => (
                   <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1f2937', padding: '6px 10px', borderRadius: '8px' }}>
@@ -452,7 +437,6 @@ export default function ProductosAdmin() {
         </form>
       </div>
 
-      {/* Lista de Productos */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <h3 style={{ fontSize: '13px', fontWeight: 'bold', color: '#d1d5db', margin: '0 4px' }}>Inventario Activo ({productos.length})</h3>
         
