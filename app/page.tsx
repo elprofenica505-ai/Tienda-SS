@@ -4,6 +4,7 @@ import {
   collection, getDocs, addDoc, updateDoc, doc, serverTimestamp
 } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
+import ProductosAdmin from './ProductosAdmin';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 
 type Vista =
@@ -950,7 +951,10 @@ export default function TiendaSS() {
               {turnos.length === 0 && <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>Aún no hay turnos registrados</p>}
             </div>
           )}
-
+{jefeSeccion === 'inventario' && (
+  <ProductosAdmin />
+)}
+        
           {jefeSeccion === 'usuarios' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧑‍💼 Gestión de Usuarios</p>
