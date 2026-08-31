@@ -110,10 +110,6 @@ export default function JefePanel({
     return data;
   };
 
-  const cargarUsuariosSistema = async () => {
-    // se recarga desde el padre normalmente, pero por si acaso
-  };
-
   const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoEmailUsuario || !nuevoPassUsuario || !nuevoNombreUsuario.trim()) {
@@ -133,8 +129,6 @@ export default function JefePanel({
       setNuevoNombreUsuario('');
       setNuevoRolUsuario('vendedor');
       alert('¡Usuario registrado correctamente!');
-      // El padre recargará al volver a montar o puedes forzar
-      window.location.reload();
     } catch (error: any) {
       alert('Error al registrar el usuario: ' + (error.message || ''));
     } finally {
