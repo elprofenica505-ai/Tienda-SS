@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
   Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega
-} from '@/components/shared/types';
+} from '@/components/Shared/types';
 
 import dynamic from 'next/dynamic';
 
