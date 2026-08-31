@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
   Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega
 } from '@/components/shared/types';
 
-// Dynamic imports → cada panel solo se descarga cuando se necesita
 import dynamic from 'next/dynamic';
 
 const Login = dynamic(() => import('@/components/Login'), { ssr: false });
@@ -28,7 +27,7 @@ export default function TiendaSS() {
   const [historial, setHistorial] = useState<Vista[]>([]);
   const [cargandoSesion, setCargandoSesion] = useState(true);
 
-  // Datos compartidos (se cargan una sola vez al iniciar sesión)
+  // Datos en tiempo real
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [turnos, setTurnos] = useState<Turno[]>([]);
@@ -40,7 +39,7 @@ export default function TiendaSS() {
     { id: 3, cliente: 'Luis Mora', direccion: 'Centroamérica', productos: 'Celular Infinix', estado: 'Entregado', choferId: 'u5' },
   ]);
 
-  // Estado del vendedor (carrito y ticket)
+  // Estado del vendedor
   const [carrito, setCarrito] = useState<any[]>([]);
   const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
 
@@ -81,56 +80,66 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
-  // Cargar datos cuando hay usuario
+  // ========== LISTENERS EN TIEMPO REAL ==========
   useEffect(() => {
     if (!user) return;
 
-    (async () => {
-      try {
-        const [ps, vs, ts, cs, us] = await Promise.all([
-          getDocs(collection(db, 'productos')),
-          getDocs(collection(db, 'ventas')),
-          getDocs(collection(db, 'turnos')),
-          getDocs(collection(db, 'compras')),
-          getDocs(collection(db, 'usuarios')),
-        ]);
-
-        const listaProductos: Producto[] = [];
-        ps.forEach(d => {
-          const x = d.data();
-          listaProductos.push({
-            id: d.id,
-            codigo: x.codigo || '',
-            nombre: x.nombre || '',
-            stock: x.stock || 0,
-            stockMinimo: x.stockMinimo ?? 5,
-            precio: x.precio || 0,
-            costo: x.costo || 0,
-            imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
-            categoria: x.categoria || 'Otros',
-          });
+    // Productos
+    const unsubProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
+      const lista: Producto[] = [];
+      snapshot.forEach(d => {
+        const x = d.data();
+        lista.push({
+          id: d.id,
+          codigo: x.codigo || '',
+          nombre: x.nombre || '',
+          stock: x.stock || 0,
+          stockMinimo: x.stockMinimo ?? 5,
+          precio: x.precio || 0,
+          costo: x.costo || 0,
+          imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
+          categoria: x.categoria || 'Otros',
         });
-        setProductos(listaProductos);
+      });
+      setProductos(lista);
+    });
 
-        const lv: Venta[] = [];
-        vs.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
-        setVentas(lv);
+    // Ventas
+    const unsubVentas = onSnapshot(collection(db, 'ventas'), (snapshot) => {
+      const lv: Venta[] = [];
+      snapshot.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
+      setVentas(lv);
+    });
 
-        const lt: Turno[] = [];
-        ts.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
-        setTurnos(lt);
+    // Turnos (cajas)
+    const unsubTurnos = onSnapshot(collection(db, 'turnos'), (snapshot) => {
+      const lt: Turno[] = [];
+      snapshot.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
+      setTurnos(lt);
+    });
 
-        const lc: Compra[] = [];
-        cs.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
-        setCompras(lc);
+    // Compras
+    const unsubCompras = onSnapshot(collection(db, 'compras'), (snapshot) => {
+      const lc: Compra[] = [];
+      snapshot.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
+      setCompras(lc);
+    });
 
-        const listaUs: UsuarioSistema[] = [];
-        us.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
-        setUsuariosSistema(listaUs);
-      } catch (e) {
-        console.error(e);
-      }
-    })();
+    // Usuarios
+    const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
+      const listaUs: UsuarioSistema[] = [];
+      snapshot.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
+      setUsuariosSistema(listaUs);
+    });
+
+    // Limpiar listeners cuando el usuario cierra sesión
+    return () => {
+      unsubProductos();
+      unsubVentas();
+      unsubTurnos();
+      unsubCompras();
+      unsubUsuarios();
+    };
   }, [user]);
 
   const cerrar = async () => {
