@@ -1,36 +1,286 @@
 'use client';
-import { useState } from 'react';
-import BodegaHome from '../components/BodegaHome';
-import ProductosAdmin from '../components/ProductosAdmin';
-import ComprasAdmin from '../components/ComprasAdmin';
-import VentasAdmin from '../components/VentasAdmin';
-import CajaAdmin from '../components/CajaAdmin';
+
+import React, { useState, useEffect } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
+import type {
+  Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega
+} from '@/components/shared/types';
+
+// Dynamic imports → cada panel solo se descarga cuando se necesita
+import dynamic from 'next/dynamic';
+
+const Login = dynamic(() => import('@/components/Login'), { ssr: false });
+const JefePanel = dynamic(() => import('@/components/Jefe/JefePanel'), { ssr: false });
+const VendedorHome = dynamic(() => import('@/components/Vendedor/VendedorHome'), { ssr: false });
+const AbrirCaja = dynamic(() => import('@/components/Vendedor/AbrirCaja'), { ssr: false });
+const CerrarCaja = dynamic(() => import('@/components/Vendedor/CerrarCaja'), { ssr: false });
+const Ticket = dynamic(() => import('@/components/Vendedor/Ticket'), { ssr: false });
+const BodegaHome = dynamic(() => import('@/components/Bodega/BodegaHome'), { ssr: false });
+const BodegaCompra = dynamic(() => import('@/components/Bodega/BodegaCompra'), { ssr: false });
+const BodegaHistorial = dynamic(() => import('@/components/Bodega/BodegaHistorial'), { ssr: false });
+const ChoferHome = dynamic(() => import('@/components/Chofer/ChoferHome'), { ssr: false });
 
 export default function TiendaSS() {
-  const [vistaActiva, setVistaActiva] = useState<'home' | 'productos' | 'compras' | 'ventas' | 'caja'>('home');
-  const [productos] = useState<any[]>([]);
+  const [user, setUser] = useState<Usuario | null>(null);
+  const [vista, setVista] = useState<Vista>('login');
+  const [historial, setHistorial] = useState<Vista[]>([]);
+  const [cargandoSesion, setCargandoSesion] = useState(true);
 
-  return (
-    <main style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', display: 'flex', flexDirection: 'column' }}>
-      
-      {/* Barra de navegación superior */}
-      <nav style={{ display: 'flex', gap: 10, padding: 15, background: '#111827', borderBottom: '1px solid #1f2937', flexWrap: 'wrap' }}>
-        <button onClick={() => setVistaActiva('home')} style={{ background: vistaActiva === 'home' ? '#3b82f6' : 'transparent', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>Inicio / Bodega</button>
-        <button onClick={() => setVistaActiva('productos')} style={{ background: vistaActiva === 'productos' ? '#3b82f6' : 'transparent', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>Productos</button>
-        <button onClick={() => setVistaActiva('compras')} style={{ background: vistaActiva === 'compras' ? '#3b82f6' : 'transparent', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>Compras</button>
-        <button onClick={() => setVistaActiva('ventas')} style={{ background: vistaActiva === 'ventas' ? '#3b82f6' : 'transparent', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>Ventas</button>
-        <button onClick={() => setVistaActiva('caja')} style={{ background: vistaActiva === 'caja' ? '#3b82f6' : 'transparent', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>Caja</button>
-      </nav>
+  // Datos compartidos (se cargan una sola vez al iniciar sesión)
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [ventas, setVentas] = useState<Venta[]>([]);
+  const [turnos, setTurnos] = useState<Turno[]>([]);
+  const [compras, setCompras] = useState<Compra[]>([]);
+  const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
+  const [entregas, setEntregas] = useState<Entrega[]>([
+    { id: 1, cliente: 'Juan Pérez', direccion: 'Reparto Schick', productos: 'TV Samsung 55"', estado: 'Pendiente', choferId: 'u5' },
+    { id: 2, cliente: 'Ana López', direccion: 'Villa El Carmen', productos: 'Cama King', estado: 'En Ruta', choferId: 'u5' },
+    { id: 3, cliente: 'Luis Mora', direccion: 'Centroamérica', productos: 'Celular Infinix', estado: 'Entregado', choferId: 'u5' },
+  ]);
 
-      {/* Enrutador de vistas */}
-      <div style={{ flex: 1 }}>
-        {vistaActiva === 'home' && <BodegaHome filtrados={productos} />}
-        {vistaActiva === 'productos' && <ProductosAdmin />}
-        {vistaActiva === 'compras' && <ComprasAdmin />}
-        {vistaActiva === 'ventas' && <VentasAdmin />}
-        {vistaActiva === 'caja' && <CajaAdmin />}
+  // Estado del vendedor (carrito y ticket)
+  const [carrito, setCarrito] = useState<any[]>([]);
+  const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
+
+  const irA = (v: Vista) => {
+    setHistorial(h => [...h, vista]);
+    setVista(v);
+  };
+
+  const volver = () => {
+    if (historial.length === 0) {
+      if (user?.rol === 'jefe') setVista('jefe_home');
+      else if (user?.rol === 'vendedor') setVista('vendedor_home');
+      else if (user?.rol === 'bodega') setVista('bodega_home');
+      else if (user?.rol === 'chofer') setVista('chofer_home');
+      else setVista('login');
+      return;
+    }
+    const prev = historial[historial.length - 1];
+    setHistorial(h => h.slice(0, -1));
+    setVista(prev);
+  };
+
+  // Escuchar sesión
+  useEffect(() => {
+    const unsub = escucharSesion((u) => {
+      setUser(u);
+      setCargandoSesion(false);
+      setHistorial([]);
+      if (u) {
+        if (u.rol === 'jefe') setVista('jefe_home');
+        else if (u.rol === 'vendedor') setVista('vendedor_home');
+        else if (u.rol === 'bodega') setVista('bodega_home');
+        else setVista('chofer_home');
+      } else {
+        setVista('login');
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Cargar datos cuando hay usuario
+  useEffect(() => {
+    if (!user) return;
+
+    (async () => {
+      try {
+        const [ps, vs, ts, cs, us] = await Promise.all([
+          getDocs(collection(db, 'productos')),
+          getDocs(collection(db, 'ventas')),
+          getDocs(collection(db, 'turnos')),
+          getDocs(collection(db, 'compras')),
+          getDocs(collection(db, 'usuarios')),
+        ]);
+
+        const listaProductos: Producto[] = [];
+        ps.forEach(d => {
+          const x = d.data();
+          listaProductos.push({
+            id: d.id,
+            codigo: x.codigo || '',
+            nombre: x.nombre || '',
+            stock: x.stock || 0,
+            stockMinimo: x.stockMinimo ?? 5,
+            precio: x.precio || 0,
+            costo: x.costo || 0,
+            imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
+            categoria: x.categoria || 'Otros',
+          });
+        });
+        setProductos(listaProductos);
+
+        const lv: Venta[] = [];
+        vs.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
+        setVentas(lv);
+
+        const lt: Turno[] = [];
+        ts.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
+        setTurnos(lt);
+
+        const lc: Compra[] = [];
+        cs.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
+        setCompras(lc);
+
+        const listaUs: UsuarioSistema[] = [];
+        us.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
+        setUsuariosSistema(listaUs);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+  }, [user]);
+
+  const cerrar = async () => {
+    await cerrarSesion();
+    setCarrito([]);
+    setUltimaVenta(null);
+  };
+
+  if (cargandoSesion) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+        Cargando...
       </div>
+    );
+  }
 
-    </main>
-  );
+  // ——— LOGIN ———
+  if (vista === 'login' || !user) {
+    return <Login onLogin={loginFirebase} />;
+  }
+
+  // ——— JEFE ———
+  if (vista === 'jefe_home') {
+    return (
+      <JefePanel
+        user={user}
+        productos={productos}
+        setProductos={setProductos}
+        ventas={ventas}
+        turnos={turnos}
+        compras={compras}
+        usuariosSistema={usuariosSistema}
+        setUsuariosSistema={setUsuariosSistema}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  // ——— VENDEDOR ———
+  const turnoAbierto = turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto');
+
+  if (vista === 'vendedor_home' && !turnoAbierto) {
+    return (
+      <AbrirCaja
+        user={user}
+        turnos={turnos}
+        setTurnos={setTurnos}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  if (vista === 'vendedor_cerrar_caja' && turnoAbierto) {
+    return (
+      <CerrarCaja
+        user={user}
+        turno={turnoAbierto}
+        ventas={ventas}
+        turnos={turnos}
+        setTurnos={setTurnos}
+        onVolver={volver}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  if (vista === 'vendedor_ticket' && ultimaVenta) {
+    return (
+      <Ticket
+        venta={ultimaVenta}
+        onNuevaVenta={() => {
+          setUltimaVenta(null);
+          setVista('vendedor_home');
+          setHistorial([]);
+        }}
+      />
+    );
+  }
+
+  if (vista === 'vendedor_home') {
+    return (
+      <VendedorHome
+        user={user}
+        productos={productos}
+        setProductos={setProductos}
+        ventas={ventas}
+        setVentas={setVentas}
+        turnos={turnos}
+        carrito={carrito}
+        setCarrito={setCarrito}
+        ultimaVenta={ultimaVenta}
+        setUltimaVenta={setUltimaVenta}
+        irA={irA}
+        onCerrar={cerrar}
+        onCerrarCaja={() => irA('vendedor_cerrar_caja')}
+      />
+    );
+  }
+
+  // ——— BODEGA ———
+  if (vista === 'bodega_home') {
+    return (
+      <BodegaHome
+        user={user}
+        productos={productos}
+        setProductos={setProductos}
+        irA={irA}
+        volver={volver}
+        historial={historial}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  if (vista === 'bodega_compra') {
+    return (
+      <BodegaCompra
+        user={user}
+        productos={productos}
+        setProductos={setProductos}
+        compras={compras}
+        setCompras={setCompras}
+        volver={volver}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  if (vista === 'bodega_historial_compras') {
+    return (
+      <BodegaHistorial
+        compras={compras}
+        volver={volver}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  // ——— CHOFER ———
+  if (vista === 'chofer_home') {
+    return (
+      <ChoferHome
+        user={user}
+        entregas={entregas}
+        setEntregas={setEntregas}
+        historial={historial}
+        onCerrar={cerrar}
+      />
+    );
+  }
+
+  return null;
 }
