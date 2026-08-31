@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
   Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega
-} from '@/components/Shared/types';
+} from '@/components/shared/types';
 
 import dynamic from 'next/dynamic';
 
@@ -72,7 +72,7 @@ export default function TiendaSS() {
         if (u.rol === 'jefe') setVista('jefe_home');
         else if (u.rol === 'vendedor') setVista('vendedor_home');
         else if (u.rol === 'bodega') setVista('bodega_home');
-        else setVista('chofer_home');
+        else if (u.rol === 'chofer') setVista('chofer_home');
       } else {
         setVista('login');
       }
