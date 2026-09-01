@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
-  Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega
+  Vista, Producto, Venta, Turno, Compra, UsuarioSistema, Entrega, Permisos
 } from '@/components/shared/types';
+import { PERMISOS_DEFAULT } from '@/components/shared/types';
 
 import dynamic from 'next/dynamic';
 
@@ -27,19 +28,18 @@ export default function TiendaSS() {
   const [historial, setHistorial] = useState<Vista[]>([]);
   const [cargandoSesion, setCargandoSesion] = useState(true);
 
-  // Datos en tiempo real
   const [productos, setProductos] = useState<Producto[]>([]);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]);
   const [usuariosSistema, setUsuariosSistema] = useState<UsuarioSistema[]>([]);
+  const [permisos, setPermisos] = useState<Permisos>(PERMISOS_DEFAULT);
   const [entregas, setEntregas] = useState<Entrega[]>([
     { id: 1, cliente: 'Juan Pérez', direccion: 'Reparto Schick', productos: 'TV Samsung 55"', estado: 'Pendiente', choferId: 'u5' },
     { id: 2, cliente: 'Ana López', direccion: 'Villa El Carmen', productos: 'Cama King', estado: 'En Ruta', choferId: 'u5' },
     { id: 3, cliente: 'Luis Mora', direccion: 'Centroamérica', productos: 'Celular Infinix', estado: 'Entregado', choferId: 'u5' },
   ]);
 
-  // Estado del vendedor
   const [carrito, setCarrito] = useState<any[]>([]);
   const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
 
@@ -62,7 +62,6 @@ export default function TiendaSS() {
     setVista(prev);
   };
 
-  // Escuchar sesión
   useEffect(() => {
     const unsub = escucharSesion((u) => {
       setUser(u);
@@ -80,11 +79,9 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
-  // ========== LISTENERS EN TIEMPO REAL ==========
   useEffect(() => {
     if (!user) return;
 
-    // Productos
     const unsubProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
       const lista: Producto[] = [];
       snapshot.forEach(d => {
@@ -104,41 +101,51 @@ export default function TiendaSS() {
       setProductos(lista);
     });
 
-    // Ventas
     const unsubVentas = onSnapshot(collection(db, 'ventas'), (snapshot) => {
       const lv: Venta[] = [];
       snapshot.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
       setVentas(lv);
     });
 
-    // Turnos (cajas)
     const unsubTurnos = onSnapshot(collection(db, 'turnos'), (snapshot) => {
       const lt: Turno[] = [];
       snapshot.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
       setTurnos(lt);
     });
 
-    // Compras
     const unsubCompras = onSnapshot(collection(db, 'compras'), (snapshot) => {
       const lc: Compra[] = [];
       snapshot.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
       setCompras(lc);
     });
 
-    // Usuarios
     const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
       const listaUs: UsuarioSistema[] = [];
       snapshot.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
       setUsuariosSistema(listaUs);
     });
 
-    // Limpiar listeners cuando el usuario cierra sesión
+    const unsubPermisos = onSnapshot(doc(db, 'config', 'permisos'), (snap) => {
+      if (snap.exists()) {
+        const x = snap.data();
+        setPermisos({
+          bodegaCrearProductos: x.bodegaCrearProductos !== false,
+          bodegaAjustarStock: x.bodegaAjustarStock !== false,
+          bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
+          choferRegistrarCompras: x.choferRegistrarCompras === true,
+        });
+      } else {
+        setPermisos(PERMISOS_DEFAULT);
+      }
+    });
+
     return () => {
       unsubProductos();
       unsubVentas();
       unsubTurnos();
       unsubCompras();
       unsubUsuarios();
+      unsubPermisos();
     };
   }, [user]);
 
@@ -156,12 +163,10 @@ export default function TiendaSS() {
     );
   }
 
-  // ——— LOGIN ———
   if (vista === 'login' || !user) {
     return <Login onLogin={loginFirebase} />;
   }
 
-  // ——— JEFE ———
   if (vista === 'jefe_home') {
     return (
       <JefePanel
@@ -173,22 +178,17 @@ export default function TiendaSS() {
         compras={compras}
         usuariosSistema={usuariosSistema}
         setUsuariosSistema={setUsuariosSistema}
+        permisos={permisos}
         onCerrar={cerrar}
       />
     );
   }
 
-  // ——— VENDEDOR ———
   const turnoAbierto = turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto');
 
   if (vista === 'vendedor_home' && !turnoAbierto) {
     return (
-      <AbrirCaja
-        user={user}
-        turnos={turnos}
-        setTurnos={setTurnos}
-        onCerrar={cerrar}
-      />
+      <AbrirCaja user={user} turnos={turnos} setTurnos={setTurnos} onCerrar={cerrar} />
     );
   }
 
@@ -239,7 +239,6 @@ export default function TiendaSS() {
     );
   }
 
-  // ——— BODEGA ———
   if (vista === 'bodega_home') {
     return (
       <BodegaHome
@@ -250,6 +249,7 @@ export default function TiendaSS() {
         volver={volver}
         historial={historial}
         onCerrar={cerrar}
+        permisos={permisos}
       />
     );
   }
@@ -270,15 +270,10 @@ export default function TiendaSS() {
 
   if (vista === 'bodega_historial_compras') {
     return (
-      <BodegaHistorial
-        compras={compras}
-        volver={volver}
-        onCerrar={cerrar}
-      />
+      <BodegaHistorial compras={compras} volver={volver} onCerrar={cerrar} />
     );
   }
 
-  // ——— CHOFER ———
   if (vista === 'chofer_home') {
     return (
       <ChoferHome
@@ -287,6 +282,8 @@ export default function TiendaSS() {
         setEntregas={setEntregas}
         historial={historial}
         onCerrar={cerrar}
+        permisos={permisos}
+        irA={irA}
       />
     );
   }
