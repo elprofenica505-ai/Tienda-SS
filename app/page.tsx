@@ -55,6 +55,7 @@ export default function TiendaSS() {
       else if (user?.rol === 'vendedor') setVista('vendedor_home');
       else if (user?.rol === 'bodega') setVista('bodega_home');
       else if (user?.rol === 'chofer') setVista('chofer_home');
+      else if (user?.rol === 'cajero') setVista('cajero_home');
       else setVista('login');
       return;
     }
@@ -73,6 +74,7 @@ export default function TiendaSS() {
         else if (u.rol === 'vendedor') setVista('vendedor_home');
         else if (u.rol === 'bodega') setVista('bodega_home');
         else if (u.rol === 'chofer') setVista('chofer_home');
+        else if (u.rol === 'cajero') setVista('cajero_home');
       } else {
         setVista('login');
       }
@@ -286,7 +288,8 @@ export default function TiendaSS() {
       />
     );
   }
-      if (vista === 'cajero_home') {
+
+  if (vista === 'cajero_home') {
     return (
       <CajeroHome
         user={user}
