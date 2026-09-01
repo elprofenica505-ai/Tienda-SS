@@ -98,3 +98,25 @@ export interface Entrega {
   estado: 'Pendiente' | 'En Ruta' | 'Entregado';
   choferId: string;
 }
+
+export interface OrdenItem {
+  id: string;
+  codigo: string;
+  nombre: string;
+  cantidad: number;
+  precio: number;
+  subtotal: number;
+}
+
+export interface Orden {
+  id?: string;
+  items: OrdenItem[];
+  total: number;
+  fecha: any;
+  estado: 'pending' | 'completed';
+  medioPago: string;
+  vendedorId: string;
+  vendedorNombre: string;
+  turnoId: string | null;
+  guaranteePhotoUrl?: string;
+}
