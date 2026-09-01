@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import type { Entrega, Vista } from '@/components/shared/types';
+import type { Entrega, Vista, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
 
 interface Props {
@@ -10,10 +10,12 @@ interface Props {
   setEntregas: (e: Entrega[]) => void;
   historial: Vista[];
   onCerrar: () => void;
+  permisos: Permisos;
+  irA: (v: Vista) => void;
 }
 
-export default function ChoferHome({ user, entregas, setEntregas, historial, onCerrar }: Props) {
-  const mis = entregas.filter(e => e.choferId === user.id || true); // por ahora muestra todas; ajusta el filtro cuando tengas choferId real
+export default function ChoferHome({ user, entregas, setEntregas, onCerrar, permisos, irA }: Props) {
+  const mis = entregas.filter(e => e.choferId === user.id || true);
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
@@ -27,6 +29,20 @@ export default function ChoferHome({ user, entregas, setEntregas, historial, onC
             Salir
           </button>
         </div>
+
+        {permisos.choferRegistrarCompras ? (
+          <button
+            onClick={() => irA('bodega_compra')}
+            style={{ background: '#052e2b', border: '1px solid #0d9488', borderRadius: 12, padding: 14, color: '#5eead4', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+          >
+            🛒 Registrar compra a proveedor
+          </button>
+        ) : (
+          <div style={{ background: '#111827', border: '1px solid #374151', borderRadius: 12, padding: 12, color: '#6b7280', fontSize: 12 }}>
+            Compras a proveedores deshabilitadas. El jefe debe activarlas en Permisos.
+          </div>
+        )}
+
         {mis.map(e => (
           <div key={e.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 14, padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
