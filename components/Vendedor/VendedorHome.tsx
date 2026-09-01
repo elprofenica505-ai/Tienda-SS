@@ -189,10 +189,11 @@ export default function VendedorHome({
                 <p style={{ fontSize: 13, margin: '6px 0 0', color: '#a5b4fc' }}>Vuelto: ${vuelto.toFixed(2)}</p>
               )}
 
-              <button onClick={cobrar}
-                style={{ width: '100%', marginTop: 12, background: '#059669', color: '#fff', border: 'none', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-                Cobrar ${totalCarrito.toLocaleString()}
-              </button>
+              <button onClick={crearPreventa}
+  style={{ width: '100%', marginTop: 12, background: '#059669', color: '#fff', border: 'none', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+  Crear Preventa ${totalCarrito.toLocaleString()}
+</button>
+
             </>
           )}
         </div>
