@@ -14,6 +14,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const [ordenesPendientes, setOrdenesPendientes] = useState<Orden[]>([]);
   const [codigoBusqueda, setCodigoBusqueda] = useState('');
   const [cargando, setCargando] = useState(false);
+  const [ordenSeleccionada, setOrdenSeleccionada] = useState<Orden | null>(null);
 
   // Función para buscar órdenes pendientes en Firestore sin gastar de más
   const cargarPendientes = async () => {
@@ -38,6 +39,24 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     cargarPendientes();
   }, []);
 
+  // Manejar el escaneo por láser o búsqueda manual por código/ID
+  const handleBusquedaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const valor = e.target.value;
+    setCodigoBusqueda(valor);
+
+    if (!valor.trim()) return;
+
+    // Buscar si coincide con alguna orden pendiente (por ID o código)
+    const encontrada = ordenesPendientes.find(
+      o => o.id?.toLowerCase() === valor.trim().toLowerCase()
+    );
+
+    if (encontrada) {
+      setOrdenSeleccionada(encontrada);
+      setCodigoBusqueda(''); // Limpiar input tras selección exitosa del láser
+    }
+  };
+
   // Función para procesar el cobro y abrir la gaveta física
   const cobrarOrden = async (ordenId: string, items: any[]) => {
     try {
@@ -60,8 +79,11 @@ export default function CajeroHome({ user, onCerrar }: Props) {
 
       alert('¡Cobro exitoso! Abriendo caja...');
       
-      // Actualizamos la lista local quitando la orden ya cobrada
+      // Actualizamos la lista local quitando la orden ya cobrada y limpiando la selección
       setOrdenesPendientes(ordenesPendientes.filter(o => o.id !== ordenId));
+      if (ordenSeleccionada?.id === ordenId) {
+        setOrdenSeleccionada(null);
+      }
     } catch (e) {
       console.error(e);
       alert('Error al procesar el pago');
@@ -86,9 +108,10 @@ export default function CajeroHome({ user, onCerrar }: Props) {
         {/* Barra de escáner / Sincronización */}
         <div style={{ display: 'flex', gap: 8 }}>
           <input
-            placeholder="🔍 Escanear código QR o ID de orden..."
+            placeholder="🔍 Escanear código QR o ID de orden con láser..."
             value={codigoBusqueda}
-            onChange={e => setCodigoBusqueda(e.target.value)}
+            onChange={handleBusquedaChange}
+            autoFocus
             style={{ flex: 1, background: '#111827', border: '1px solid #374151', borderRadius: 12, padding: 12, color: '#fff', fontSize: 14, outline: 'none' }}
           />
           <button onClick={cargarPendientes} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '0 16px', borderRadius: 12, fontWeight: 700, cursor: 'pointer' }}>
@@ -96,7 +119,41 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           </button>
         </div>
 
-        {/* Lista de Prevent pendientes */}
+        {/* Detalle de Preventa Seleccionada mediante Escáner o Clic */}
+        {ordenSeleccionada && (
+          <div style={{ background: '#1e1b4b', border: '1px solid #4338ca', borderRadius: 16, padding: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <p style={{ fontWeight: 800, margin: 0, color: '#c7d2fe', fontSize: 13 }}>⚡ Preventa Seleccionada</p>
+              <button 
+                onClick={() => setOrdenSeleccionada(null)}
+                style={{ background: 'transparent', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>
+                ✕ Cerrar detalle
+              </button>
+            </div>
+            <p style={{ fontSize: 12, fontWeight: 700, margin: '0 0 4px', color: '#a5b4fc' }}>Orden ID: {ordenSeleccionada.id}</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: '0 0 8px' }}>Vendedor: {ordenSeleccionada.vendedorNombre}</p>
+            
+            <div style={{ background: '#111827', borderRadius: 8, padding: 8, marginBottom: 10, maxHeight: 120, overflowY: 'auto' }}>
+              {ordenSeleccionada.items?.map((item: any, idx: number) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4, color: '#e5e7eb' }}>
+                  <span>{item.cantidad}x {item.nombre}</span>
+                  <span>${(item.precio * item.cantidad)?.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ fontSize: 14, fontWeight: 800, margin: 0, color: '#34d399' }}>Total: ${ordenSeleccionada.total?.toLocaleString()}</p>
+              <button 
+                onClick={() => ordenSeleccionada.id && cobrarOrden(ordenSeleccionada.id, ordenSeleccionada.items)}
+                style={{ background: '#059669', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                Cobrar y Abrir Caja
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Lista de Preventas pendientes */}
         <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
           <p style={{ fontWeight: 700, margin: '0 0 10px', fontSize: 13 }}>Preventas en espera ({ordenesPendientes.length})</p>
           
@@ -104,14 +161,30 @@ export default function CajeroHome({ user, onCerrar }: Props) {
             <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>No hay órdenes pendientes por cobrar.</p>
           ) : (
             ordenesPendientes.map(orden => (
-              <div key={orden.id} style={{ background: '#1f2937', borderRadius: 10, padding: 10, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div 
+                key={orden.id} 
+                onClick={() => setOrdenSeleccionada(orden)}
+                style={{ 
+                  background: ordenSeleccionada?.id === orden.id ? '#374151' : '#1f2937', 
+                  borderRadius: 10, 
+                  padding: 10, 
+                  marginBottom: 10, 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  border: ordenSeleccionada?.id === orden.id ? '1px solid #4f46e5' : '1px solid transparent'
+                }}>
                 <div>
                   <p style={{ fontSize: 12, fontWeight: 700, margin: 0, color: '#a5b4fc' }}>Orden: {orden.id}</p>
                   <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Vendedor: {orden.vendedorNombre}</p>
                   <p style={{ fontSize: 13, fontWeight: 800, margin: 0, color: '#34d399' }}>Total: ${orden.total?.toLocaleString()}</p>
                 </div>
                 <button 
-                  onClick={() => orden.id && cobrarOrden(orden.id, orden.items)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    orden.id && cobrarOrden(orden.id, orden.items);
+                  }}
                   style={{ background: '#059669', color: '#fff', border: 'none', padding: '10px 14px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                   Cobrar y Abrir Caja
                 </button>
