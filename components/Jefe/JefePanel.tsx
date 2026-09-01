@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
-import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion } from '@/components/shared/types';
+import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
   compras: Compra[];
   usuariosSistema: UsuarioSistema[];
   setUsuariosSistema: (u: UsuarioSistema[]) => void;
+  permisos: Permisos;
   onCerrar: () => void;
 }
 
@@ -30,6 +32,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
   { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
   { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
+  { key: 'permisos', label: 'Permisos', icon: '🔐' },
   { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
 ];
 
@@ -37,13 +40,12 @@ const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov'
 
 export default function JefePanel({
   user, productos, ventas, turnos, compras,
-  usuariosSistema, setUsuariosSistema, onCerrar
+  usuariosSistema, setUsuariosSistema, permisos, onCerrar
 }: Props) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion>('inicio');
   const [proximamenteNombre, setProximamenteNombre] = useState('');
 
-  // Estados usuarios
   const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
   const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
   const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
@@ -156,6 +158,17 @@ export default function JefePanel({
     }
   };
 
+  const guardarPermiso = async (campo: keyof Permisos, valor: boolean) => {
+    try {
+      await setDoc(doc(db, 'config', 'permisos'), {
+        ...permisos,
+        [campo]: valor,
+      }, { merge: true });
+    } catch (e: any) {
+      alert('No se pudo guardar: ' + (e?.message || ''));
+    }
+  };
+
   const seleccionarMenu = (key: string, proximamente?: boolean, label?: string) => {
     if (proximamente) {
       setProximamenteNombre(label || key);
@@ -168,7 +181,6 @@ export default function JefePanel({
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
-      {/* Sidebar */}
       <div style={{
         position: 'fixed', top: 0, left: 0, bottom: 0, width: 260, background: '#111827',
         borderRight: '1px solid #1f2937', zIndex: 40, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)',
@@ -187,7 +199,8 @@ export default function JefePanel({
               key={item.key}
               onClick={() => seleccionarMenu(item.key, item.proximamente, item.label)}
               style={{
-                width: '100%', textAlign: 'left', background: jefeSeccion === item.key || (jefeSeccion === 'proximamente' && proximamenteNombre === item.label) ? '#1e1b4b' : 'transparent',
+                width: '100%', textAlign: 'left',
+                background: jefeSeccion === item.key || (jefeSeccion === 'proximamente' && proximamenteNombre === item.label) ? '#1e1b4b' : 'transparent',
                 border: 'none', padding: '11px 18px', color: item.proximamente ? '#6b7280' : '#e5e7eb',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10
               }}
@@ -205,14 +218,11 @@ export default function JefePanel({
         </div>
       </div>
 
-      {/* Overlay móvil */}
       {menuAbierto && (
         <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 30 }} />
       )}
 
-      {/* Contenido principal */}
       <div style={{ flex: 1, marginLeft: 0, minHeight: '100vh' }}>
-        {/* Header */}
         <div style={{ background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, zIndex: 20 }}>
           <button onClick={() => setMenuAbierto(true)} style={{ background: '#1f2937', border: 'none', color: '#fff', width: 40, height: 40, borderRadius: 10, fontSize: 18, cursor: 'pointer' }}>☰</button>
           <div>
@@ -224,7 +234,6 @@ export default function JefePanel({
         </div>
 
         <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
-          {/* ——— INICIO ——— */}
           {jefeSeccion === 'inicio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -287,7 +296,6 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* ——— VENTAS ——— */}
           {jefeSeccion === 'ventas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Todas las ventas del sistema ({ventas.length})</p>
@@ -309,12 +317,10 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* ——— INVENTARIO ——— */}
           {jefeSeccion === 'inventario' && (
             <ProductosAdmin />
           )}
 
-          {/* ——— COMPRAS ——— */}
           {jefeSeccion === 'compras' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Historial de compras ({compras.length})</p>
@@ -339,7 +345,6 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* ——— CAJAS ——— */}
           {jefeSeccion === 'cajas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Turnos / Cierres de caja</p>
@@ -364,7 +369,7 @@ export default function JefePanel({
                   <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
                     Inicial: ${t.montoInicial}
                     {t.estado === 'cerrado' && (
-                      <> · Contado: \( {t.montoContado} · Dif: <span style={{ color: (t.diferencia || 0) !== 0 ? '#f87171' : '#34d399' }}> \){t.diferencia}</span></>
+                      <> · Contado: ${t.montoContado} · Dif: <span style={{ color: (t.diferencia || 0) !== 0 ? '#f87171' : '#34d399' }}>{t.diferencia}</span></>
                     )}
                   </p>
                 </div>
@@ -375,7 +380,6 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* ——— USUARIOS ——— */}
           {jefeSeccion === 'usuarios' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -424,7 +428,34 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* ——— PRÓXIMAMENTE ——— */}
+          {jefeSeccion === 'permisos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
+                Activa o desactiva lo que puede hacer bodega y chofer. Se guarda solo en Firebase.
+              </p>
+              {([
+                { key: 'bodegaCrearProductos' as const, label: 'Bodega: crear productos nuevos' },
+                { key: 'bodegaAjustarStock' as const, label: 'Bodega: ajustar stock' },
+                { key: 'bodegaRegistrarCompras' as const, label: 'Bodega: registrar compras a proveedores' },
+                { key: 'choferRegistrarCompras' as const, label: 'Chofer: registrar compras a proveedores' },
+              ]).map(item => (
+                <div key={item.key} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
+                  <button
+                    onClick={() => guardarPermiso(item.key, !permisos[item.key])}
+                    style={{
+                      background: permisos[item.key] ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.15)',
+                      color: permisos[item.key] ? '#34d399' : '#f87171',
+                      border: 'none', padding: '8px 14px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer'
+                    }}
+                  >
+                    {permisos[item.key] ? 'Activado' : 'Desactivado'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {jefeSeccion === 'proximamente' && (
             <div style={{ textAlign: 'center', padding: 40, background: '#111827', borderRadius: 16, border: '1px solid #1f2937' }}>
               <p style={{ fontSize: 40, margin: '0 0 12px' }}>🚧</p>
