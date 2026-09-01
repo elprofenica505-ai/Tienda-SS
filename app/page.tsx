@@ -246,8 +246,6 @@ export default function TiendaSS() {
         productos={productos}
         setProductos={setProductos}
         irA={irA}
-        volver={volver}
-        historial={historial}
         onCerrar={cerrar}
         permisos={permisos}
       />
