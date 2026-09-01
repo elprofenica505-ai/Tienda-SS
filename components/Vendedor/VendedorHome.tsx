@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { collection, addDoc, updateDoc, doc, getDocs, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Producto, CarritoItem, Venta, Turno, Vista } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -23,12 +23,10 @@ interface Props {
 }
 
 export default function VendedorHome({
-  user, productos, setProductos, ventas, setVentas, turnos,
-  carrito, setCarrito, setUltimaVenta, irA, onCerrar, onCerrarCaja
+  user, productos, setProductos, turnos,
+  carrito, setCarrito, onCerrar, onCerrarCaja
 }: Props) {
   const [busqueda, setBusqueda] = useState('');
-  const [medioPago, setMedioPago] = useState<'Efectivo' | 'Tarjeta' | 'Transferencia' | 'Mixto'>('Efectivo');
-  const [montoRecibido, setMontoRecibido] = useState('');
 
   const turnoAbierto = turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto');
 
@@ -58,17 +56,11 @@ export default function VendedorHome({
   };
 
   const totalCarrito = carrito.reduce((s, c) => s + c.precio * c.cantidad, 0);
-  const vuelto = medioPago === 'Efectivo' && montoRecibido
-    ? Math.max(0, parseFloat(montoRecibido) - totalCarrito) : 0;
 
-    const crearPreventa = async () => {
+  const crearPreventa = async () => {
     if (!user || carrito.length === 0) return;
     if (!turnoAbierto) {
       alert('Debes abrir caja antes de vender');
-      return;
-    }
-    if (medioPago === 'Efectivo' && (!montoRecibido || parseFloat(montoRecibido) < totalCarrito)) {
-      alert('El monto recibido debe ser mayor o igual al total');
       return;
     }
     try {
@@ -79,19 +71,17 @@ export default function VendedorHome({
         })),
         total: totalCarrito,
         fecha: serverTimestamp(),
-        estado: 'pending', // <--- La orden se queda esperando a que la caja la cobre
-        medioPago,
+        estado: 'pending', // La orden queda en espera para que la cobre el cajero
         vendedorId: user.id,
         vendedorNombre: user.nombre,
         turnoId: turnoAbierto ? turnoAbierto.id : null,
       };
 
-      // Guardamos en la colección 'orders' en lugar de 'ventas'
+      // Guardamos en la colección 'orders' para que la caja la procese
       const docRef = await addDoc(collection(db, 'orders'), dataOrden);
 
       // Limpiamos el carrito del vendedor
       setCarrito([]);
-      setMontoRecibido('');
       alert(`¡Preventa creada con éxito! Código de orden: ${docRef.id}`);
 
     } catch (e) {
@@ -100,13 +90,12 @@ export default function VendedorHome({
     }
   };
 
-
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
       <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <h1 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧾 Punto de venta</h1>
+            <h1 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>🧾 Punto de venta (Preventa)</h1>
             <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -162,38 +151,14 @@ export default function VendedorHome({
           {carrito.length > 0 && (
             <>
               <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
-                <span>Total</span>
+                <span>Total Preventa</span>
                 <span style={{ color: '#34d399' }}>${totalCarrito.toLocaleString()}</span>
               </div>
 
-              <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-                {(['Efectivo', 'Tarjeta', 'Transferencia', 'Mixto'] as const).map(m => (
-                  <button key={m} onClick={() => setMedioPago(m)}
-                    style={{
-                      flex: 1, minWidth: 70, padding: 8, borderRadius: 8, border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                      background: medioPago === m ? '#4f46e5' : '#1f2937', color: '#fff'
-                    }}>{m}</button>
-                ))}
-              </div>
-
-              {medioPago === 'Efectivo' && (
-                <input
-                  type="number"
-                  placeholder="Monto recibido"
-                  value={montoRecibido}
-                  onChange={e => setMontoRecibido(e.target.value)}
-                  style={{ width: '100%', marginTop: 10, background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
-                />
-              )}
-              {medioPago === 'Efectivo' && montoRecibido && (
-                <p style={{ fontSize: 13, margin: '6px 0 0', color: '#a5b4fc' }}>Vuelto: ${vuelto.toFixed(2)}</p>
-              )}
-
               <button onClick={crearPreventa}
-  style={{ width: '100%', marginTop: 12, background: '#059669', color: '#fff', border: 'none', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-  Crear Preventa ${totalCarrito.toLocaleString()}
-</button>
-
+                style={{ width: '100%', marginTop: 16, background: '#059669', color: '#fff', border: 'none', padding: 14, borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                Generar Preventa para Caja (${totalCarrito.toLocaleString()})
+              </button>
             </>
           )}
         </div>
