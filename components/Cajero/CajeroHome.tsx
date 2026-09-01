@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Orden, UsuarioSistema } from '@/components/shared/types';
 
@@ -16,7 +16,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const [cargando, setCargando] = useState(false);
   const [ordenSeleccionada, setOrdenSeleccionada] = useState<Orden | null>(null);
 
-  // Función para buscar órdenes pendientes en Firestore sin gastar de más
+  // Función para buscar órdenes pendientes en Firestore
   const cargarPendientes = async () => {
     setCargando(true);
     try {
@@ -46,18 +46,17 @@ export default function CajeroHome({ user, onCerrar }: Props) {
 
     if (!valor.trim()) return;
 
-    // Buscar si coincide con alguna orden pendiente (por ID o código)
     const encontrada = ordenesPendientes.find(
       o => o.id?.toLowerCase() === valor.trim().toLowerCase()
     );
 
     if (encontrada) {
       setOrdenSeleccionada(encontrada);
-      setCodigoBusqueda(''); // Limpiar input tras selección exitosa del láser
+      setCodigoBusqueda(''); 
     }
   };
 
-  // Función para procesar el cobro y abrir la gaveta física
+  // Función para procesar el cobro, descontar stock en Firebase y abrir la gaveta física
   const cobrarOrden = async (ordenId: string, items: any[]) => {
     try {
       // 1. Cambiamos el estado de la orden a 'completed' y guardamos el ID del cajero
@@ -68,16 +67,27 @@ export default function CajeroHome({ user, onCerrar }: Props) {
         completedAt: serverTimestamp(),
       });
 
-      // 2. Descontamos el stock de cada producto de la orden en bloque
+      // 2. Descontamos oficialmente el stock de cada producto en Firebase
       for (const item of items) {
+        if (!item.id) continue;
         const prodRef = doc(db, 'productos', item.id);
-        // Opcional: puedes restar el stock actual menos item.cantidad
+        const prodSnap = await getDoc(prodRef);
+        
+        if (prodSnap.exists()) {
+          const stockActual = prodSnap.data().stock || 0;
+          const cantidadComprada = item.cantidad || 1;
+          const nuevoStock = Math.max(0, stockActual - cantidadComprada);
+
+          await updateDoc(prodRef, {
+            stock: nuevoStock
+          });
+        }
       }
 
       // 3. Disparamos la impresión térmica y la apertura automática de la gaveta física
       window.print();
 
-      alert('¡Cobro exitoso! Abriendo caja...');
+      alert('¡Cobro exitoso, stock descontado y caja abierta!');
       
       // Actualizamos la lista local quitando la orden ya cobrada y limpiando la selección
       setOrdenesPendientes(ordenesPendientes.filter(o => o.id !== ordenId));
@@ -86,7 +96,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       }
     } catch (e) {
       console.error(e);
-      alert('Error al procesar el pago');
+      alert('Error al procesar el pago y descontar inventario');
     }
   };
 
