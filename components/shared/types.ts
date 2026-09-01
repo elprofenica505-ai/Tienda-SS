@@ -2,7 +2,7 @@ export type Vista =
   | 'login' | 'jefe_home'
   | 'vendedor_home' | 'vendedor_ticket' | 'vendedor_cerrar_caja'
   | 'bodega_home' | 'bodega_ajuste' | 'bodega_compra' | 'bodega_historial_compras'
-  | 'chofer_home';
+  | 'chofer_home' | 'cajero_home';
 
 export type JefeSeccion =
   | 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'permisos' | 'proximamente';
