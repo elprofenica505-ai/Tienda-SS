@@ -12,7 +12,7 @@ interface Props {
   productos: Producto[];
   setProductos: (p: Producto[]) => void;
   permisos?: Permisos;
-  irA: (vista: string) => void;
+  irA: (vista: any) => void;
   onCerrar: () => void;
 }
 
