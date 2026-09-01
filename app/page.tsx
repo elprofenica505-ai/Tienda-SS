@@ -21,6 +21,7 @@ const BodegaHome = dynamic(() => import('@/components/Bodega/BodegaHome'), { ssr
 const BodegaCompra = dynamic(() => import('@/components/Bodega/BodegaCompra'), { ssr: false });
 const BodegaHistorial = dynamic(() => import('@/components/Bodega/BodegaHistorial'), { ssr: false });
 const ChoferHome = dynamic(() => import('@/components/Chofer/ChoferHome'), { ssr: false });
+const CajeroHome = dynamic(() => import('@/components/Cajero/CajeroHome'), { ssr: false });
 
 export default function TiendaSS() {
   const [user, setUser] = useState<Usuario | null>(null);
@@ -282,6 +283,14 @@ export default function TiendaSS() {
         onCerrar={cerrar}
         permisos={permisos}
         irA={irA}
+      />
+    );
+  }
+      if (vista === 'cajero_home') {
+    return (
+      <CajeroHome
+        user={user}
+        onCerrar={cerrar}
       />
     );
   }
