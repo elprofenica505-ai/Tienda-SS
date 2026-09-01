@@ -61,7 +61,7 @@ export default function VendedorHome({
   const vuelto = medioPago === 'Efectivo' && montoRecibido
     ? Math.max(0, parseFloat(montoRecibido) - totalCarrito) : 0;
 
-  const cobrar = async () => {
+    const crearPreventa = async () => {
     if (!user || carrito.length === 0) return;
     if (!turnoAbierto) {
       alert('Debes abrir caja antes de vender');
@@ -72,48 +72,34 @@ export default function VendedorHome({
       return;
     }
     try {
-      const data = {
+      const dataOrden = {
         items: carrito.map(c => ({
           id: c.id, codigo: c.codigo, nombre: c.nombre,
           cantidad: c.cantidad, precio: c.precio, subtotal: c.precio * c.cantidad
         })),
         total: totalCarrito,
         fecha: serverTimestamp(),
-        estado: 'Completada',
+        estado: 'pending', // <--- La orden se queda esperando a que la caja la cobre
         medioPago,
         vendedorId: user.id,
         vendedorNombre: user.nombre,
-        recibido: medioPago === 'Efectivo' ? parseFloat(montoRecibido) : totalCarrito,
-        vuelto: medioPago === 'Efectivo' ? vuelto : 0,
         turnoId: turnoAbierto ? turnoAbierto.id : null,
       };
-      const ref = await addDoc(collection(db, 'ventas'), data);
 
-      for (const c of carrito) {
-        await updateDoc(doc(db, 'productos', c.id), {
-          stock: Math.max(0, c.stock - c.cantidad)
-        });
-      }
-      setProductos(productos.map(p => {
-        const c = carrito.find(x => x.id === p.id);
-        return c ? { ...p, stock: Math.max(0, p.stock - c.cantidad) } : p;
-      }));
+      // Guardamos en la colección 'orders' en lugar de 'ventas'
+      const docRef = await addDoc(collection(db, 'orders'), dataOrden);
 
-      const vs = await getDocs(collection(db, 'ventas'));
-      const lv: Venta[] = [];
-      vs.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
-      setVentas(lv);
-
-      const ticket: Venta = { id: ref.id, ...data, fecha: new Date() } as any;
-      setUltimaVenta(ticket);
+      // Limpiamos el carrito del vendedor
       setCarrito([]);
       setMontoRecibido('');
-      irA('vendedor_ticket');
+      alert(`¡Preventa creada con éxito! Código de orden: ${docRef.id}`);
+
     } catch (e) {
       console.error(e);
-      alert('Error al cobrar');
+      alert('Error al crear la preventa');
     }
   };
+
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
