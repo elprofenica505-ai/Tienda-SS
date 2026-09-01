@@ -5,7 +5,21 @@ export type Vista =
   | 'chofer_home';
 
 export type JefeSeccion =
-  | 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'proximamente';
+  | 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'permisos' | 'proximamente';
+
+export interface Permisos {
+  bodegaCrearProductos: boolean;
+  bodegaAjustarStock: boolean;
+  bodegaRegistrarCompras: boolean;
+  choferRegistrarCompras: boolean;
+}
+
+export const PERMISOS_DEFAULT: Permisos = {
+  bodegaCrearProductos: true,
+  bodegaAjustarStock: true,
+  bodegaRegistrarCompras: true,
+  choferRegistrarCompras: false,
+};
 
 export interface Producto {
   id: string;
