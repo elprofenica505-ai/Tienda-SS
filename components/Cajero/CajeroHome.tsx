@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc, addDoc } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Orden, UsuarioSistema } from '@/components/shared/types';
 
@@ -47,7 +47,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
-  // Cargar créditos activos de clientes (Módulo de Fiados/Créditos)
+  // Cargar créditos activos de clientes
   const cargarCreditos = async () => {
     try {
       const q = query(collection(db, 'creditos'));
@@ -67,7 +67,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     cargarCreditos();
   }, []);
 
-  // Manejo de escáner láser
+  // Manejo de escáner láser o búsqueda por ID de orden
   const handleBusquedaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const valor = e.target.value.replace(/[\n\r]+/g, '').trim();
     setCodigoBusqueda(valor);
@@ -90,7 +90,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const efectivoNum = parseFloat(montoEfectivoRecibido) || 0;
   const vuelto = Math.max(0, efectivoNum - totalOrden);
 
-  // Procesar cobro de preventa
+  // Procesar cobro de preventa e imprimir ticket corregido
   const confirmarCobro = async () => {
     if (!ordenSeleccionada || !ordenSeleccionada.id) return;
 
@@ -122,13 +122,15 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       }
 
       setUltimaOrdenCobrada(ordenSeleccionada);
-      setTimeout(() => {
-        window.print();
-      }, 300);
-
       setOrdenesPendientes(prev => prev.filter(o => o.id !== ordenSeleccionada.id));
       setOrdenSeleccionada(null);
       setMontoEfectivoRecibido('');
+
+      // Disparar impresión térmica corregida con retraso para renderizar el DOM
+      setTimeout(() => {
+        window.print();
+      }, 400);
+
       alert('¡Cobro procesado con éxito, inventario actualizado y gaveta abierta!');
     } catch (e) {
       console.error(e);
@@ -172,58 +174,62 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
       
-      {/* ESTILOS DE IMPRESIÓN TÉRMICA */}
+      {/* ESTILOS DE IMPRESIÓN TÉRMICA CORREGIDOS (Evita ticket en blanco) */}
       <style jsx global>{`
         @media print {
           body * { visibility: hidden !important; }
           #ticket-impresion, #ticket-impresion * { visibility: visible !important; }
           #ticket-impresion {
-            position: absolute; left: 0; top: 0; width: 100%;
-            background: white !important; color: black !important; padding: 10px; font-family: monospace;
+            display: block !important;
+            position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important;
+            background: #ffffff !important; color: #000000 !important; padding: 15px !important; font-family: monospace !important;
           }
         }
       `}</style>
 
-      {/* TICKET TÉRMICO OCULTO */}
-      {ultimaOrdenCobrada && (
-        <div id="ticket-impresion" style={{ display: 'none' }}>
-          <div style={{ textAlign: 'center', marginBottom: 10 }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>TIENDA SS - ELECTROHOGAR</h2>
-            <p style={{ fontSize: 11, margin: '2px 0' }}>Comprobante de Caja</p>
-            <p style={{ fontSize: 10, margin: '2px 0' }}>Orden: {ultimaOrdenCobrada.id}</p>
-            <p style={{ fontSize: 10, margin: '2px 0' }}>Cajero: {user.nombre || user.email}</p>
-            <p style={{ fontSize: 10, margin: '2px 0' }}>Método: {metodoPago.toUpperCase()}</p>
-            <p style={{ fontSize: 10, margin: '2px 0' }}>Fecha: {new Date().toLocaleString()}</p>
+      {/* TICKET TÉRMICO DE IMPRESIÓN */}
+      <div id="ticket-impresion" style={{ display: 'none' }}>
+        {ultimaOrdenCobrada && (
+          <div>
+            <div style={{ textAlign: 'center', marginBottom: 10 }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 'bold' }}>TIENDA SS - ELECTROHOGAR</h2>
+              <p style={{ fontSize: 11, margin: '2px 0' }}>Comprobante Oficial de Caja</p>
+              <p style={{ fontSize: 10, margin: '2px 0' }}>Orden ID: {ultimaOrdenCobrada.id}</p>
+              <p style={{ fontSize: 10, margin: '2px 0' }}>Vendedor: {ultimaOrdenCobrada.vendedorNombre}</p>
+              <p style={{ fontSize: 10, margin: '2px 0' }}>Cajero: {user.nombre || user.email}</p>
+              <p style={{ fontSize: 10, margin: '2px 0' }}>Método: {metodoPago.toUpperCase()}</p>
+              <p style={{ fontSize: 10, margin: '2px 0' }}>Fecha: {new Date().toLocaleString()}</p>
+            </div>
+            <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
+            <div style={{ fontSize: 11 }}>
+              {ultimaOrdenCobrada.items?.map((item: any, i: number) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span>{item.cantidad}x {item.nombre}</span>
+                  <span>${(item.precio * item.cantidad)?.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+            <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold' }}>
+              <span>TOTAL PAGADO:</span>
+              <span>${ultimaOrdenCobrada.total?.toLocaleString()}</span>
+            </div>
+            {metodoPago === 'efectivo' && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+                  <span>EFECTIVO RECIBIDO:</span>
+                  <span>${efectivoNum.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span>CAMBIO / VUELTO:</span>
+                  <span>${vuelto.toLocaleString()}</span>
+                </div>
+              </>
+            )}
+            <p style={{ textAlign: 'center', fontSize: 10, marginTop: 15 }}>¡Gracias por su preferencia en Tienda-SS!</p>
           </div>
-          <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
-          <div style={{ fontSize: 11 }}>
-            {ultimaOrdenCobrada.items?.map((item: any, i: number) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span>{item.cantidad}x {item.nombre}</span>
-                <span>${(item.precio * item.cantidad)?.toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-          <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold' }}>
-            <span>TOTAL:</span>
-            <span>${ultimaOrdenCobrada.total?.toLocaleString()}</span>
-          </div>
-          {metodoPago === 'efectivo' && (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-                <span>RECIBIDO:</span>
-                <span>${efectivoNum.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-                <span>CAMBIO/VUELTO:</span>
-                <span>${vuelto.toLocaleString()}</span>
-              </div>
-            </>
-          )}
-          <p style={{ textAlign: 'center', fontSize: 10, marginTop: 15 }}>¡Gracias por su preferencia!</p>
-        </div>
-      )}
+        )}
+      </div>
 
       <div style={{ maxWidth: 650, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         
@@ -377,7 +383,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                   <p style={{ fontWeight: 800, color: '#c7d2fe', margin: 0, fontSize: 13 }}>Cliente: {clienteSeleccionado.nombreCliente}</p>
                   <button onClick={() => setClienteSeleccionado(null)} style={{ background: 'transparent', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer' }}>✕ Volver</button>
                 </div>
-                <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Cédula: {clienteSeleccionado.cedula || 'N/D'}</p>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Cédula: {clienteSeleccionado.cedula || 'N/D'} | Artículo: {clienteSeleccionado.articulo || 'N/D'}</p>
                 <p style={{ fontSize: 14, fontWeight: 800, color: '#ef4444', margin: '6px 0' }}>Saldo Pendiente: ${clienteSeleccionado.saldoPendiente?.toLocaleString()}</p>
                 
                 <div style={{ background: '#111827', borderRadius: 8, padding: 8, margin: '8px 0', maxHeight: 90, overflowY: 'auto' }}>
@@ -417,7 +423,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                     .map(c => (
                       <div key={c.id} onClick={() => setClienteSeleccionado(c)} style={{ background: '#1f2937', borderRadius: 10, padding: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
                         <div>
-                          <p style={{ fontSize: 13, fontWeight: 700, margin: 0, color: '#fff' }}>{c.nombreCliente}</p>
+                          <p style={{ fontSize: 13, fontWeight: 700, margin: 0, color: '#fff' }}>{c.nombreCliente} {c.articulo ? `(${c.articulo})` : ''}</p>
                           <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Plazo: {c.plazoMeses} meses · Cuota: ${c.cuotaMensual}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
