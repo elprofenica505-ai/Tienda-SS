@@ -844,14 +844,17 @@ export default function JefePanel({
                   style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
                 <input type="password" placeholder="Contraseña" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)}
                   style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }} />
-                <select value={nuevoRolUsuario} onChange={e => setNuevoRolUsuario(e.target.value)}
-                  style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }}>
-                  <option value="vendedor">Vendedor</option>
-                  <option value="bodega">Bodega</option>
-                  <option value="chofer">Chofer</option>
-                  <option value="cajero">Cajero</option>
-                  <option value="jefe">Jefe</option>
-                </select>
+                <select 
+  value={nuevoRolUsuario} 
+  onChange={e => setNuevoRolUsuario(e.target.value)}
+  style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }}
+>
+  <option value="vendedor">Vendedor</option>
+  <option value="bodega">Bodega</option>
+  <option value="chofer">Chofer</option>
+  <option value="cajero">Cajero</option>
+  <option value="jefe">Jefe</option>
+</select>
                 <button type="submit" disabled={guardandoUsuario}
                   style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>
                   {guardandoUsuario ? 'Guardando...' : 'Registrar usuario'}
