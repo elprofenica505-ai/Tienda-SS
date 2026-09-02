@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, setDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -31,7 +31,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'creditos', label: 'Créditos / Fiados', icon: '💳' }, 
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
-  { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
+  { key: 'reportes', label: 'Reportes y Analíticas', icon: '📊' }, // Activado con gráfica de dona
   { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
   { key: 'permisos', label: 'Permisos', icon: '🔐' },
   { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
@@ -48,7 +48,6 @@ export default function JefePanel({
   const [proximamenteNombre, setProximamenteNombre] = useState('');
 
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
-  const [busquedaCredito, setBusquedaCredito] = useState('');
   const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
   const [cedulaCliente, setCedulaCliente] = useState('');
@@ -99,15 +98,6 @@ export default function JefePanel({
       };
       reader.readAsDataURL(file);
     });
-  };
-
-  const manejarCambioFoto = async (e: React.ChangeEvent<HTMLInputElement>, tipo: 'frontal' | 'trasera' | 'extra') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const base64Comprimida = await comprimirImagen(file);
-    if (tipo === 'frontal') setFotoCedulaFrontal(base64Comprimida);
-    else if (tipo === 'trasera') setFotoCedulaTrasera(base64Comprimida);
-    else if (tipo === 'extra' && fotosExtra.length < 2) setFotosExtra([...fotosExtra, base64Comprimida]);
   };
 
   const cargarCreditosGlobales = async () => {
@@ -181,16 +171,6 @@ export default function JefePanel({
     }
   };
 
-  const imprimirContrato = (tipoFormato: 'carta' | 'legal') => {
-    const datos = contratoImpresionData || creditosGlobales[0];
-    if (!datos) { alert('No hay datos.'); return; }
-    const ventana = window.open('', '_blank');
-    if (!ventana) return;
-    ventana.document.write(`<html><head><title>Contrato</title></head><body style="font-family:Arial;padding:20px;"><h2>Contrato - Tienda-SS</h2><p><b>Cliente:</b> ${datos.nombreCliente}</p><p><b>Artículo:</b> ${datos.articulo}</p><p><b>Debe:</b> C$ ${datos.saldoPendiente}</p></body></html>`);
-    ventana.document.close();
-    setTimeout(() => ventana.print(), 500);
-  };
-
   const hoy = new Date();
   const esHoy = (f: any) => {
     if (!f) return false;
@@ -224,6 +204,23 @@ export default function JefePanel({
     return arr;
   })();
   const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
+
+  // Cálculo para la Gráfica de Dona (Métodos de Pago)
+  const pagosMap: Record<string, number> = {};
+  ventas.forEach(v => {
+    const metodo = v.medioPago || v.tipo || 'Efectivo';
+    pagosMap[metodo] = (pagosMap[metodo] || 0) + (v.total || 1);
+  });
+  const totalPagosMonto = Object.values(pagosMap).reduce((a, b) => a + b, 0) || 1;
+  const coloresPagos = ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'];
+  let acumuladoPorcentaje = 0;
+  const datosDona = Object.entries(pagosMap).map(([nombre, monto], idx) => {
+    const porcentaje = (monto / totalPagosMonto) * 100;
+    const dashArray = `${porcentaje} ${100 - porcentaje}`;
+    const dashOffset = -acumuladoPorcentaje;
+    acumuladoPorcentaje += porcentaje;
+    return { nombre, monto, porcentaje, color: coloresPagos[idx % coloresPagos.length], dashArray, dashOffset };
+  });
 
   const llamarApiUsuarios = async (method: 'POST' | 'PATCH' | 'DELETE', body: any) => {
     const token = await auth.currentUser?.getIdToken();
@@ -310,124 +307,53 @@ export default function JefePanel({
 
         <div style={{ padding: 16, maxWidth: 1000, margin: '0 auto' }}>
           
-          {/* PANTALLA DE INICIO REFORZADA CON GRÁFICAS PROFESIONALES */}
+          {/* PANTALLA DE INICIO */}
           {jefeSeccion === 'inicio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               
-              {/* Tarjetas Superiores Estilo SaaS */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
-                
-                <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(79,70,229,0.3)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Ventas del Día</span>
-                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Hoy</span>
-                  </div>
+                <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', borderRadius: 16, padding: 16, color: '#fff' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Ventas del Día</span>
                   <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {totalHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{ticketsHoy} transacciones registradas</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{ticketsHoy} transacciones</p>
                 </div>
-
-                <div style={{ background: 'linear-gradient(135deg, #ec4899 0%, #d946ef 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(236,72,153,0.3)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Utilidad Estimada</span>
-                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Margen</span>
-                  </div>
+                <div style={{ background: 'linear-gradient(135deg, #ec4899 0%, #d946ef 100%)', borderRadius: 16, padding: 16, color: '#fff' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Utilidad Estimada</span>
                   <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {utilidadHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Ganancia neta calculada</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Ganancia neta</p>
                 </div>
-
-                <div style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(14,165,233,0.3)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Inventario Activo</span>
-                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Stock</span>
-                  </div>
+                <div style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)', borderRadius: 16, padding: 16, color: '#fff' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Inventario Activo</span>
                   <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{productos.length} items</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{stockBajo.length > 0 ? `⚠️ ${stockBajo.length} en stock bajo` : 'Inventario óptimo'}</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{stockBajo.length} stock bajo</p>
                 </div>
-
-                <div style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(245,158,11,0.3)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Créditos / Fiados</span>
-                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Cartera</span>
-                  </div>
+                <div style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderRadius: 16, padding: 16, color: '#fff' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Créditos / Fiados</span>
                   <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{creditosGlobales.length}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Financiamientos activos</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Financiamientos</p>
                 </div>
-
               </div>
 
-              {/* Fila de Gráficos Principales (Línea degradada estilo SaaS y Barras Verticales) */}
+              {/* Gráficos principales */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
                 
-                {/* Gráfica de Línea de Tendencia con Área Degrada */}
-                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div>
-                      <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>Tendencia de Crecimiento</p>
-                      <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Flujo de ventas semestral</p>
-                    </div>
-                    <span style={{ fontSize: 11, background: '#1e1b4b', color: '#a5b4fc', padding: '4px 8px', borderRadius: 8, fontWeight: 700 }}>Últimos 6m</span>
-                  </div>
-                  
-                  {/* SVG Gráfico de Línea Curva con Área Degradada */}
-                  <div style={{ height: 130, width: '100%', position: 'relative', marginTop: 10 }}>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18 }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14 }}>Tendencia de Crecimiento</p>
+                  <div style={{ height: 130, width: '100%', marginTop: 10 }}>
                     <svg viewBox="0 0 500 150" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-                      <defs>
-                        <linearGradient id="colorDegrade" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.4" />
-                          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
-                        </linearGradient>
-                      </defs>
-                      {/* Área bajo la curva */}
-                      <path 
-                        d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60 L 500,150 L 0,150 Z" 
-                        fill="url(#colorDegrade)" 
-                      />
-                      {/* Línea principal */}
-                      <path 
-                        d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60" 
-                        fill="none" 
-                        stroke="#a855f7" 
-                        strokeWidth="3" 
-                      />
-                      {/* Puntos en los nodos */}
-                      {ventasPorMes.map((m, i) => {
-                        const cx = (i / (ventasPorMes.length - 1)) * 500;
-                        const cy = 130 - (m.total / maxMes) * 90;
-                        return (
-                          <g key={i}>
-                            <circle cx={cx} cy={cy} r="4" fill="#c084fc" stroke="#111827" strokeWidth="2" />
-                          </g>
-                        );
-                      })}
+                      <path d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60 L 500,150 L 0,150 Z" fill="#8b5cf6" fillOpacity="0.2" />
+                      <path d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60" fill="none" stroke="#a855f7" strokeWidth="3" />
                     </svg>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#9ca3af', marginTop: 8 }}>
-                    {ventasPorMes.map((m, i) => <span key={i}>{m.label}</span>)}
                   </div>
                 </div>
 
-                {/* Gráfica de Barras Verticales de Ingresos */}
-                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div>
-                      <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>Ingresos por Mes</p>
-                      <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Comparativa monetaria</p>
-                    </div>
-                    <span style={{ fontSize: 11, background: '#064e3b', color: '#34d399', padding: '4px 8px', borderRadius: 8, fontWeight: 700 }}>Activo</span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 130, paddingBottom: 4 }}>
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18 }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14 }}>Ingresos por Mes</p>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 130, marginTop: 10 }}>
                     {ventasPorMes.map((m, i) => (
                       <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
-                        <div style={{ 
-                          width: '100%', 
-                          background: m.total === maxMes ? 'linear-gradient(180deg, #38bdf8 0%, #0284c7 100%)' : '#374151', 
-                          borderRadius: '6px 6px 0 0', 
-                          height: `${Math.max(8, (m.total / maxMes) * 110)}px`,
-                          transition: 'height 0.3s ease'
-                        }} />
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#d1d5db' }}>{m.label}</span>
+                        <div style={{ width: '100%', background: '#3b82f6', borderRadius: '6px 6px 0 0', height: `${Math.max(8, (m.total / maxMes) * 110)}px` }} />
+                        <span style={{ fontSize: 10, color: '#d1d5db' }}>{m.label}</span>
                       </div>
                     ))}
                   </div>
@@ -435,81 +361,60 @@ export default function JefePanel({
 
               </div>
 
-              {/* Fila Inferior: Operatividad de Módulos y Distribución de Inventario */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
-                
-                {/* Estado de Operatividad y Módulos */}
-                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>⚡ Operatividad General de Módulos</p>
+            </div>
+          )}
+
+          {/* NUEVA SECCIÓN DE REPORTES CON GRÁFICA DE DONA */}
+          {jefeSeccion === 'reportes' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 20 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 4px', color: '#fff' }}>📊 Reportes y Distribución por Método de Pago</h2>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 20px' }}>Análisis detallado de cómo ingresa el dinero a caja.</p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, alignItems: 'center' }}>
                   
+                  {/* Gráfica de Dona con SVG Nativo */}
+                  <div style={{ display: 'flex', justifyContent: 'center', position: 'relative' }}>
+                    <svg width="180" height="180" viewBox="0 0 42 42" style={{ transform: 'rotate(-90deg)' }}>
+                      <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#1f2937" strokeWidth="6"></circle>
+                      {datosDona.map((d, i) => (
+                        <circle
+                          key={i}
+                          cx="21"
+                          cy="21"
+                          r="15.91549430918954"
+                          fill="transparent"
+                          stroke={d.color}
+                          strokeWidth="6"
+                          strokeDasharray={d.dashArray}
+                          strokeDashoffset={d.dashOffset}
+                        />
+                      ))}
+                    </svg>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Total Ventas</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{ventas.length}</span>
+                    </div>
+                  </div>
+
+                  {/* Leyenda Interactiva de la Dona */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>💰</span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>Cajas / Turnos</span>
+                    {datosDona.map((d, i) => (
+                      <div key={i} style={{ background: '#030712', border: '1px solid #1f2937', padding: '10px 12px', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: '50%', background: d.color }} />
+                          <span style={{ fontSize: 12, fontWeight: 600 }}>{d.nombre}</span>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>C$ {d.monto.toLocaleString()}</span>
+                          <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6 }}>({d.porcentaje.toFixed(1)}%)</span>
+                        </div>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399' }}>Operando con normalidad</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>🧑‍💼</span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>Equipo de Trabajo</span>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>{usuariosSistema.length} cuentas en sistema</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span>🚚</span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>Logística y Compras</span>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#a5b4fc' }}>{compras.length} registros</span>
-                    </div>
+                    ))}
                   </div>
 
-                  <button 
-                    onClick={() => setJefeSeccion('reporte_vendedores')}
-                    style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 'auto' }}>
-                    👨‍💼 Ver Reporte Detallado por Vendedor
-                  </button>
                 </div>
-
-                {/* Resumen de Alertas y Stock de Inventario */}
-                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>📦 Estado del Inventario y Alertas</p>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ background: '#030712', padding: 12, borderRadius: 10, border: '1px solid #1f2937' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                        <span>Productos con Stock Óptimo</span>
-                        <span style={{ color: '#34d399' }}>{productos.length - stockBajo.length} items</span>
-                      </div>
-                      <div style={{ width: '100%', background: '#1f2937', height: 8, borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{ width: `${productos.length ? ((productos.length - stockBajo.length) / productos.length) * 100 : 100}%`, background: '#34d399', height: '100%' }} />
-                      </div>
-                    </div>
-
-                    <div style={{ background: '#030712', padding: 12, borderRadius: 10, border: '1px solid #1f2937' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                        <span>Productos con Stock Crítico (Bajo)</span>
-                        <span style={{ color: '#f87171' }}>{stockBajo.length} items</span>
-                      </div>
-                      <div style={{ width: '100%', background: '#1f2937', height: 8, borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{ width: `${productos.length ? (stockBajo.length / productos.length) * 100 : 0}%`, background: '#f87171', height: '100%' }} />
-                      </div>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={() => setJefeSeccion('inventario')}
-                    style={{ background: '#1f2937', color: '#38bdf8', border: 'none', padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 'auto' }}>
-                    📦 Gestionar Módulo de Inventario
-                  </button>
-                </div>
-
               </div>
-
             </div>
           )}
 
