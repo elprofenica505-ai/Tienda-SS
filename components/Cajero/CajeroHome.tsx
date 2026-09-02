@@ -30,6 +30,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
 
   // Estados para Cierre de Caja
   const [ventasDelTurno, setVentasDelTurno] = useState<any[]>([]);
+  const [abonosDelTurno, setAbonosDelTurno] = useState<any[]>([]);
   const [efectivoInicialGaveta, setEfectivoInicialGaveta] = useState<string>('0');
   const [efectivoRealEnGaveta, setEfectivoRealEnGaveta] = useState<string>('');
   const [cierreRealizado, setCierreRealizado] = useState(false);
@@ -79,7 +80,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       const lista: any[] = [];
       querySnapshot.forEach((d) => {
         const data = d.data();
-        // Opcional: filtrar por cajero o turno si data.cashierId === user.id
         if (data.cashierId === user.id) {
           lista.push({ id: d.id, ...data });
         }
@@ -90,10 +90,37 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
+  // Cargar abonos realizados por este cajero en la fecha actual para el cierre
+  const cargarAbonosDelTurno = async () => {
+    try {
+      const q = query(collection(db, 'creditos'));
+      const querySnapshot = await getDocs(q);
+      const listaAbonos: any[] = [];
+      const hoyStr = new Date().toDateString();
+
+      querySnapshot.forEach((d) => {
+        const data = d.data();
+        if (data.abonos && Array.isArray(data.abonos)) {
+          data.abonos.forEach((ab: any) => {
+            const fechaAbonoStr = ab.fecha ? new Date(ab.fecha).toDateString() : '';
+            // Validar si el abono fue hoy y si corresponde a este cajero (o si no tiene cajeroId asignado por compatibilidad, se puede filtrar)
+            if (fechaAbonoStr === hoyStr && (ab.cajeroId === user.id || ab.cajero === user.nombre || ab.cajero === user.email)) {
+              listaAbonos.push({ cliente: data.nombreCliente, ...ab });
+            }
+          });
+        }
+      });
+      setAbonosDelTurno(listaAbonos);
+    } catch (e) {
+      console.error('Error al cargar abonos del turno:', e);
+    }
+  };
+
   useEffect(() => {
     cargarPendientes();
     cargarCreditos();
     cargarVentasDelTurno();
+    cargarAbonosDelTurno();
   }, []);
 
   // Manejo de escáner láser o búsqueda por ID de orden
@@ -131,8 +158,15 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   });
 
+  // Sumar los abonos en efectivo del turno
+  let totalEfectivoAbonos = 0;
+  abonosDelTurno.forEach((ab) => {
+    totalEfectivoAbonos += (ab.monto || 0);
+  });
+
   const efectivoInicialNum = parseFloat(efectivoInicialGaveta) || 0;
-  const efectivoEsperadoEnGaveta = efectivoInicialNum + totalEfectivoVentas;
+  // El efectivo esperado ahora incluye tanto las ventas en efectivo como los abonos en efectivo recibidos
+  const efectivoEsperadoEnGaveta = efectivoInicialNum + totalEfectivoVentas + totalEfectivoAbonos;
   const efectivoRealNum = parseFloat(efectivoRealEnGaveta) || 0;
   const diferenciaCaja = efectivoRealNum - efectivoEsperadoEnGaveta;
 
@@ -199,6 +233,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       const abonoReg = {
         fecha: new Date().toISOString(),
         monto: abonoNum,
+        cajeroId: user.id,
         cajero: user.nombre || user.email
       };
 
@@ -212,13 +247,14 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       setMontoAbono('');
       setClienteSeleccionado(null);
       cargarCreditos();
+      cargarAbonosDelTurno();
     } catch (e) {
       console.error(e);
       alert('Error al registrar el abono');
     }
   };
 
-  // Guardar Cierre de Caja en Firestore
+  // Guardar Cierre de Caja en Firestore (Blindado contra undefined)
   const guardarCierreCaja = async () => {
     if (efectivoRealEnGaveta === '') {
       alert('Por favor ingrese el conteo físico del efectivo real en gaveta.');
@@ -226,25 +262,28 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
 
     try {
-      await addDoc(collection(db, 'cierres_caja'), {
-        cajeroId: user.id,
-        cajeroNombre: user.nombre || user.email,
+      const datosCierre = {
+        cajeroId: user?.id || 'unknown',
+        cajeroNombre: user?.nombre || user?.email || 'Cajero',
         fecha: serverTimestamp(),
         efectivoInicial: efectivoInicialNum,
-        totalEfectivoVentas,
-        totalTarjetaVentas,
-        efectivoEsperadoEnGaveta,
-        efectivoRealEnGaveta: efectivoRealNum,
-        diferencia: diferenciaCaja,
-        totalVentasGlobal: totalEfectivoVentas + totalTarjetaVentas,
-        cantidadTransacciones: ventasDelTurno.length
-      });
+        totalEfectivoVentas: Number(totalEfectivoVentas) || 0,
+        totalTarjetaVentas: Number(totalTarjetaVentas) || 0,
+        totalEfectivoAbonos: Number(totalEfectivoAbonos) || 0,
+        efectivoEsperadoEnGaveta: Number(efectivoEsperadoEnGaveta) || 0,
+        efectivoRealEnGaveta: Number(efectivoRealNum) || 0,
+        diferencia: Number(diferenciaCaja) || 0,
+        totalVentasGlobal: (Number(totalEfectivoVentas) || 0) + (Number(totalTarjetaVentas) || 0),
+        cantidadTransacciones: ventasDelTurno.length + abonosDelTurno.length
+      };
+
+      await addDoc(collection(db, 'cierres_caja'), datosCierre);
 
       setCierreRealizado(true);
       alert('¡Cierre de caja registrado y guardado exitosamente!');
     } catch (e) {
-      console.error(e);
-      alert('Error al guardar el cierre de caja');
+      console.error('Error detallado al cerrar caja:', e);
+      alert('Error al guardar el cierre de caja. Revisa la consola.');
     }
   };
 
@@ -524,7 +563,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <p style={{ fontWeight: 800, fontSize: 14, margin: 0 }}>🔒 Cierre de Caja Real y Funcional</p>
-              <button onClick={cargarVentasDelTurno} style={{ background: '#374151', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Actualizar Ventas</button>
+              <button onClick={() => { cargarVentasDelTurno(); cargarAbonosDelTurno(); }} style={{ background: '#374151', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Actualizar Ventas</button>
             </div>
 
             <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -538,7 +577,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
             </div>
 
             <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', margin: '0 0 4px' }}>📊 Resumen del Turno Actual ({ventasDelTurno.length} preventas cobradas)</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', margin: '0 0 4px' }}>📊 Resumen del Turno Actual ({ventasDelTurno.length} preventas y {abonosDelTransaccionCount => abonosDelTurno.length} abonos)</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
                 <span>Total Ventas en Efectivo:</span>
                 <span style={{ fontWeight: 'bold', color: '#34d399' }}>${totalEfectivoVentas.toLocaleString()}</span>
@@ -546,6 +585,10 @@ export default function CajeroHome({ user, onCerrar }: Props) {
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
                 <span>Total Ventas con Tarjeta:</span>
                 <span style={{ fontWeight: 'bold', color: '#60a5fa' }}>${totalTarjetaVentas.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
+                <span>Total Abonos en Efectivo:</span>
+                <span style={{ fontWeight: 'bold', color: '#f59e0b' }}>${totalEfectivoAbonos.toLocaleString()}</span>
               </div>
               <hr style={{ border: '0', borderTop: '1px solid #374151', margin: '6px 0' }} />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold', color: '#fff' }}>
