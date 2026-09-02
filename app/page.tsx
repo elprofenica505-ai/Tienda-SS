@@ -14,8 +14,6 @@ import dynamic from 'next/dynamic';
 const Login = dynamic(() => import('@/components/Login'), { ssr: false });
 const JefePanel = dynamic(() => import('@/components/Jefe/JefePanel'), { ssr: false });
 const VendedorHome = dynamic(() => import('@/components/Vendedor/VendedorHome'), { ssr: false });
-const AbrirCaja = dynamic(() => import('@/components/Vendedor/AbrirCaja'), { ssr: false });
-const CerrarCaja = dynamic(() => import('@/components/Vendedor/CerrarCaja'), { ssr: false });
 const Ticket = dynamic(() => import('@/components/Vendedor/Ticket'), { ssr: false });
 const BodegaHome = dynamic(() => import('@/components/Bodega/BodegaHome'), { ssr: false });
 const BodegaCompra = dynamic(() => import('@/components/Bodega/BodegaCompra'), { ssr: false });
@@ -240,10 +238,6 @@ export default function TiendaSS() {
     return (
       <BodegaCompra
         user={user}
-        compras={compras}
-        setCompras={setCompras}
-        volver={volver}
-        onCerrar={cerrar}
       />
     );
   }
