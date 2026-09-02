@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, setDoc, collection, getDocs, query } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -27,7 +27,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'compras', label: 'Compras', icon: '🚚' },
   { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
   { key: 'proveedores', label: 'Proveedores', icon: '🏭', proximamente: true },
-  { key: 'creditos', label: 'Créditos / fiados', icon: '💳' }, // Activado para control gerencial
+  { key: 'creditos', label: 'Créditos / Fiados', icon: '💳' }, 
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
   { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
@@ -52,9 +52,33 @@ export default function JefePanel({
   const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
   const [guardandoUsuario, setGuardandoUsuario] = useState(false);
 
-  // Estados para supervisión de créditos por el Jefe
+  // Estados para supervisión y creación de créditos por el Jefe con Autocalculadora
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
   const [busquedaCredito, setBusquedaCredito] = useState('');
+  
+  // Formulario de Nuevo Crédito / Fiado
+  const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
+  const [nombreCliente, setNombreCliente] = useState('');
+  const [cedulaCliente, setCedulaCliente] = useState('');
+  const [telefonoCliente, setTelefonoCliente] = useState('');
+  const [direccionCliente, setDireccionCliente] = useState('');
+  const [fiadorCliente, setFiadorCliente] = useState('');
+  const [articuloFiado, setArticuloFiado] = useState('');
+  const [precioBaseArticulo, setPrecioBaseArticulo] = useState('');
+  const [primaMonto, setPrimaMonto] = useState('');
+  const [plazoSeleccionado, setPlazoSeleccionado] = useState(12);
+
+  // Porcentajes de recargo editables por el Jefe según el plazo (configurable)
+  const [porcentajesPlazos, setPorcentajesPlazos] = useState<Record<number, number>>({
+    3: 5,
+    6: 10,
+    9: 15,
+    12: 20,
+    18: 30,
+    24: 40,
+    30: 50,
+    36: 60
+  });
 
   const cargarCreditosGlobales = async () => {
     try {
@@ -73,6 +97,61 @@ export default function JefePanel({
   useEffect(() => {
     cargarCreditosGlobales();
   }, []);
+
+  // Autocalculadora Financiera
+  const precioBaseNum = parseFloat(precioBaseArticulo) || 0;
+  const primaNum = parseFloat(primaMonto) || 0;
+  const porcentajeRecargo = porcentajesPlazos[plazoSeleccionado] || 0;
+  
+  const subtotalFinanciar = Math.max(0, precioBaseNum - primaNum);
+  const montoConRecargo = subtotalFinanciar * (1 + porcentajeRecargo / 100);
+  const cuotaMensualCalculada = plazoSeleccionado > 0 ? (montoConRecargo / plazoSeleccionado).toFixed(2) : '0';
+
+  const guardarNuevoCredito = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nombreCliente.trim() || precioBaseNum <= 0) {
+      alert('Ingrese el nombre del cliente y un precio válido del producto.');
+      return;
+    }
+
+    try {
+      const dataCredito = {
+        nombreCliente: nombreCliente.trim(),
+        cedula: cedulaCliente.trim(),
+        telefono: telefonoCliente.trim(),
+        direccion: direccionCliente.trim(),
+        fiador: fiadorCliente.trim(),
+        articulo: articuloFiado.trim(),
+        precioBase: precioBaseNum,
+        prima: primaNum,
+        plazoMeses: plazoSeleccionado,
+        porcentajeRecargoApplied: porcentajeRecargo,
+        saldoPendiente: parseFloat(montoConRecargo.toFixed(2)),
+        cuotaMensual: parseFloat(cuotaMensualCalculada),
+        fechaCreacion: serverTimestamp(),
+        creadoPor: user.nombre || user.email,
+        abonos: []
+      };
+
+      await addDoc(collection(db, 'creditos'), dataCredito);
+      alert('¡Crédito / Fiado autorizado y registrado exitosamente en el sistema y disponible para el cajero!');
+      
+      // Limpiar formulario
+      setNombreCliente('');
+      setCedulaCliente('');
+      setTelefonoCliente('');
+      setDireccionCliente('');
+      setFiadorCliente('');
+      setArticuloFiado('');
+      setPrecioBaseArticulo('');
+      setPrimaMonto('');
+      setMostrarFormCredito(false);
+      cargarCreditosGlobales();
+    } catch (err) {
+      console.error(err);
+      alert('Error al registrar el crédito');
+    }
+  };
 
   const hoy = new Date();
   const esHoy = (f: any) => {
@@ -290,31 +369,6 @@ export default function JefePanel({
                   ))}
                 </div>
               </div>
-
-              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
-                <p style={{ fontWeight: 700, margin: '0 0 8px', fontSize: 13 }}>Por medio de pago (hoy)</p>
-                {Object.keys(porPago).length === 0 ? (
-                  <p style={{ fontSize: 12, color: '#6b7280' }}>Sin ventas aún</p>
-                ) : (
-                  Object.entries(porPago).map(([medio, total]) => (
-                    <div key={medio} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                      <span>{medio}</span>
-                      <span style={{ fontWeight: 700, color: '#34d399' }}>${total.toLocaleString()}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {turnosAbiertosAhora.length > 0 && (
-                <div style={{ background: '#052e2b', border: '1px solid #0d9488', borderRadius: 14, padding: 14 }}>
-                  <p style={{ fontWeight: 700, color: '#5eead4', margin: '0 0 8px', fontSize: 13 }}>Cajas abiertas ahora ({turnosAbiertosAhora.length})</p>
-                  {turnosAbiertosAhora.map(t => (
-                    <p key={t.id} style={{ fontSize: 12, margin: '2px 0', color: '#99f6e4' }}>
-                      {t.vendedorNombre} · Inicial ${t.montoInicial}
-                    </p>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
@@ -343,39 +397,111 @@ export default function JefePanel({
             <ProductosAdmin />
           )}
 
-          {jefeSeccion === 'compras' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Historial de compras ({compras.length})</p>
-              {compras.slice().sort((a, b) => {
-                const fa = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha || 0);
-                const fb = b.fecha?.toDate ? b.fecha.toDate() : new Date(b.fecha || 0);
-                return fb.getTime() - fa.getTime();
-              }).map(c => (
-                <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700 }}>{c.proveedor}</span>
-                    <span style={{ fontWeight: 800, color: '#34d399' }}>${(c.total || 0).toLocaleString()}</span>
-                  </div>
-                  {(c.items || []).map((it, i) => (
-                    <p key={i} style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>
-                      {it.nombre} x{it.cantidad} · ${it.costoUnitario}/u
-                    </p>
-                  ))}
-                  <p style={{ fontSize: 11, color: '#6b7280', margin: '6px 0 0' }}>Por: {c.creadoPor}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* MÓDULO DE CRÉDITOS Y FIADOS PARA EL JEFE */}
+          {/* MÓDULO DE CRÉDITOS Y FIADOS CON AUTOCALCULADORA PARA EL JEFE */}
           {jefeSeccion === 'creditos' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Supervisión General de Créditos y Fiados</p>
-                <button onClick={cargarCreditosGlobales} style={{ background: '#374151', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  Actualizar
-                </button>
+                <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Gestión y Supervisión de Créditos / Fiados</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setMostrarFormCredito(!mostrarFormCredito)} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    {mostrarFormCredito ? '✕ Cerrar Formulario' : '➕ Nuevo Crédito / Fiado'}
+                  </button>
+                  <button onClick={cargarCreditosGlobales} style={{ background: '#374151', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    Actualizar
+                  </button>
+                </div>
               </div>
+
+              {/* FORMULARIO DE NUEVO CRÉDITO Y AUTOCALCULADORA */}
+              {mostrarFormCredito && (
+                <form onSubmit={guardarNuevoCredito} style={{ background: '#111827', border: '1px solid #4338ca', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <p style={{ fontWeight: 800, color: '#c7d2fe', margin: 0, fontSize: 14 }}>📝 Asignar Venta al Crédito (Requisitos Bancarios / Legales)</p>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Nombre Completo del Cliente:</label>
+                      <input placeholder="Ej: Juan Pérez" value={nombreCliente} onChange={e => setNombreCliente(e.target.value)} required
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula / Identificación:</label>
+                      <input placeholder="Ej: 001-XXXXXX-XXXX" value={cedulaCliente} onChange={e => setCedulaCliente(e.target.value)} required
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Teléfono de Contacto:</label>
+                      <input placeholder="Ej: +505 88888888" value={telefonoCliente} onChange={e => setTelefonoCliente(e.target.value)}
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Nombre del Fiador / Referencia:</label>
+                      <input placeholder="Ej: María Gómez" value={fiadorCliente} onChange={e => setFiadorCliente(e.target.value)}
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: 11, color: '#9ca3af' }}>Dirección Domiciliar:</label>
+                    <input placeholder="Ej: De los semáforos 2 cuadras al lago..." value={direccionCliente} onChange={e => setDireccionCliente(e.target.value)}
+                      style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Electrodoméstico / Mueble / Artículo:</label>
+                      <input placeholder="Ej: Refrigeradora LG 14 Pies" value={articuloFiado} onChange={e => setArticuloFiado(e.target.value)} required
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Precio Base ($):</label>
+                      <input type="number" placeholder="3000" value={precioBaseArticulo} onChange={e => setPrecioBaseArticulo(e.target.value)} required
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Prima / Enganche ($):</label>
+                      <input type="number" placeholder="500" value={primaMonto} onChange={e => setPrimaMonto(e.target.value)}
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                    </div>
+                  </div>
+
+                  {/* Configuración de Plazos y Recargos */}
+                  <div style={{ background: '#1e1b4b', padding: 12, borderRadius: 10, border: '1px solid #312e81' }}>
+                    <p style={{ fontWeight: 700, fontSize: 12, color: '#c7d2fe', margin: '0 0 8px' }}>⚡ Autocalculadora de Plazo y Porcentajes de Financiamiento</p>
+                    
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                      {[3, 6, 9, 12, 18, 24, 30, 36].map(meses => (
+                        <button
+                          type="button"
+                          key={meses}
+                          onClick={() => setPlazoSeleccionado(meses)}
+                          style={{
+                            background: plazoSeleccionado === meses ? '#4f46e5' : '#111827',
+                            color: '#fff', border: '1px solid #374151', padding: '6px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer'
+                          }}>
+                          {meses} Meses ({porcentajesPlazos[meses]}%)
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#e5e7eb', marginTop: 6 }}>
+                      <span>Plazo seleccionado: <b>{plazoSeleccionado} meses</b></span>
+                      <span>Porcentaje de recargo aplicado: <b>{porcentajeRecargo}%</b></span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold', color: '#34d399', marginTop: 6, borderTop: '1px solid #374151', paddingTop: 6 }}>
+                      <span>Total Financiado con Intereses: <b>${montoConRecargo.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+                      <span>Cuota Mensual: <b>${cuotaMensualCalculada}</b></span>
+                    </div>
+                  </div>
+
+                  <button type="submit" style={{ width: '100%', background: '#059669', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                    Aprobar y Enviar Crédito a Caja
+                  </button>
+                </form>
+              )}
 
               <input
                 placeholder="🔍 Buscar cliente por nombre o cédula..."
@@ -393,8 +519,8 @@ export default function JefePanel({
                     .map(c => (
                       <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente}</p>
-                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Cédula: {c.cedula || 'N/D'} · Plazo: <b>{c.plazoMeses} meses</b></p>
+                          <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente} {c.articulo ? `(${c.articulo})` : ''}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Cédula: {c.cedula || 'N/D'} · Plazo: <b>{c.plazoMeses} meses</b> · Fiador: {c.fiador || 'N/D'}</p>
                           <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: ${c.cuotaMensual} · Abonos realizados: {c.abonos?.length || 0}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
@@ -413,7 +539,7 @@ export default function JefePanel({
               {turnos.slice().sort((a, b) => {
                 const fa = a.fechaApertura?.toDate ? a.fechaApertura.toDate() : new Date(a.fechaApertura || 0);
                 const fb = b.fechaApertura?.toDate ? b.fechaApertura.toDate() : new Date(b.fechaApertura || 0);
-                return fb.getTime() - fb.getTime(); // Orden descendente corregido
+                return fb.getTime() - fa.getTime();
               }).map(t => (
                 <div key={t.id} style={{
                   background: '#111827',
@@ -457,6 +583,7 @@ export default function JefePanel({
                   <option value="vendedor">Vendedor</option>
                   <option value="bodega">Bodega</option>
                   <option value="chofer">Chofer</option>
+                  <option value="cajero">Cajero</option>
                   <option value="jefe">Jefe</option>
                 </select>
                 <button type="submit" disabled={guardandoUsuario}
@@ -490,16 +617,20 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* PERMISOS GENERALES INCLUYENDO CAJA */}
           {jefeSeccion === 'permisos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
-                Activa o desactiva lo que puede hacer bodega y chofer. Se guarda solo en Firebase.
+                Activa o desactiva los permisos del personal en el sistema. Se guarda en tiempo real en Firebase.
               </p>
               {([
                 { key: 'bodegaCrearProductos' as const, label: 'Bodega: crear productos nuevos' },
                 { key: 'bodegaAjustarStock' as const, label: 'Bodega: ajustar stock' },
                 { key: 'bodegaRegistrarCompras' as const, label: 'Bodega: registrar compras a proveedores' },
                 { key: 'choferRegistrarCompras' as const, label: 'Chofer: registrar compras a proveedores' },
+                { key: 'cajaAbrirCerrar' as const, label: 'Caja: abrir y cerrar turnos y gaveta' },
+                { key: 'cajaCobrarPreventas' as const, label: 'Caja: cobrar preventas y emitir tickets' },
+                { key: 'cajaGestionarCreditos' as const, label: 'Caja: registrar abonos a créditos y fiados' },
               ]).map(item => (
                 <div key={item.key} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>{item.label}</span>
