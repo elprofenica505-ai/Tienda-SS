@@ -149,7 +149,7 @@ export default function JefePanel({
   })();
   const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
 
-  // Dona métodos de pago
+  // Dona métodos de pago corregida sin 'v.tipo'
   const pagosMap: Record<string, number> = {};
   ventas.forEach(v => {
     const metodo = v.medioPago || 'Efectivo';
@@ -328,7 +328,7 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* CLIENTES (NUEVO MÓDULO) */}
+          {/* CLIENTES */}
           {jefeSeccion === 'clientes' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <form onSubmit={guardarCliente} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -353,7 +353,7 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* PROVEEDORES (NUEVO MÓDULO) */}
+          {/* PROVEEDORES */}
           {jefeSeccion === 'proveedores' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <form onSubmit={guardarProveedor} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -408,7 +408,7 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* GASTOS (NUEVO MÓDULO) */}
+          {/* GASTOS */}
           {jefeSeccion === 'gastos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <form onSubmit={guardarGasto} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -496,7 +496,7 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* CONFIGURACIÓN (NUEVO MÓDULO) */}
+          {/* CONFIGURACIÓN */}
           {jefeSeccion === 'configuracion' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
