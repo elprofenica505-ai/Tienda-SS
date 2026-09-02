@@ -23,6 +23,7 @@ interface Props {
 const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
   { key: 'inicio', label: 'Inicio', icon: '🏠' },
   { key: 'ventas', label: 'Ventas', icon: '🧾' },
+  { key: 'reporte_vendedores', label: 'Ventas por Vendedor', icon: '👨‍💼' },
   { key: 'inventario', label: 'Inventario', icon: '📦' },
   { key: 'compras', label: 'Compras', icon: '🚚' },
   { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
@@ -187,10 +188,8 @@ export default function JefePanel({
         estadoCaja: 'pendiente'
       };
 
-      // 1. Guardar en colección créditos
       const docRef = await addDoc(collection(db, 'creditos'), dataCredito);
       
-      // 2. Registrar simultáneamente en colección ventas para que aparezca en el panel de ventas
       await addDoc(collection(db, 'ventas'), {
         cliente: nombreCliente.trim(),
         tipo: 'Crédito',
@@ -539,6 +538,60 @@ export default function JefePanel({
                   </p>
                 </div>
               ))}
+            </div>
+          )}
+
+          {jefeSeccion === 'reporte_vendedores' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
+                <p style={{ fontSize: 15, fontWeight: 800, margin: '0 0 4px', color: '#38bdf8' }}>📊 Reporte Diario de Productos Vendidos por Vendedor</p>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 16px' }}>Desglose de unidades y artículos vendidos por cada miembro del equipo en el día de hoy.</p>
+
+                {ventasHoy.length === 0 ? (
+                  <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '20px 0' }}>No hay ventas registradas el día de hoy.</p>
+                ) : (
+                  (() => {
+                    // Agrupar ventas del día por vendedor
+                    const porVendedor: Record<string, { totalMonto: number; totalUnidades: number; productos: Record<string, number> }> = {};
+                    
+                    ventasHoy.forEach(v => {
+                      const vendedor = v.vendedorNombre || 'Sin asignar';
+                      if (!porVendedor[vendedor]) {
+                        porVendedor[vendedor] = { totalMonto: 0, totalUnidades: 0, productos: {} };
+                      }
+                      porVendedor[vendedor].totalMonto += (v.total || 0);
+
+                      (v.items || []).forEach((item: any) => {
+                        const nombreProd = item.nombre || 'Producto sin nombre';
+                        const cant = item.cantidad || 1;
+                        porVendedor[vendedor].totalUnidades += cant;
+                        porVendedor[vendedor].productos[nombreProd] = (porVendedor[vendedor].productos[nombreProd] || 0) + cant;
+                      });
+                    });
+
+                    return Object.entries(porVendedor).map(([nombreVendedor, data]) => (
+                      <div key={nombreVendedor} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f2937', paddingBottom: 8, marginBottom: 10 }}>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: '#fff' }}>👨‍💼 {nombreVendedor}</span>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: '#34d399' }}>C$ {data.totalMonto.toLocaleString()}</span>
+                            <p style={{ fontSize: 10, color: '#9ca3af', margin: 0 }}>{data.totalUnidades} unidades vendidas hoy</p>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <p style={{ fontSize: 11, fontWeight: 700, color: '#a5b4fc', margin: 0 }}>Productos despachados:</p>
+                          {Object.entries(data.productos).map(([prod, cantidad], idx) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db', background: '#111827', padding: '6px 10px', borderRadius: 6 }}>
+                              <span>• {prod}</span>
+                              <span style={{ fontWeight: 'bold', color: '#38bdf8' }}>{cantidad} un.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()
+                )}
+              </div>
             </div>
           )}
 
