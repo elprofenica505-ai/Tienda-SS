@@ -141,7 +141,7 @@ export default function VendedorHome({
           )}
           {carrito.length > 0 && (
             <>
-              <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-name', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
+              <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
                 <span>Total Preventa</span>
                 <span style={{ color: '#34d399' }}>${totalCarrito.toLocaleString()}</span>
               </div>
