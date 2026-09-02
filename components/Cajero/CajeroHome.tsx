@@ -576,8 +576,8 @@ export default function CajeroHome({ user, onCerrar }: Props) {
               />
             </div>
 
-            <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', margin: '0 0 4px' }}>📊 Resumen del Turno Actual ({ventasDelTurno.length} preventas y {abonosDelTransaccionCount => abonosDelTurno.length} abonos)</p>
+                        <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', margin: '0 0 4px' }}>📊 Resumen del Turno Actual ({ventasDelTurno.length} preventas y {abonosDelTurno.length} abonos)</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
                 <span>Total Ventas en Efectivo:</span>
                 <span style={{ fontWeight: 'bold', color: '#34d399' }}>${totalEfectivoVentas.toLocaleString()}</span>
