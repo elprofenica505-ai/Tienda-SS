@@ -6,6 +6,7 @@ import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
+import type { Usuario } from '@/lib/auth';
 
 interface Props {
   user: Usuario;
@@ -41,6 +42,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
 ];
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
 
 export default function JefePanel({
   user, productos, ventas, turnos, compras,
@@ -80,7 +82,6 @@ export default function JefePanel({
     30: 50,
     36: 60
   });
-
   const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
   const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
   const [fotosExtra, setFotosExtra] = useState<string[]>([]);
