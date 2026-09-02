@@ -152,7 +152,7 @@ export default function JefePanel({
   // Dona métodos de pago
   const pagosMap: Record<string, number> = {};
   ventas.forEach(v => {
-    const metodo = v.medioPago || v.tipo || 'Efectivo';
+    const metodo = v.medioPago || 'Efectivo';
     pagosMap[metodo] = (pagosMap[metodo] || 0) + (v.total || 1);
   });
   const totalPagosMonto = Object.values(pagosMap).reduce((a, b) => a + b, 0) || 1;
