@@ -47,10 +47,11 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
-  // Cargar créditos activos de clientes
+  // Cargar créditos activos o aprobados de clientes para la libreta de abonos
   const cargarCreditos = async () => {
     try {
-      const q = query(collection(db, 'creditos'));
+      // Filtramos los créditos aprobados para que el cajero pueda gestionarlos
+      const q = query(collection(db, 'creditos'), where('estado', '==', 'aprobado'));
       const querySnapshot = await getDocs(q);
       const lista: any[] = [];
       querySnapshot.forEach((d) => {
@@ -58,7 +59,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       });
       setCreditosClientes(lista);
     } catch (e) {
-      console.error(e);
+      console.error('Error al cargar créditos:', e);
     }
   };
 
@@ -90,7 +91,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const efectivoNum = parseFloat(montoEfectivoRecibido) || 0;
   const vuelto = Math.max(0, efectivoNum - totalOrden);
 
-  // Procesar cobro de preventa e imprimir ticket corregido
+  // Procesar cobro de preventa e imprimir ticket
   const confirmarCobro = async () => {
     if (!ordenSeleccionada || !ordenSeleccionada.id) return;
 
@@ -126,7 +127,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       setOrdenSeleccionada(null);
       setMontoEfectivoRecibido('');
 
-      // Disparar impresión térmica corregida con retraso para renderizar el DOM
       setTimeout(() => {
         window.print();
       }, 400);
@@ -148,7 +148,8 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
 
     try {
-      const nuevoSaldo = Math.max(0, (clienteSeleccionado.saldoPendiente || 0) - abonoNum);
+      const saldoActual = clienteSeleccionado.saldoPendiente ?? clienteSeleccionado.montoTotal ?? 0;
+      const nuevoSaldo = Math.max(0, saldoActual - abonoNum);
       const abonoReg = {
         fecha: new Date().toISOString(),
         monto: abonoNum,
@@ -174,7 +175,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
       
-      {/* ESTILOS DE IMPRESIÓN TÉRMICA CORREGIDOS (Evita ticket en blanco) */}
       <style jsx global>{`
         @media print {
           body * { visibility: hidden !important; }
@@ -244,7 +244,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           </button>
         </div>
 
-        {/* Pestañas de Navegación del Cajero */}
+        {/* Pestañas de Navegación */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button 
             onClick={() => setPestana('cobros')}
@@ -254,11 +254,11 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           <button 
             onClick={() => setPestana('abonos')}
             style={{ flex: 1, padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 13, background: pestana === 'abonos' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
-            📒 Libreta de Abonos y Créditos
+            📒 Libreta de Abonos y Créditos ({creditosClientes.length})
           </button>
         </div>
 
-        {/* CONTENIDO DE PESTAÑA: COBROS */}
+        {/* PESTAÑA COBROS */}
         {pestana === 'cobros' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -274,7 +274,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
               </button>
             </div>
 
-            {/* Modal de Cobro Detallado */}
             {ordenSeleccionada && (
               <div style={{ background: '#1e1b4b', border: '1px solid #4338ca', borderRadius: 16, padding: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -298,7 +297,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                   <span style={{ fontSize: 20, fontWeight: 900, color: '#34d399' }}>${totalOrden.toLocaleString()}</span>
                 </div>
 
-                {/* Selección de Método de Pago */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                   <button onClick={() => setMetodoPago('efectivo')} style={{ flex: 1, padding: 10, borderRadius: 8, fontWeight: 700, background: metodoPago === 'efectivo' ? '#059669' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
                     💵 Efectivo
@@ -308,7 +306,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                   </button>
                 </div>
 
-                {/* Si paga en efectivo, calculamos vuelto */}
                 {metodoPago === 'efectivo' && (
                   <div style={{ background: '#111827', padding: 10, borderRadius: 10, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <label style={{ fontSize: 12, color: '#9ca3af' }}>Efectivo Recibido del Cliente ($):</label>
@@ -334,7 +331,6 @@ export default function CajeroHome({ user, onCerrar }: Props) {
               </div>
             )}
 
-            {/* Lista de Preventas Pendientes */}
             <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14 }}>
               <p style={{ fontWeight: 700, margin: '0 0 10px', fontSize: 13 }}>Preventas en espera de cobro ({ordenesPendientes.length})</p>
               
@@ -366,10 +362,14 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           </div>
         )}
 
-        {/* CONTENIDO DE PESTAÑA: ABONOS Y CRÉDITOS */}
+        {/* PESTAÑA ABONOS Y CRÉDITOS */}
         {pestana === 'abonos' && (
           <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <p style={{ fontWeight: 800, fontSize: 14, margin: 0 }}>📒 Control de Créditos y Libreta de Abonos</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ fontWeight: 800, fontSize: 14, margin: 0 }}>📒 Libreta de Abonos y Créditos Aprobados</p>
+              <button onClick={cargarCreditos} style={{ background: '#374151', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Sincronizar</button>
+            </div>
+            
             <input
               placeholder="🔍 Buscar cliente por nombre o cédula..."
               value={busquedaCliente}
@@ -384,14 +384,14 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                   <button onClick={() => setClienteSeleccionado(null)} style={{ background: 'transparent', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer' }}>✕ Volver</button>
                 </div>
                 <p style={{ fontSize: 12, color: '#9ca3af', margin: '2px 0' }}>Cédula: {clienteSeleccionado.cedula || 'N/D'} | Artículo: {clienteSeleccionado.articulo || 'N/D'}</p>
-                <p style={{ fontSize: 14, fontWeight: 800, color: '#ef4444', margin: '6px 0' }}>Saldo Pendiente: ${clienteSeleccionado.saldoPendiente?.toLocaleString()}</p>
+                <p style={{ fontSize: 14, fontWeight: 800, color: '#ef4444', margin: '6px 0' }}>Saldo Pendiente: ${((clienteSeleccionado.saldoPendiente ?? clienteSeleccionado.montoTotal) || 0).toLocaleString()}</p>
                 
                 <div style={{ background: '#111827', borderRadius: 8, padding: 8, margin: '8px 0', maxHeight: 90, overflowY: 'auto' }}>
                   <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', margin: '0 0 4px' }}>Historial de abonos:</p>
-                  {clienteSeleccionado.abonos?.length === 0 ? (
+                  {(!clienteSeleccionado.abonos || clienteSeleccionado.abonos.length === 0) ? (
                     <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>No hay abonos previos registrados.</p>
                   ) : (
-                    clienteSeleccionado.abonos?.map((ab: any, i: number) => (
+                    clienteSeleccionado.abonos.map((ab: any, i: number) => (
                       <div key={i} style={{ fontSize: 11, display: 'flex', justifyContent: 'space-between', color: '#e5e7eb', marginBottom: 2 }}>
                         <span>{new Date(ab.fecha).toLocaleDateString()}</span>
                         <span style={{ color: '#34d399', fontWeight: 'bold' }}>+${ab.monto}</span>
@@ -416,7 +416,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto' }}>
                 {creditosClientes.length === 0 ? (
-                  <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>No hay créditos activos registrados en el sistema.</p>
+                  <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>No hay créditos aprobados pendientes de cobro en el sistema.</p>
                 ) : (
                   creditosClientes
                     .filter(c => c.nombreCliente?.toLowerCase().includes(busquedaCliente.toLowerCase()))
@@ -427,7 +427,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                           <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Plazo: {c.plazoMeses} meses · Cuota: ${c.cuotaMensual}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <p style={{ fontSize: 12, fontWeight: 800, margin: 0, color: '#ef4444' }}>Debe: ${c.saldoPendiente?.toLocaleString()}</p>
+                          <p style={{ fontSize: 12, fontWeight: 800, margin: 0, color: '#ef4444' }}>Debe: ${((c.saldoPendiente ?? c.montoTotal) || 0).toLocaleString()}</p>
                           <span style={{ fontSize: 10, color: '#34d399' }}>Ver abonos →</span>
                         </div>
                       </div>
