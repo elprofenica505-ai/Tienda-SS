@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Orden, UsuarioSistema } from '@/components/shared/types';
 
@@ -11,7 +11,7 @@ interface Props {
 }
 
 export default function CajeroHome({ user, onCerrar }: Props) {
-  const [pestana, setPestana] = useState<'cobros' | 'abonos'>('cobros');
+  const [pestana, setPestana] = useState<'cobros' | 'abonos' | 'cierre'>('cobros');
   const [ordenesPendientes, setOrdenesPendientes] = useState<Orden[]>([]);
   const [codigoBusqueda, setCodigoBusqueda] = useState('');
   const [cargando, setCargando] = useState(false);
@@ -27,6 +27,12 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const [creditosClientes, setCreditosClientes] = useState<any[]>([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<any | null>(null);
   const [montoAbono, setMontoAbono] = useState<string>('');
+
+  // Estados para Cierre de Caja
+  const [ventasDelTurno, setVentasDelTurno] = useState<any[]>([]);
+  const [efectivoInicialGaveta, setEfectivoInicialGaveta] = useState<string>('0');
+  const [efectivoRealEnGaveta, setEfectivoRealEnGaveta] = useState<string>('');
+  const [cierreRealizado, setCierreRealizado] = useState(false);
 
   // Cargar órdenes pendientes desde Firebase
   const cargarPendientes = async () => {
@@ -47,18 +53,15 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
-    // Cargar créditos activos de clientes para la libreta de abonos
+  // Cargar créditos activos de clientes para la libreta de abonos
   const cargarCreditos = async () => {
     try {
-      // Cargamos todos los créditos de la colección para evitar bloqueos por filtros de estado
       const q = query(collection(db, 'creditos'));
       const querySnapshot = await getDocs(q);
       const lista: any[] = [];
       querySnapshot.forEach((d) => {
         const data = d.data();
-        // Verificamos que tenga saldo pendiente mayor a 0 o que esté activo
         if ((data.saldoPendiente ?? data.montoTotal ?? 0) > 0) {
-          lista.path = d.id;
           lista.push({ id: d.id, ...data });
         }
       });
@@ -68,9 +71,29 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
+  // Cargar ventas completadas del día por este cajero para el cierre
+  const cargarVentasDelTurno = async () => {
+    try {
+      const q = query(collection(db, 'orders'), where('estado', '==', 'completed'));
+      const querySnapshot = await getDocs(q);
+      const lista: any[] = [];
+      querySnapshot.forEach((d) => {
+        const data = d.data();
+        // Opcional: filtrar por cajero o turno si data.cashierId === user.id
+        if (data.cashierId === user.id) {
+          lista.push({ id: d.id, ...data });
+        }
+      });
+      setVentasDelTurno(lista);
+    } catch (e) {
+      console.error('Error al cargar ventas del turno:', e);
+    }
+  };
+
   useEffect(() => {
     cargarPendientes();
     cargarCreditos();
+    cargarVentasDelTurno();
   }, []);
 
   // Manejo de escáner láser o búsqueda por ID de orden
@@ -95,6 +118,23 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const totalOrden = ordenSeleccionada?.total || 0;
   const efectivoNum = parseFloat(montoEfectivoRecibido) || 0;
   const vuelto = Math.max(0, efectivoNum - totalOrden);
+
+  // Lógica de Cálculo para el Cierre de Caja
+  let totalEfectivoVentas = 0;
+  let totalTarjetaVentas = 0;
+
+  ventasDelTurno.forEach((v) => {
+    if (v.metodoPago === 'tarjeta') {
+      totalTarjetaVentas += (v.total || 0);
+    } else {
+      totalEfectivoVentas += (v.total || 0);
+    }
+  });
+
+  const efectivoInicialNum = parseFloat(efectivoInicialGaveta) || 0;
+  const efectivoEsperadoEnGaveta = efectivoInicialNum + totalEfectivoVentas;
+  const efectivoRealNum = parseFloat(efectivoRealEnGaveta) || 0;
+  const diferenciaCaja = efectivoRealNum - efectivoEsperadoEnGaveta;
 
   // Procesar cobro de preventa e imprimir ticket
   const confirmarCobro = async () => {
@@ -131,6 +171,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
       setOrdenesPendientes(prev => prev.filter(o => o.id !== ordenSeleccionada.id));
       setOrdenSeleccionada(null);
       setMontoEfectivoRecibido('');
+      cargarVentasDelTurno();
 
       setTimeout(() => {
         window.print();
@@ -174,6 +215,36 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     } catch (e) {
       console.error(e);
       alert('Error al registrar el abono');
+    }
+  };
+
+  // Guardar Cierre de Caja en Firestore
+  const guardarCierreCaja = async () => {
+    if (efectivoRealEnGaveta === '') {
+      alert('Por favor ingrese el conteo físico del efectivo real en gaveta.');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'cierres_caja'), {
+        cajeroId: user.id,
+        cajeroNombre: user.nombre || user.email,
+        fecha: serverTimestamp(),
+        efectivoInicial: efectivoInicialNum,
+        totalEfectivoVentas,
+        totalTarjetaVentas,
+        efectivoEsperadoEnGaveta,
+        efectivoRealEnGaveta: efectivoRealNum,
+        diferencia: diferenciaCaja,
+        totalVentasGlobal: totalEfectivoVentas + totalTarjetaVentas,
+        cantidadTransacciones: ventasDelTurno.length
+      });
+
+      setCierreRealizado(true);
+      alert('¡Cierre de caja registrado y guardado exitosamente!');
+    } catch (e) {
+      console.error(e);
+      alert('Error al guardar el cierre de caja');
     }
   };
 
@@ -250,16 +321,21 @@ export default function CajeroHome({ user, onCerrar }: Props) {
         </div>
 
         {/* Pestañas de Navegación */}
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
           <button 
             onClick={() => setPestana('cobros')}
-            style={{ flex: 1, padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 13, background: pestana === 'cobros' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
-            ⚡ Cobro de Preventas ({ordenesPendientes.length})
+            style={{ flex: 1, padding: '10px 6px', borderRadius: 10, fontWeight: 700, fontSize: 12, background: pestana === 'cobros' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
+            ⚡ Cobros ({ordenesPendientes.length})
           </button>
           <button 
             onClick={() => setPestana('abonos')}
-            style={{ flex: 1, padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 13, background: pestana === 'abonos' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
-            📒 Libreta de Abonos y Créditos ({creditosClientes.length})
+            style={{ flex: 1, padding: '10px 6px', borderRadius: 10, fontWeight: 700, fontSize: 12, background: pestana === 'abonos' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
+            📒 Abonos ({creditosClientes.length})
+          </button>
+          <button 
+            onClick={() => setPestana('cierre')}
+            style={{ flex: 1, padding: '10px 6px', borderRadius: 10, fontWeight: 700, fontSize: 12, background: pestana === 'cierre' ? '#4f46e5' : '#111827', color: '#fff', border: '1px solid #374151', cursor: 'pointer' }}>
+            🔒 Cierre de Caja
           </button>
         </div>
 
@@ -440,6 +516,69 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* PESTAÑA CIERRE DE CAJA */}
+        {pestana === 'cierre' && (
+          <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ fontWeight: 800, fontSize: 14, margin: 0 }}>🔒 Cierre de Caja Real y Funcional</p>
+              <button onClick={cargarVentasDelTurno} style={{ background: '#374151', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Actualizar Ventas</button>
+            </div>
+
+            <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 12, color: '#9ca3af' }}>Efectivo Inicial en Gaveta (Base / Fondo):</label>
+              <input 
+                type="number"
+                value={efectivoInicialGaveta}
+                onChange={e => setEfectivoInicialGaveta(e.target.value)}
+                style={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, padding: 8, color: '#fff', fontSize: 14, outline: 'none' }}
+              />
+            </div>
+
+            <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', margin: '0 0 4px' }}>📊 Resumen del Turno Actual ({ventasDelTurno.length} preventas cobradas)</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
+                <span>Total Ventas en Efectivo:</span>
+                <span style={{ fontWeight: 'bold', color: '#34d399' }}>${totalEfectivoVentas.toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db' }}>
+                <span>Total Ventas con Tarjeta:</span>
+                <span style={{ fontWeight: 'bold', color: '#60a5fa' }}>${totalTarjetaVentas.toLocaleString()}</span>
+              </div>
+              <hr style={{ border: '0', borderTop: '1px solid #374151', margin: '6px 0' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold', color: '#fff' }}>
+                <span>Efectivo Esperado en Gaveta:</span>
+                <span style={{ color: '#34d399' }}>${efectivoEsperadoEnGaveta.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div style={{ background: '#1f2937', padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <label style={{ fontSize: 12, color: '#9ca3af' }}>Conteo Físico Real (Efectivo contado en gaveta):</label>
+              <input 
+                type="number"
+                placeholder="Ej: 1500"
+                value={efectivoRealEnGaveta}
+                onChange={e => setEfectivoRealEnGaveta(e.target.value)}
+                style={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 16, fontWeight: 'bold', outline: 'none' }}
+              />
+              {efectivoRealEnGaveta !== '' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 800, marginTop: 4 }}>
+                  <span style={{ color: '#9ca3af' }}>Diferencia (Sobrante / Faltante):</span>
+                  <span style={{ color: diferenciaCaja === 0 ? '#34d399' : diferenciaCaja > 0 ? '#60a5fa' : '#ef4444' }}>
+                    {diferenciaCaja > 0 ? `+$${diferenciaCaja.toLocaleString()}` : `$${diferenciaCaja.toLocaleString()}`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <button 
+              onClick={guardarCierreCaja}
+              disabled={cierreRealizado}
+              style={{ width: '100%', background: cierreRealizado ? '#374151' : '#059669', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: cierreRealizado ? 'not-allowed' : 'pointer' }}>
+              {cierreRealizado ? '✓ Cierre Guardado Exitosamente' : 'Finalizar y Registrar Cierre de Caja'}
+            </button>
           </div>
         )}
 
