@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -27,7 +27,7 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'compras', label: 'Compras', icon: '🚚' },
   { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
   { key: 'proveedores', label: 'Proveedores', icon: '🏭', proximamente: true },
-  { key: 'creditos', label: 'Créditos / fiados', icon: '💳', proximamente: true },
+  { key: 'creditos', label: 'Créditos / fiados', icon: '💳' }, // Activado para control gerencial
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
   { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
@@ -43,7 +43,7 @@ export default function JefePanel({
   usuariosSistema, setUsuariosSistema, permisos, onCerrar
 }: Props) {
   const [menuAbierto, setMenuAbierto] = useState(false);
-  const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion>('inicio');
+  const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion | string>('inicio');
   const [proximamenteNombre, setProximamenteNombre] = useState('');
 
   const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
@@ -51,6 +51,28 @@ export default function JefePanel({
   const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
   const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
   const [guardandoUsuario, setGuardandoUsuario] = useState(false);
+
+  // Estados para supervisión de créditos por el Jefe
+  const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
+  const [busquedaCredito, setBusquedaCredito] = useState('');
+
+  const cargarCreditosGlobales = async () => {
+    try {
+      const q = query(collection(db, 'creditos'));
+      const querySnapshot = await getDocs(q);
+      const lista: any[] = [];
+      querySnapshot.forEach((d) => {
+        lista.push({ id: d.id, ...d.data() });
+      });
+      setCreditosGlobales(lista);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    cargarCreditosGlobales();
+  }, []);
 
   const hoy = new Date();
   const esHoy = (f: any) => {
@@ -174,7 +196,7 @@ export default function JefePanel({
       setProximamenteNombre(label || key);
       setJefeSeccion('proximamente');
     } else {
-      setJefeSeccion(key as JefeSeccion);
+      setJefeSeccion(key);
     }
     setMenuAbierto(false);
   };
@@ -345,13 +367,53 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* MÓDULO DE CRÉDITOS Y FIADOS PARA EL JEFE */}
+          {jefeSeccion === 'creditos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Supervisión General de Créditos y Fiados</p>
+                <button onClick={cargarCreditosGlobales} style={{ background: '#374151', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  Actualizar
+                </button>
+              </div>
+
+              <input
+                placeholder="🔍 Buscar cliente por nombre o cédula..."
+                value={busquedaCredito}
+                onChange={e => setBusquedaCredito(e.target.value)}
+                style={{ background: '#111827', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13, outline: 'none' }}
+              />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {creditosGlobales.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#6b7280' }}>No hay créditos activos registrados en el sistema.</p>
+                ) : (
+                  creditosGlobales
+                    .filter(c => c.nombreCliente?.toLowerCase().includes(busquedaCredito.toLowerCase()))
+                    .map(c => (
+                      <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente}</p>
+                          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Cédula: {c.cedula || 'N/D'} · Plazo: <b>{c.plazoMeses} meses</b></p>
+                          <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: ${c.cuotaMensual} · Abonos realizados: {c.abonos?.length || 0}</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: ${c.saldoPendiente?.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          )}
+
           {jefeSeccion === 'cajas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Turnos / Cierres de caja</p>
               {turnos.slice().sort((a, b) => {
                 const fa = a.fechaApertura?.toDate ? a.fechaApertura.toDate() : new Date(a.fechaApertura || 0);
                 const fb = b.fechaApertura?.toDate ? b.fechaApertura.toDate() : new Date(b.fechaApertura || 0);
-                return fb.getTime() - fa.getTime();
+                return fb.getTime() - fb.getTime(); // Orden descendente corregido
               }).map(t => (
                 <div key={t.id} style={{
                   background: '#111827',
