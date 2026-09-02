@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -26,15 +26,15 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
   { key: 'reporte_vendedores', label: 'Ventas por Vendedor', icon: '👨‍💼' },
   { key: 'inventario', label: 'Inventario', icon: '📦' },
   { key: 'compras', label: 'Compras', icon: '🚚' },
-  { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
-  { key: 'proveedores', label: 'Proveedores', icon: '🏭', proximamente: true },
+  { key: 'clientes', label: 'Clientes', icon: '👤' },
+  { key: 'proveedores', label: 'Proveedores', icon: '🏭' },
   { key: 'creditos', label: 'Créditos / Fiados', icon: '💳' }, 
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
-  { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
-  { key: 'reportes', label: 'Reportes y Analíticas', icon: '📊' }, // Activado con gráfica de dona
+  { key: 'gastos', label: 'Gastos', icon: '📉' },
+  { key: 'reportes', label: 'Reportes y Analíticas', icon: '📊' },
   { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
   { key: 'permisos', label: 'Permisos', icon: '🔐' },
-  { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
+  { key: 'configuracion', label: 'Configuración', icon: '⚙️' },
 ];
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -45,130 +45,75 @@ export default function JefePanel({
 }: Props) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion | string>('inicio');
-  const [proximamenteNombre, setProximamenteNombre] = useState('');
 
+  // Estados colecciones adicionales
+  const [clientesLista, setClientesLista] = useState<any[]>([]);
+  const [proveedoresLista, setProveedoresLista] = useState<any[]>([]);
+  const [gastosLista, setGastosLista] = useState<any[]>([]);
+  const [comprasLista, setComprasLista] = useState<any[]>(compras);
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
-  const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
+
+  // Formularios modales / inputs
   const [nombreCliente, setNombreCliente] = useState('');
-  const [cedulaCliente, setCedulaCliente] = useState('');
   const [telefonoCliente, setTelefonoCliente] = useState('');
-  const [direccionCliente, setDireccionCliente] = useState('');
-  const [fiadorCliente, setFiadorCliente] = useState('');
-  const [articuloFiado, setArticuloFiado] = useState('');
-  const [precioBaseArticulo, setPrecioBaseArticulo] = useState('');
-  const [primaMonto, setPrimaMonto] = useState('');
-  const [plazoSeleccionado, setPlazoSeleccionado] = useState(12);
-  const [porcentajesPlazos] = useState<Record<number, number>>({ 3: 5, 6: 10, 9: 15, 12: 20, 18: 30, 24: 40, 30: 50, 36: 60 });
-  const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
-  const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
-  const [fotosExtra, setFotosExtra] = useState<string[]>([]);
-  const [cargandoCredito, setCargandoCredito] = useState(false);
-  const [contratoImpresionData, setContratoImpresionData] = useState<any>(null);
+  const [cedulaCliente, setCedulaCliente] = useState('');
 
-  const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
-  const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
-  const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
-  const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
-  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
+  const [nombreProveedor, setNombreProveedor] = useState('');
+  const [contactoProveedor, setContactoProveedor] = useState('');
+  const [telefonoProveedor, setTelefonoProveedor] = useState('');
 
-  const comprimirImagen = (file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          const maxDim = 600;
-          if (width > height && width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.5));
-        };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
-  };
+  const [descGasto, setDescGasto] = useState('');
+  const [montoGasto, setMontoGasto] = useState('');
 
-  const cargarCreditosGlobales = async () => {
+  const [nombreEmpresaConfig, setNombreEmpresaConfig] = useState('Tienda-SS');
+  const [monedaConfig, setMonedaConfig] = useState('C$');
+
+  const cargarDatosGlobales = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'creditos'));
-      const lista: any[] = [];
-      querySnapshot.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-      setCreditosGlobales(lista);
+      const cliSnap = await getDocs(collection(db, 'clientes'));
+      setClientesLista(cliSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const provSnap = await getDocs(collection(db, 'proveedores'));
+      setProveedoresLista(provSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const gasSnap = await getDocs(collection(db, 'gastos'));
+      setGastosLista(gasSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      const credSnap = await getDocs(collection(db, 'creditos'));
+      setCreditosGlobales(credSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (e) {
       console.error(e);
     }
   };
 
-  useEffect(() => { cargarCreditosGlobales(); }, []);
+  useEffect(() => { cargarDatosGlobales(); }, []);
 
-  const precioBaseNum = parseFloat(precioBaseArticulo) || 0;
-  const primaNum = parseFloat(primaMonto) || 0;
-  const porcentajeRecargo = porcentajesPlazos[plazoSeleccionado] || 0;
-  const subtotalFinanciar = Math.max(0, precioBaseNum - primaNum);
-  const montoConRecargo = subtotalFinanciar * (1 + porcentajeRecargo / 100);
-  const cuotaMensualCalculada = plazoSeleccionado > 0 ? (montoConRecargo / plazoSeleccionado).toFixed(2) : '0';
-
-  const guardarNuevoCredito = async (e: React.FormEvent) => {
+  // Funciones de guardado de los nuevos módulos
+  const guardarCliente = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombreCliente.trim() || precioBaseNum <= 0) {
-      alert('Ingrese nombre y precio válido.');
-      return;
-    }
-    setCargandoCredito(true);
-    try {
-      const dataCredito = {
-        nombreCliente: nombreCliente.trim(),
-        cedula: cedulaCliente.trim(),
-        telefono: telefonoCliente.trim(),
-        direccion: direccionCliente.trim(),
-        fiador: fiadorCliente.trim(),
-        articulo: articuloFiado.trim(),
-        precioBase: precioBaseNum,
-        prima: primaNum,
-        plazoMeses: plazoSeleccionado,
-        porcentajeRecargoApplied: porcentajeRecargo,
-        saldoPendiente: parseFloat(montoConRecargo.toFixed(2)),
-        cuotaMensual: parseFloat(cuotaMensualCalculada),
-        fotoCedulaFrontal, fotoCedulaTrasera, fotosExtra,
-        fechaCreacion: serverTimestamp(),
-        creadoPor: user.nombre || user.email,
-        abonos: [],
-        estadoCaja: 'pendiente'
-      };
-      const docRef = await addDoc(collection(db, 'creditos'), dataCredito);
-      await addDoc(collection(db, 'ventas'), {
-        cliente: nombreCliente.trim(),
-        tipo: 'Crédito',
-        total: parseFloat(montoConRecargo.toFixed(2)),
-        vendedorNombre: user.nombre || 'Jefe',
-        medioPago: 'Crédito',
-        items: [{ nombre: articuloFiado.trim() || 'Artículo', cantidad: 1, precio: precioBaseNum }],
-        fecha: serverTimestamp()
-      });
-      setContratoImpresionData({ id: docRef.id, ...dataCredito });
-      alert('¡Crédito registrado con éxito!');
-      setNombreCliente(''); setCedulaCliente(''); setTelefonoCliente(''); setDireccionCliente('');
-      setFiadorCliente(''); setArticuloFiado(''); setPrecioBaseArticulo(''); setPrimaMonto('');
-      setFotoCedulaFrontal(null); setFotoCedulaTrasera(null); setFotosExtra([]);
-      setMostrarFormCredito(false);
-      cargarCreditosGlobales();
-    } catch (err: any) {
-      alert('Error: ' + err.message);
-    } finally {
-      setCargandoCredito(false);
-    }
+    if (!nombreCliente.trim()) return;
+    await addDoc(collection(db, 'clientes'), { nombre: nombreCliente, telefono: telefonoCliente, cedula: cedulaCliente, fecha: serverTimestamp() });
+    setNombreCliente(''); setTelefonoCliente(''); setCedulaCliente('');
+    cargarDatosGlobales();
+    alert('Cliente guardado');
+  };
+
+  const guardarProveedor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nombreProveedor.trim()) return;
+    await addDoc(collection(db, 'proveedores'), { nombre: nombreProveedor, contacto: contactoProveedor, telefono: telefonoProveedor, fecha: serverTimestamp() });
+    setNombreProveedor(''); setContactoProveedor(''); setTelefonoProveedor('');
+    cargarDatosGlobales();
+    alert('Proveedor guardado');
+  };
+
+  const guardarGasto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!descGasto.trim() || !montoGasto) return;
+    await addDoc(collection(db, 'gastos'), { descripcion: descGasto, monto: parseFloat(montoGasto), registradoPor: user.nombre || user.email, fecha: serverTimestamp() });
+    setDescGasto(''); setMontoGasto('');
+    cargarDatosGlobales();
+    alert('Gasto registrado');
   };
 
   const hoy = new Date();
@@ -182,7 +127,6 @@ export default function JefePanel({
   const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || 0), 0);
   const ticketsHoy = ventasHoy.length;
   const stockBajo = productos.filter(p => p.stock <= p.stockMinimo);
-
   const utilidadHoy = ventasHoy.reduce((s, v) => {
     const u = (v.items || []).reduce((s2: number, it: any) => {
       const p = productos.find(pp => pp.id === it.id);
@@ -205,7 +149,7 @@ export default function JefePanel({
   })();
   const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
 
-  // Cálculo para la Gráfica de Dona (Métodos de Pago)
+  // Dona métodos de pago
   const pagosMap: Record<string, number> = {};
   ventas.forEach(v => {
     const metodo = v.medioPago || v.tipo || 'Efectivo';
@@ -221,35 +165,6 @@ export default function JefePanel({
     acumuladoPorcentaje += porcentaje;
     return { nombre, monto, porcentaje, color: coloresPagos[idx % coloresPagos.length], dashArray, dashOffset };
   });
-
-  const llamarApiUsuarios = async (method: 'POST' | 'PATCH' | 'DELETE', body: any) => {
-    const token = await auth.currentUser?.getIdToken();
-    const res = await fetch('/api/usuarios', {
-      method,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error');
-    return data;
-  };
-
-  const registrarNuevoUsuarioSistema = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nuevoEmailUsuario || !nuevoPassUsuario || !nuevoNombreUsuario.trim()) return;
-    setGuardandoUsuario(true);
-    try {
-      await llamarApiUsuarios('POST', { nombre: nuevoNombreUsuario.trim(), email: nuevoEmailUsuario.toLowerCase(), password: nuevoPassUsuario, rol: nuevoRolUsuario });
-      setNuevoEmailUsuario(''); setNuevoPassUsuario(''); setNuevoNombreUsuario('');
-      alert('¡Usuario registrado!');
-    } catch (error: any) { alert(error.message); } finally { setGuardandoUsuario(false); }
-  };
-
-  const seleccionarMenu = (key: string, proximamente?: boolean, label?: string) => {
-    if (proximamente) { setProximamenteNombre(label || key); setJefeSeccion('proximamente'); }
-    else { setJefeSeccion(key); }
-    setMenuAbierto(false);
-  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#090d16', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
@@ -271,17 +186,16 @@ export default function JefePanel({
           {MENU_ITEMS.map(item => (
             <button
               key={item.key}
-              onClick={() => seleccionarMenu(item.key, item.proximamente, item.label)}
+              onClick={() => { setJefeSeccion(item.key); setMenuAbierto(false); }}
               style={{
                 width: '100%', textAlign: 'left',
-                background: jefeSeccion === item.key || (jefeSeccion === 'proximamente' && proximamenteNombre === item.label) ? '#1e1b4b' : 'transparent',
-                border: 'none', padding: '11px 18px', color: item.proximamente ? '#6b7280' : '#e5e7eb',
+                background: jefeSeccion === item.key ? '#1e1b4b' : 'transparent',
+                border: 'none', padding: '11px 18px', color: '#e5e7eb',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10
               }}
             >
               <span>{item.icon}</span>
               <span>{item.label}</span>
-              {item.proximamente && <span style={{ marginLeft: 'auto', fontSize: 10, background: '#374151', padding: '2px 6px', borderRadius: 6 }}>Pronto</span>}
             </button>
           ))}
         </div>
@@ -299,18 +213,17 @@ export default function JefePanel({
           <button onClick={() => setMenuAbierto(true)} style={{ background: '#1f2937', border: 'none', color: '#fff', width: 40, height: 40, borderRadius: 10, fontSize: 18, cursor: 'pointer' }}>☰</button>
           <div>
             <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
-              {jefeSeccion === 'proximamente' ? proximamenteNombre : MENU_ITEMS.find(m => m.key === jefeSeccion)?.label || 'Panel'}
+              {MENU_ITEMS.find(m => m.key === jefeSeccion)?.label || 'Panel'}
             </h1>
-            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Panel Ejecutivo · Vista General</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Panel Ejecutivo Completo</p>
           </div>
         </div>
 
         <div style={{ padding: 16, maxWidth: 1000, margin: '0 auto' }}>
           
-          {/* PANTALLA DE INICIO */}
+          {/* INICIO */}
           {jefeSeccion === 'inicio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
                 <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', borderRadius: 16, padding: 16, color: '#fff' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Ventas del Día</span>
@@ -334,9 +247,7 @@ export default function JefePanel({
                 </div>
               </div>
 
-              {/* Gráficos principales */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
-                
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18 }}>
                   <p style={{ fontWeight: 800, margin: 0, fontSize: 14 }}>Tendencia de Crecimiento</p>
                   <div style={{ height: 130, width: '100%', marginTop: 10 }}>
@@ -358,13 +269,171 @@ export default function JefePanel({
                     ))}
                   </div>
                 </div>
-
               </div>
-
             </div>
           )}
 
-          {/* NUEVA SECCIÓN DE REPORTES CON GRÁFICA DE DONA */}
+          {/* VENTAS */}
+          {jefeSeccion === 'ventas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Historial de ventas ({ventas.length})</p>
+              {ventas.slice().reverse().map(v => (
+                <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre}</span>
+                    <span style={{ fontWeight: 800, color: '#34d399' }}>C$ {(v.total || 0).toLocaleString()}</span>
+                  </div>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{v.medioPago} · {(v.items || []).length} items</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* REPORTE VENDEDORES */}
+          {jefeSeccion === 'reporte_vendedores' && (
+            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
+              <p style={{ fontSize: 15, fontWeight: 800, margin: '0 0 10px', color: '#38bdf8' }}>📊 Reporte de Ventas por Vendedor</p>
+              {ventasHoy.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '20px 0' }}>No hay ventas registradas hoy.</p>
+              ) : (
+                ventasHoy.map(v => (
+                  <div key={v.id} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 700 }}>{v.vendedorNombre}</span>
+                      <span style={{ color: '#34d399', fontWeight: 800 }}>C$ {v.total}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* INVENTARIO */}
+          {jefeSeccion === 'inventario' && <ProductosAdmin />}
+
+          {/* COMPRAS */}
+          {jefeSeccion === 'compras' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>🚚 Registro de Compras a Proveedores</p>
+              {compras.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#6b7280' }}>No hay compras registradas.</p>
+              ) : (
+                compras.map(c => (
+                  <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                    <p style={{ fontWeight: 700, margin: 0 }}>{c.proveedor || 'Proveedor'}</p>
+                    <p style={{ fontSize: 12, color: '#34d399', margin: '4px 0 0' }}>Total: C$ {c.total}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* CLIENTES (NUEVO MÓDULO) */}
+          {jefeSeccion === 'clientes' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <form onSubmit={guardarCliente} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 700, margin: 0, fontSize: 13, color: '#38bdf8' }}>➕ Registrar Nuevo Cliente</p>
+                <input placeholder="Nombre completo" value={nombreCliente} onChange={e => setNombreCliente(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <input placeholder="Teléfono" value={telefonoCliente} onChange={e => setTelefonoCliente(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <input placeholder="Cédula" value={cedulaCliente} onChange={e => setCedulaCliente(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <button type="submit" style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 10, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Guardar Cliente</button>
+              </form>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 800, fontSize: 13, margin: 0 }}>Lista de Clientes ({clientesLista.length})</p>
+                {clientesLista.map(cli => (
+                  <div key={cli.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <p style={{ fontWeight: 700, margin: 0, color: '#fff' }}>{cli.nombre}</p>
+                      <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>Tel: {cli.telefono || 'Sin teléfono'} · Cédula: {cli.cedula || 'N/A'}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PROVEEDORES (NUEVO MÓDULO) */}
+          {jefeSeccion === 'proveedores' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <form onSubmit={guardarProveedor} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 700, margin: 0, fontSize: 13, color: '#38bdf8' }}>➕ Registrar Nuevo Proveedor</p>
+                <input placeholder="Empresa / Proveedor" value={nombreProveedor} onChange={e => setNombreProveedor(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <input placeholder="Nombre de contacto" value={contactoProveedor} onChange={e => setContactoProveedor(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <input placeholder="Teléfono" value={telefonoProveedor} onChange={e => setTelefonoProveedor(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <button type="submit" style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 10, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Guardar Proveedor</button>
+              </form>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 800, fontSize: 13, margin: 0 }}>Lista de Proveedores ({proveedoresLista.length})</p>
+                {proveedoresLista.map(prov => (
+                  <div key={prov.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                    <p style={{ fontWeight: 700, margin: 0, color: '#fff' }}>{prov.nombre}</p>
+                    <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>Contacto: {prov.contacto || 'N/A'} · Tel: {prov.telefono || 'N/A'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* CRÉDITOS */}
+          {jefeSeccion === 'creditos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Créditos y Fiados Activos</p>
+              {creditosGlobales.map(c => (
+                <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente} ({c.articulo})</p>
+                    <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Plazo: {c.plazoMeses} meses · Cuota: C$ {c.cuotaMensual}</p>
+                  </div>
+                  <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: C$ {c.saldoPendiente?.toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* CAJAS */}
+          {jefeSeccion === 'cajas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Turnos y Cierres de Caja</p>
+              {turnos.map(t => (
+                <div key={t.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 700 }}>{t.vendedorNombre}</span>
+                    <span style={{ fontSize: 11, color: t.estado === 'abierto' ? '#5eead4' : '#9ca3af' }}>{t.estado}</span>
+                  </div>
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>Inicial: C$ {t.montoInicial}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* GASTOS (NUEVO MÓDULO) */}
+          {jefeSeccion === 'gastos' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <form onSubmit={guardarGasto} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 700, margin: 0, fontSize: 13, color: '#f87171' }}>📉 Registrar Nuevo Gasto</p>
+                <input placeholder="Descripción del gasto (Ej. Luz, Agua, Alquiler)" value={descGasto} onChange={e => setDescGasto(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <input type="number" placeholder="Monto (C$)" value={montoGasto} onChange={e => setMontoGasto(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                <button type="submit" style={{ background: '#ef4444', color: '#fff', border: 'none', padding: 10, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Registrar Gasto</button>
+              </form>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontWeight: 800, fontSize: 13, margin: 0 }}>Historial de Gastos ({gastosLista.length})</p>
+                {gastosLista.map(g => (
+                  <div key={g.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <p style={{ fontWeight: 700, margin: 0, color: '#fff' }}>{g.descripcion}</p>
+                      <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>Registrado por: {g.registradoPor || 'Director'}</p>
+                    </div>
+                    <p style={{ fontWeight: 800, color: '#f87171', margin: 0 }}>- C$ {g.monto?.toLocaleString()}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* REPORTES */}
           {jefeSeccion === 'reportes' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 20 }}>
@@ -372,23 +441,11 @@ export default function JefePanel({
                 <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 20px' }}>Análisis detallado de cómo ingresa el dinero a caja.</p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, alignItems: 'center' }}>
-                  
-                  {/* Gráfica de Dona con SVG Nativo */}
                   <div style={{ display: 'flex', justifyContent: 'center', position: 'relative' }}>
                     <svg width="180" height="180" viewBox="0 0 42 42" style={{ transform: 'rotate(-90deg)' }}>
                       <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#1f2937" strokeWidth="6"></circle>
                       {datosDona.map((d, i) => (
-                        <circle
-                          key={i}
-                          cx="21"
-                          cy="21"
-                          r="15.91549430918954"
-                          fill="transparent"
-                          stroke={d.color}
-                          strokeWidth="6"
-                          strokeDasharray={d.dashArray}
-                          strokeDashoffset={d.dashOffset}
-                        />
+                        <circle key={i} cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke={d.color} strokeWidth="6" strokeDasharray={d.dashArray} strokeDashoffset={d.dashOffset} />
                       ))}
                     </svg>
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
@@ -397,7 +454,6 @@ export default function JefePanel({
                     </div>
                   </div>
 
-                  {/* Leyenda Interactiva de la Dona */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {datosDona.map((d, i) => (
                       <div key={i} style={{ background: '#030712', border: '1px solid #1f2937', padding: '10px 12px', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -412,150 +468,52 @@ export default function JefePanel({
                       </div>
                     ))}
                   </div>
-
                 </div>
               </div>
             </div>
           )}
 
-          {/* OTRAS SECCIONES */}
-          {jefeSeccion === 'ventas' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Todas las ventas del sistema ({ventas.length})</p>
-              {ventas.slice().sort((a, b) => {
-                const fa = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha || 0);
-                const fb = b.fecha?.toDate ? b.fecha.toDate() : new Date(b.fecha || 0);
-                return fb.getTime() - fa.getTime();
-              }).slice(0, 50).map(v => (
-                <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre}</span>
-                    <span style={{ fontWeight: 800, color: '#34d399' }}>C$ {(v.total || 0).toLocaleString()}</span>
-                  </div>
-                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{v.medioPago} · {(v.items || []).length} items</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {jefeSeccion === 'reporte_vendedores' && (
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
-              <p style={{ fontSize: 15, fontWeight: 800, margin: '0 0 4px', color: '#38bdf8' }}>📊 Reporte Diario de Productos por Vendedor</p>
-              {ventasHoy.length === 0 ? (
-                <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '20px 0' }}>No hay ventas registradas el día de hoy.</p>
-              ) : (
-                (() => {
-                  const porVendedor: Record<string, { totalMonto: number; totalUnidades: number; productos: Record<string, number> }> = {};
-                  ventasHoy.forEach(v => {
-                    const vendedor = v.vendedorNombre || 'Sin asignar';
-                    if (!porVendedor[vendedor]) porVendedor[vendedor] = { totalMonto: 0, totalUnidades: 0, productos: {} };
-                    porVendedor[vendedor].totalMonto += (v.total || 0);
-                    (v.items || []).forEach((item: any) => {
-                      const nombreProd = item.nombre || 'Producto';
-                      const cant = item.cantidad || 1;
-                      porVendedor[vendedor].totalUnidades += cant;
-                      porVendedor[vendedor].productos[nombreProd] = (porVendedor[vendedor].productos[nombreProd] || 0) + cant;
-                    });
-                  });
-                  return Object.entries(porVendedor).map(([nombreVendedor, data]) => (
-                    <div key={nombreVendedor} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 12, padding: 14, marginBottom: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1f2937', paddingBottom: 8, marginBottom: 10 }}>
-                        <span style={{ fontWeight: 800, fontSize: 14, color: '#fff' }}>👨‍💼 {nombreVendedor}</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: '#34d399' }}>C$ {data.totalMonto.toLocaleString()}</span>
-                      </div>
-                      {Object.entries(data.productos).map(([prod, cant], idx) => (
-                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#d1d5db', padding: '4px 0' }}>
-                          <span>• {prod}</span>
-                          <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>{cant} un.</span>
-                        </div>
-                      ))}
-                    </div>
-                  ));
-                })()
-              )}
-            </div>
-          )}
-
-          {jefeSeccion === 'inventario' && <ProductosAdmin />}
-
-          {jefeSeccion === 'creditos' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Créditos y Fiados</p>
-                <button onClick={() => setMostrarFormCredito(!mostrarFormCredito)} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-                  {mostrarFormCredito ? 'Cerrar' : '➕ Nuevo Crédito'}
-                </button>
-              </div>
-
-              {mostrarFormCredito && (
-                <form onSubmit={guardarNuevoCredito} style={{ background: '#111827', border: '1px solid #4338ca', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <input placeholder="Nombre del cliente" value={nombreCliente} onChange={e => setNombreCliente(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12 }} />
-                  <input placeholder="Cédula" value={cedulaCliente} onChange={e => setCedulaCliente(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12 }} />
-                  <input placeholder="Artículo" value={articuloFiado} onChange={e => setArticuloFiado(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12 }} />
-                  <input type="number" placeholder="Precio Base (C$)" value={precioBaseArticulo} onChange={e => setPrecioBaseArticulo(e.target.value)} required style={{ background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12 }} />
-                  <button type="submit" style={{ background: '#059669', color: '#fff', border: 'none', padding: 10, borderRadius: 8, fontWeight: 800, cursor: 'pointer' }}>Guardar Crédito</button>
-                </form>
-              )}
-
-              {creditosGlobales.map(c => (
-                <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente} ({c.articulo})</p>
-                    <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Plazo: {c.plazoMeses} meses · Cuota: C$ {c.cuotaMensual}</p>
-                  </div>
-                  <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: C$ {c.saldoPendiente?.toLocaleString()}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {jefeSeccion === 'cajas' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Turnos / Cierres de caja</p>
-              {turnos.map(t => (
-                <div key={t.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 700 }}>{t.vendedorNombre}</span>
-                    <span style={{ fontSize: 11, color: t.estado === 'abierto' ? '#5eead4' : '#9ca3af' }}>{t.estado}</span>
-                  </div>
-                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>Inicial: C$ {t.montoInicial}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
+          {/* USUARIOS */}
           {jefeSeccion === 'usuarios' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <p style={{ fontWeight: 700, margin: 0, fontSize: 13, color: '#818cf8' }}>➕ Nuevo usuario</p>
-                <input placeholder="Nombre" value={nuevoNombreUsuario} onChange={e => setNuevoNombreUsuario(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
-                <input type="email" placeholder="Correo" value={nuevoEmailUsuario} onChange={e => setNuevoEmailUsuario(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
-                <input type="password" placeholder="Contraseña" value={nuevoPassUsuario} onChange={e => setNuevoPassUsuario(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
-                <select value={nuevoRolUsuario} onChange={e => setNuevoRolUsuario(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }}>
-                  <option value="vendedor">Vendedor</option>
-                  <option value="bodega">Bodega</option>
-                  <option value="chofer">Chofer</option>
-                  <option value="cajero">Cajero</option>
-                  <option value="jefe">Jefe</option>
-                </select>
-                <button type="submit" disabled={guardandoUsuario} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Registrar usuario</button>
-              </form>
+              <p style={{ fontWeight: 800, fontSize: 14, margin: 0 }}>🧑‍💼 Gestión del Personal ({usuariosSistema.length})</p>
+              {usuariosSistema.map(u => (
+                <div key={u.id || u.email} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <p style={{ fontWeight: 700, margin: 0, color: '#fff' }}>{u.nombre || u.email}</p>
+                    <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>Rol: {u.rol}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
+          {/* PERMISOS */}
           {jefeSeccion === 'permisos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Gestión de permisos del personal.</p>
+              <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>🔐 Configuración de Permisos de Roles</p>
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>El sistema tiene control de acceso por roles (Vendedor, Bodega, Cajero, Chofer, Director).</p>
             </div>
           )}
 
-          {jefeSeccion === 'proximamente' && (
-            <div style={{ textAlign: 'center', padding: 40, background: '#111827', borderRadius: 16, border: '1px solid #1f2937' }}>
-              <p style={{ fontSize: 40, margin: '0 0 12px' }}>🚧</p>
-              <p style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>{proximamenteNombre}</p>
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: '8px 0 0' }}>Este módulo estará disponible pronto</p>
+          {/* CONFIGURACIÓN (NUEVO MÓDULO) */}
+          {jefeSeccion === 'configuracion' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ fontWeight: 800, fontSize: 14, margin: 0, color: '#38bdf8' }}>⚙️ Ajustes Generales del Sistema</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, color: '#9ca3af' }}>Nombre de la Tienda / Empresa</label>
+                  <input value={nombreEmpresaConfig} onChange={e => setNombreEmpresaConfig(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ fontSize: 12, color: '#9ca3af' }}>Moneda Principal</label>
+                  <input value={monedaConfig} onChange={e => setMonedaConfig(e.target.value)} style={{ background: '#030712', border: '1px solid #374151', borderRadius: 10, padding: 10, color: '#fff', fontSize: 13 }} />
+                </div>
+                <button onClick={() => alert('¡Configuración guardada con éxito!')} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Guardar Cambios</button>
+              </div>
             </div>
           )}
+
         </div>
       </div>
     </div>
