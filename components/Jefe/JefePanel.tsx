@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, setDoc, doc } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
@@ -47,15 +47,8 @@ export default function JefePanel({
   const [jefeSeccion, setJefeSeccion] = useState<JefeSeccion | string>('inicio');
   const [proximamenteNombre, setProximamenteNombre] = useState('');
 
-  const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
-  const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
-  const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
-  const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
-  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
-
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
   const [busquedaCredito, setBusquedaCredito] = useState('');
-  
   const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
   const [cedulaCliente, setCedulaCliente] = useState('');
@@ -66,16 +59,18 @@ export default function JefePanel({
   const [precioBaseArticulo, setPrecioBaseArticulo] = useState('');
   const [primaMonto, setPrimaMonto] = useState('');
   const [plazoSeleccionado, setPlazoSeleccionado] = useState(12);
-
-  const [porcentajesPlazos, setPorcentajesPlazos] = useState<Record<number, number>>({
-    3: 5, 6: 10, 9: 15, 12: 20, 18: 30, 24: 40, 30: 50, 36: 60
-  });
-
+  const [porcentajesPlazos] = useState<Record<number, number>>({ 3: 5, 6: 10, 9: 15, 12: 20, 18: 30, 24: 40, 30: 50, 36: 60 });
   const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
   const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
   const [fotosExtra, setFotosExtra] = useState<string[]>([]);
   const [cargandoCredito, setCargandoCredito] = useState(false);
   const [contratoImpresionData, setContratoImpresionData] = useState<any>(null);
+
+  const [nuevoEmailUsuario, setNuevoEmailUsuario] = useState('');
+  const [nuevoPassUsuario, setNuevoPassUsuario] = useState('');
+  const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
+  const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
+  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
 
   const comprimirImagen = (file: File): Promise<string> => {
     return new Promise((resolve) => {
@@ -112,9 +107,7 @@ export default function JefePanel({
     const base64Comprimida = await comprimirImagen(file);
     if (tipo === 'frontal') setFotoCedulaFrontal(base64Comprimida);
     else if (tipo === 'trasera') setFotoCedulaTrasera(base64Comprimida);
-    else if (tipo === 'extra' && fotosExtra.length < 2) {
-      setFotosExtra([...fotosExtra, base64Comprimida]);
-    }
+    else if (tipo === 'extra' && fotosExtra.length < 2) setFotosExtra([...fotosExtra, base64Comprimida]);
   };
 
   const cargarCreditosGlobales = async () => {
@@ -128,9 +121,7 @@ export default function JefePanel({
     }
   };
 
-  useEffect(() => {
-    cargarCreditosGlobales();
-  }, []);
+  useEffect(() => { cargarCreditosGlobales(); }, []);
 
   const precioBaseNum = parseFloat(precioBaseArticulo) || 0;
   const primaNum = parseFloat(primaMonto) || 0;
@@ -142,7 +133,7 @@ export default function JefePanel({
   const guardarNuevoCredito = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombreCliente.trim() || precioBaseNum <= 0) {
-      alert('Ingrese el nombre del cliente y un precio válido del producto.');
+      alert('Ingrese nombre y precio válido.');
       return;
     }
     setCargandoCredito(true);
@@ -160,9 +151,7 @@ export default function JefePanel({
         porcentajeRecargoApplied: porcentajeRecargo,
         saldoPendiente: parseFloat(montoConRecargo.toFixed(2)),
         cuotaMensual: parseFloat(cuotaMensualCalculada),
-        fotoCedulaFrontal: fotoCedulaFrontal || null,
-        fotoCedulaTrasera: fotoCedulaTrasera || null,
-        fotosExtra: fotosExtra,
+        fotoCedulaFrontal, fotoCedulaTrasera, fotosExtra,
         fechaCreacion: serverTimestamp(),
         creadoPor: user.nombre || user.email,
         abonos: [],
@@ -173,20 +162,20 @@ export default function JefePanel({
         cliente: nombreCliente.trim(),
         tipo: 'Crédito',
         total: parseFloat(montoConRecargo.toFixed(2)),
-        vendedorNombre: user.nombre || 'Jefe / Sistema',
+        vendedorNombre: user.nombre || 'Jefe',
         medioPago: 'Crédito',
-        items: [{ nombre: articuloFiado.trim() || 'Artículo financiado', cantidad: 1, precio: precioBaseNum }],
+        items: [{ nombre: articuloFiado.trim() || 'Artículo', cantidad: 1, precio: precioBaseNum }],
         fecha: serverTimestamp()
       });
       setContratoImpresionData({ id: docRef.id, ...dataCredito });
-      alert('¡Crédito autorizado, sincronizado con ventas y enviado al panel del cajero!');
+      alert('¡Crédito registrado con éxito!');
       setNombreCliente(''); setCedulaCliente(''); setTelefonoCliente(''); setDireccionCliente('');
       setFiadorCliente(''); setArticuloFiado(''); setPrecioBaseArticulo(''); setPrimaMonto('');
       setFotoCedulaFrontal(null); setFotoCedulaTrasera(null); setFotosExtra([]);
       setMostrarFormCredito(false);
       cargarCreditosGlobales();
     } catch (err: any) {
-      alert('Error al registrar el crédito: ' + (err.message || ''));
+      alert('Error: ' + err.message);
     } finally {
       setCargandoCredito(false);
     }
@@ -194,20 +183,10 @@ export default function JefePanel({
 
   const imprimirContrato = (tipoFormato: 'carta' | 'legal') => {
     const datos = contratoImpresionData || creditosGlobales[0];
-    if (!datos) { alert('No hay datos para imprimir.'); return; }
+    if (!datos) { alert('No hay datos.'); return; }
     const ventana = window.open('', '_blank');
     if (!ventana) return;
-    ventana.document.write(`
-      <html>
-        <head><title>Contrato - ${tipoFormato.toUpperCase()}</title></head>
-        <body style="font-family: Arial; padding: 20px;">
-          <h2>TIENDA-SS - CONTRATO DE FINANCIAMIENTO</h2>
-          <p><b>Cliente:</b> ${datos.nombreCliente} | <b>Cédula:</b> ${datos.cedula}</p>
-          <p><b>Artículo:</b> ${datos.articulo} | <b>Total Financiado:</b> C$ ${datos.saldoPendiente?.toLocaleString()}</p>
-          <p><b>Cuota Mensual:</b> C$ ${datos.cuotaMensual} (${datos.plazoMeses} meses)</p>
-        </body>
-      </html>
-    `);
+    ventana.document.write(`<html><head><title>Contrato</title></head><body style="font-family:Arial;padding:20px;"><h2>Contrato - Tienda-SS</h2><p><b>Cliente:</b> ${datos.nombreCliente}</p><p><b>Artículo:</b> ${datos.articulo}</p><p><b>Debe:</b> C$ ${datos.saldoPendiente}</p></body></html>`);
     ventana.document.close();
     setTimeout(() => ventana.print(), 500);
   };
@@ -246,8 +225,6 @@ export default function JefePanel({
   })();
   const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
 
-  const turnosAbiertosAhora = turnos.filter(t => t.estado === 'abierto');
-
   const llamarApiUsuarios = async (method: 'POST' | 'PATCH' | 'DELETE', body: any) => {
     const token = await auth.currentUser?.getIdToken();
     const res = await fetch('/api/usuarios', {
@@ -278,7 +255,9 @@ export default function JefePanel({
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
+    <div style={{ minHeight: '100vh', background: '#090d16', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
+      
+      {/* Menú Lateral */}
       <div style={{
         position: 'fixed', top: 0, left: 0, bottom: 0, width: 260, background: '#111827',
         borderRight: '1px solid #1f2937', zIndex: 40, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)',
@@ -286,8 +265,8 @@ export default function JefePanel({
       }}>
         <div style={{ padding: '16px 18px', borderBottom: '1px solid #1f2937', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <p style={{ fontWeight: 800, fontSize: 16, margin: 0 }}>Tienda-SS</p>
-            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre} · Jefe</p>
+            <p style={{ fontWeight: 800, fontSize: 16, margin: 0, color: '#a855f7' }}>Tienda-SS</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre} · Director</p>
           </div>
           <button onClick={() => setMenuAbierto(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>✕</button>
         </div>
@@ -316,7 +295,7 @@ export default function JefePanel({
         </div>
       </div>
 
-      {menuAbierto && <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 30 }} />}
+      {menuAbierto && <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 30 }} />}
 
       <div style={{ flex: 1, minHeight: '100vh' }}>
         <div style={{ background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, zIndex: 20 }}>
@@ -325,89 +304,143 @@ export default function JefePanel({
             <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
               {jefeSeccion === 'proximamente' ? proximamenteNombre : MENU_ITEMS.find(m => m.key === jefeSeccion)?.label || 'Panel'}
             </h1>
-            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Panel del Jefe · Control Ejecutivo</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Panel Ejecutivo · Vista General</p>
           </div>
         </div>
 
-        <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
+        <div style={{ padding: 16, maxWidth: 1000, margin: '0 auto' }}>
           
-          {/* VISTA DE INICIO REDISEÑADA Y PROFESIONAL */}
+          {/* PANTALLA DE INICIO REFORZADA CON GRÁFICAS PROFESIONALES */}
           {jefeSeccion === 'inicio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               
-              {/* Tarjetas de Métricas Principales */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-                <div style={{ background: 'linear-gradient(135deg, #111827 0%, #1f2937 100%)', border: '1px solid #374151', borderRadius: 16, padding: 16, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+              {/* Tarjetas Superiores Estilo SaaS */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+                
+                <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(79,70,229,0.3)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Ventas Hoy</span>
-                    <span style={{ fontSize: 16 }}>🧾</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Ventas del Día</span>
+                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Hoy</span>
                   </div>
-                  <p style={{ fontSize: 24, fontWeight: 800, margin: '8px 0 2px', color: '#34d399' }}>C$ {totalHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>{ticketsHoy} transacciones realizadas</p>
+                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {totalHoy.toLocaleString()}</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{ticketsHoy} transacciones registradas</p>
                 </div>
 
-                <div style={{ background: 'linear-gradient(135deg, #111827 0%, #1f2937 100%)', border: '1px solid #374151', borderRadius: 16, padding: 16, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                <div style={{ background: 'linear-gradient(135deg, #ec4899 0%, #d946ef 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(236,72,153,0.3)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Utilidad Est. Hoy</span>
-                    <span style={{ fontSize: 16 }}>📈</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Utilidad Estimada</span>
+                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Margen</span>
                   </div>
-                  <p style={{ fontSize: 24, fontWeight: 800, margin: '8px 0 2px', color: '#a5b4fc' }}>C$ {utilidadHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>Margen estimado de ganancia</p>
+                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {utilidadHoy.toLocaleString()}</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Ganancia neta calculada</p>
                 </div>
 
-                <div style={{ background: 'linear-gradient(135deg, #111827 0%, #1f2937 100%)', border: '1px solid #374151', borderRadius: 16, padding: 16, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                <div style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(14,165,233,0.3)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Inventario Activo</span>
-                    <span style={{ fontSize: 16 }}>📦</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Inventario Activo</span>
+                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Stock</span>
                   </div>
-                  <p style={{ fontSize: 24, fontWeight: 800, margin: '8px 0 2px', color: '#38bdf8' }}>{productos.length} items</p>
-                  <p style={{ fontSize: 11, color: stockBajo.length > 0 ? '#f87171' : '#6b7280', margin: 0 }}>
-                    {stockBajo.length > 0 ? `⚠️ ${stockBajo.length} con stock bajo` : 'Stock en niveles óptimos'}
-                  </p>
+                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{productos.length} items</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{stockBajo.length > 0 ? `⚠️ ${stockBajo.length} en stock bajo` : 'Inventario óptimo'}</p>
                 </div>
 
-                <div style={{ background: 'linear-gradient(135deg, #111827 0%, #1f2937 100%)', border: '1px solid #374151', borderRadius: 16, padding: 16, boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+                <div style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderRadius: 16, padding: 16, color: '#fff', boxShadow: '0 10px 15px -3px rgba(245,158,11,0.3)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Créditos / Fiados</span>
-                    <span style={{ fontSize: 16 }}>💳</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Créditos / Fiados</span>
+                    <span style={{ background: 'rgba(255,255,255,0.2)', padding: '4px 8px', borderRadius: 8, fontSize: 11 }}>Cartera</span>
                   </div>
-                  <p style={{ fontSize: 24, fontWeight: 800, margin: '8px 0 2px', color: '#fbbf24' }}>{creditosGlobales.length}</p>
-                  <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>Cartera activa de financiamiento</p>
+                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{creditosGlobales.length}</p>
+                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Financiamientos activos</p>
                 </div>
+
               </div>
 
-              {/* Sección de Gráfica de Ventas Semestrales y Estado de Módulos */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              {/* Fila de Gráficos Principales (Línea degradada estilo SaaS y Barras Verticales) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
                 
-                {/* Gráfica de 6 Meses Estilizada */}
+                {/* Gráfica de Línea de Tendencia con Área Degrada */}
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                      <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>📊 Rendimiento de Ventas (6 Meses)</p>
-                      <span style={{ fontSize: 11, background: '#1f2937', padding: '2px 8px', borderRadius: 6, color: '#9ca3af' }}>Historial</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>Tendencia de Crecimiento</p>
+                      <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Flujo de ventas semestral</p>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 120, paddingBottom: 4, borderBottom: '1px solid #1f2937' }}>
-                      {ventasPorMes.map((m, i) => (
-                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
-                          <span style={{ fontSize: 9, color: '#9ca3af' }}>{m.total > 0 ? `${(m.total / 1000).toFixed(0)}k` : '0'}</span>
-                          <div style={{ 
-                            width: '100%', 
-                            background: m.total === maxMes ? 'linear-gradient(180deg, #6366f1 0%, #4f46e5 100%)' : '#374151', 
-                            borderRadius: '6px 6px 0 0', 
-                            height: `${Math.max(6, (m.total / maxMes) * 85)}px`,
-                            transition: 'height 0.3s ease'
-                          }} />
-                          <span style={{ fontSize: 10, fontWeight: 700, color: '#d1d5db' }}>{m.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <span style={{ fontSize: 11, background: '#1e1b4b', color: '#a5b4fc', padding: '4px 8px', borderRadius: 8, fontWeight: 700 }}>Últimos 6m</span>
                   </div>
-                  <p style={{ fontSize: 11, color: '#9ca3af', margin: '12px 0 0', textAlign: 'center' }}>Monitoreo consolidado de ingresos mensuales</p>
+                  
+                  {/* SVG Gráfico de Línea Curva con Área Degradada */}
+                  <div style={{ height: 130, width: '100%', position: 'relative', marginTop: 10 }}>
+                    <svg viewBox="0 0 500 150" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                      <defs>
+                        <linearGradient id="colorDegrade" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.4" />
+                          <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      {/* Área bajo la curva */}
+                      <path 
+                        d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60 L 500,150 L 0,150 Z" 
+                        fill="url(#colorDegrade)" 
+                      />
+                      {/* Línea principal */}
+                      <path 
+                        d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60" 
+                        fill="none" 
+                        stroke="#a855f7" 
+                        strokeWidth="3" 
+                      />
+                      {/* Puntos en los nodos */}
+                      {ventasPorMes.map((m, i) => {
+                        const cx = (i / (ventasPorMes.length - 1)) * 500;
+                        const cy = 130 - (m.total / maxMes) * 90;
+                        return (
+                          <g key={i}>
+                            <circle cx={cx} cy={cy} r="4" fill="#c084fc" stroke="#111827" strokeWidth="2" />
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#9ca3af', marginTop: 8 }}>
+                    {ventasPorMes.map((m, i) => <span key={i}>{m.label}</span>)}
+                  </div>
                 </div>
 
-                {/* Resumen Rápido por Módulos y Operatividad */}
+                {/* Gráfica de Barras Verticales de Ingresos */}
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>Ingresos por Mes</p>
+                      <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Comparativa monetaria</p>
+                    </div>
+                    <span style={{ fontSize: 11, background: '#064e3b', color: '#34d399', padding: '4px 8px', borderRadius: 8, fontWeight: 700 }}>Activo</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 130, paddingBottom: 4 }}>
+                    {ventasPorMes.map((m, i) => (
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
+                        <div style={{ 
+                          width: '100%', 
+                          background: m.total === maxMes ? 'linear-gradient(180deg, #38bdf8 0%, #0284c7 100%)' : '#374151', 
+                          borderRadius: '6px 6px 0 0', 
+                          height: `${Math.max(8, (m.total / maxMes) * 110)}px`,
+                          transition: 'height 0.3s ease'
+                        }} />
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#d1d5db' }}>{m.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Fila Inferior: Operatividad de Módulos y Distribución de Inventario */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
+                
+                {/* Estado de Operatividad y Módulos */}
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>⚡ Estado Operativo de Módulos</p>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>⚡ Operatividad General de Módulos</p>
                   
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
@@ -415,36 +448,63 @@ export default function JefePanel({
                         <span>💰</span>
                         <span style={{ fontSize: 12, fontWeight: 600 }}>Cajas / Turnos</span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: turnosAbiertosAhora.length > 0 ? '#34d399' : '#f87171' }}>
-                        {turnosAbiertosAhora.length > 0 ? `${turnosAbiertosAhora.length} turno(s) abierto(s)` : 'Cajas cerradas'}
-                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399' }}>Operando con normalidad</span>
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span>🧑‍💼</span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>Personal Activo</span>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>Equipo de Trabajo</span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>
-                        {usuariosSistema.length} usuarios registrados
-                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>{usuariosSistema.length} cuentas en sistema</span>
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#030712', padding: '10px 12px', borderRadius: 10, border: '1px solid #1f2937' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span>🚚</span>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>Compras / Proveedores</span>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>Logística y Compras</span>
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#a5b4fc' }}>
-                        {compras.length} órdenes registradas
-                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#a5b4fc' }}>{compras.length} registros</span>
                     </div>
                   </div>
 
                   <button 
                     onClick={() => setJefeSeccion('reporte_vendedores')}
-                    style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '10px', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 'auto' }}>
-                    👨‍💼 Ver Reporte de Ventas por Vendedor
+                    style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 'auto' }}>
+                    👨‍💼 Ver Reporte Detallado por Vendedor
+                  </button>
+                </div>
+
+                {/* Resumen de Alertas y Stock de Inventario */}
+                <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14, color: '#f3f4f6' }}>📦 Estado del Inventario y Alertas</p>
+                  
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ background: '#030712', padding: 12, borderRadius: 10, border: '1px solid #1f2937' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                        <span>Productos con Stock Óptimo</span>
+                        <span style={{ color: '#34d399' }}>{productos.length - stockBajo.length} items</span>
+                      </div>
+                      <div style={{ width: '100%', background: '#1f2937', height: 8, borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${productos.length ? ((productos.length - stockBajo.length) / productos.length) * 100 : 100}%`, background: '#34d399', height: '100%' }} />
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#030712', padding: 12, borderRadius: 10, border: '1px solid #1f2937' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                        <span>Productos con Stock Crítico (Bajo)</span>
+                        <span style={{ color: '#f87171' }}>{stockBajo.length} items</span>
+                      </div>
+                      <div style={{ width: '100%', background: '#1f2937', height: 8, borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${productos.length ? (stockBajo.length / productos.length) * 100 : 0}%`, background: '#f87171', height: '100%' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => setJefeSeccion('inventario')}
+                    style={{ background: '#1f2937', color: '#38bdf8', border: 'none', padding: '11px', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', marginTop: 'auto' }}>
+                    📦 Gestionar Módulo de Inventario
                   </button>
                 </div>
 
