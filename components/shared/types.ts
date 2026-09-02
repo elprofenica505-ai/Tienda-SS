@@ -1,3 +1,5 @@
+// ====================== TIPOS BASE ======================
+
 export type Vista =
   | 'login' | 'jefe_home'
   | 'vendedor_home' | 'vendedor_ticket' | 'vendedor_cerrar_caja'
@@ -5,7 +7,77 @@ export type Vista =
   | 'chofer_home' | 'cajero_home';
 
 export type JefeSeccion =
-  | 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'permisos' | 'proximamente';
+  | 'inicio' | 'ventas' | 'inventario' | 'compras' | 'cajas' | 'usuarios' | 'permisos' | 'roles' | 'proximamente';
+
+// ====================== PERMISOS (RBAC) ======================
+
+export type Permission =
+  // Inventario
+  | 'inventario.ver' | 'inventario.crear' | 'inventario.editar' | 'inventario.eliminar' | 'inventario.ajustar'
+  // Ventas / POS
+  | 'ventas.ver' | 'ventas.crear' | 'ventas.anular' | 'ventas.ver_todas'
+  // Caja
+  | 'caja.abrir' | 'caja.cerrar' | 'caja.ver_cierres'
+  // Compras
+  | 'compras.ver' | 'compras.crear' | 'compras.aprobar'
+  // Entregas
+  | 'entregas.ver' | 'entregas.actualizar_estado' | 'entregas.asignar'
+  // Créditos
+  | 'creditos.ver' | 'creditos.crear' | 'creditos.cobrar' | 'creditos.editar'
+  // Usuarios y Roles
+  | 'usuarios.ver' | 'usuarios.crear' | 'usuarios.editar' | 'usuarios.eliminar'
+  | 'roles.ver' | 'roles.crear' | 'roles.editar' | 'roles.eliminar'
+  // Reportes y Config
+  | 'reportes.ver' | 'configuracion.ver' | 'configuracion.editar'
+  // Super
+  | 'organizacion.administrar';
+
+// ====================== MULTI-TENANT ======================
+
+export interface Organizacion {
+  id: string;
+  nombre: string;
+  slug: string;
+  plan: 'gratis' | 'basico' | 'pro' | 'enterprise';
+  activo: boolean;
+  creadoEn: any;
+  creadoPor: string;
+}
+
+export interface Rol {
+  id: string;
+  organizacionId: string;
+  nombre: string;
+  descripcion?: string;
+  permisos: Permission[];
+  esSistema: boolean; // true = no se puede eliminar (roles por defecto)
+  creadoEn?: any;
+}
+
+export interface Membresia {
+  rolId: string;
+  permisosExtra?: Permission[];
+  activo: boolean;
+  unidoEn?: any;
+}
+
+// ====================== USUARIO (compatible con lo actual + multi-tenant) ======================
+
+export type RolAntiguo = 'jefe' | 'vendedor' | 'bodega' | 'chofer' | 'cajero';
+
+export interface Usuario {
+  id: string;
+  email: string;
+  nombre: string;
+  activo: boolean;
+  // Sistema actual (lo mantenemos para que no se rompa nada)
+  rol: RolAntiguo;
+  // Nuevo sistema multi-tenant (lo usaremos después)
+  orgActualId?: string;
+  organizaciones?: Record<string, Membresia>;
+}
+
+// ====================== PERMISOS ANTIGUOS (compatibilidad) ======================
 
 export interface Permisos {
   bodegaCrearProductos: boolean;
@@ -26,6 +98,54 @@ export const PERMISOS_DEFAULT: Permisos = {
   cajaCobrarPreventas: true,
   cajaGestionarCreditos: false,
 };
+
+// ====================== ROLES POR DEFECTO (se crean al registrar una organización) ======================
+
+export const ROLES_SISTEMA: Omit<Rol, 'id' | 'organizacionId'>[] = [
+  {
+    nombre: 'Jefe / Owner',
+    descripcion: 'Acceso total a la organización',
+    permisos: [
+      'organizacion.administrar',
+      'usuarios.ver', 'usuarios.crear', 'usuarios.editar', 'usuarios.eliminar',
+      'roles.ver', 'roles.crear', 'roles.editar', 'roles.eliminar',
+      'inventario.ver', 'inventario.crear', 'inventario.editar', 'inventario.eliminar', 'inventario.ajustar',
+      'ventas.ver', 'ventas.crear', 'ventas.anular', 'ventas.ver_todas',
+      'caja.abrir', 'caja.cerrar', 'caja.ver_cierres',
+      'compras.ver', 'compras.crear', 'compras.aprobar',
+      'entregas.ver', 'entregas.actualizar_estado', 'entregas.asignar',
+      'creditos.ver', 'creditos.crear', 'creditos.cobrar', 'creditos.editar',
+      'reportes.ver', 'configuracion.ver', 'configuracion.editar',
+    ],
+    esSistema: true,
+  },
+  {
+    nombre: 'Vendedor',
+    descripcion: 'Punto de venta y atención al cliente',
+    permisos: ['ventas.ver', 'ventas.crear', 'caja.abrir', 'caja.cerrar', 'inventario.ver'],
+    esSistema: true,
+  },
+  {
+    nombre: 'Bodega',
+    descripcion: 'Control de inventario y compras',
+    permisos: ['inventario.ver', 'inventario.crear', 'inventario.editar', 'inventario.ajustar', 'compras.ver', 'compras.crear'],
+    esSistema: true,
+  },
+  {
+    nombre: 'Chofer',
+    descripcion: 'Gestión de entregas',
+    permisos: ['entregas.ver', 'entregas.actualizar_estado'],
+    esSistema: true,
+  },
+  {
+    nombre: 'Cajero',
+    descripcion: 'Cobro de ventas y créditos',
+    permisos: ['ventas.ver', 'caja.abrir', 'caja.cerrar', 'creditos.ver', 'creditos.cobrar'],
+    esSistema: true,
+  },
+];
+
+// ====================== RESTO DE TIPOS (igual que antes) ======================
 
 export interface Producto {
   id: string;
