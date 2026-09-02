@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
@@ -52,11 +52,9 @@ export default function JefePanel({
   const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
   const [guardandoUsuario, setGuardandoUsuario] = useState(false);
 
-  // Estados para supervisión y creación de créditos por el Jefe con Autocalculadora
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
   const [busquedaCredito, setBusquedaCredito] = useState('');
   
-  // Formulario de Nuevo Crédito / Fiado con mejor espaciado y campos expandidos
   const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
   const [cedulaCliente, setCedulaCliente] = useState('');
@@ -68,7 +66,6 @@ export default function JefePanel({
   const [primaMonto, setPrimaMonto] = useState('');
   const [plazoSeleccionado, setPlazoSeleccionado] = useState(12);
 
-  // Porcentajes de recargo editables por el Jefe según el plazo (configurable)
   const [porcentajesPlazos, setPorcentajesPlazos] = useState<Record<number, number>>({
     3: 5,
     6: 10,
@@ -80,12 +77,15 @@ export default function JefePanel({
     36: 60
   });
 
-  // Estados para compresión de fotos (cédula delantera, trasera y extras)
   const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
   const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
   const [fotosExtra, setFotosExtra] = useState<string[]>([]);
+  const [cargandoCredito, setCargandoCredito] = useState(false);
 
-  // Función utilitaria para comprimir imagen mediante Canvas a menor peso (~150 KB)
+  // Referencias para impresión de contratos en tamaño Carta y Legal
+  const contratoRef = useRef<HTMLDivElement>(null);
+  const [contratoImpresionData, setContratoImpresionData] = useState<any>(null);
+
   const comprimirImagen = (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -95,7 +95,7 @@ export default function JefePanel({
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 900;
+          const maxDim = 600; // Reducido para evitar exceder el límite de Firestore (1MB)
           if (width > height && width > maxDim) {
             height = Math.round((height * maxDim) / width);
             width = maxDim;
@@ -107,8 +107,7 @@ export default function JefePanel({
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          // Calidad 0.7 para asegurar que pese alrededor de 150 KB o menos
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // Calidad 0.5 para bajo peso
           resolve(dataUrl);
         };
         img.src = e.target?.result as string;
@@ -150,7 +149,6 @@ export default function JefePanel({
     cargarCreditosGlobales();
   }, []);
 
-  // Autocalculadora Financiera
   const precioBaseNum = parseFloat(precioBaseArticulo) || 0;
   const primaNum = parseFloat(primaMonto) || 0;
   const porcentajeRecargo = porcentajesPlazos[plazoSeleccionado] || 0;
@@ -166,6 +164,7 @@ export default function JefePanel({
       return;
     }
 
+    setCargandoCredito(true);
     try {
       const dataCredito = {
         nombreCliente: nombreCliente.trim(),
@@ -185,13 +184,17 @@ export default function JefePanel({
         fotosExtra: fotosExtra,
         fechaCreacion: serverTimestamp(),
         creadoPor: user.nombre || user.email,
-        abonos: []
+        abonos: [],
+        estadoCaja: 'pendiente' // Sincronizado para que el cajero lo reciba de inmediato
       };
 
-      await addDoc(collection(db, 'creditos'), dataCredito);
-      alert('¡Crédito / Fiado autorizado y registrado exitosamente en el sistema y disponible para el cajero!');
+      const docRef = await addDoc(collection(db, 'creditos'), dataCredito);
       
-      // Limpiar formulario y fotos
+      // Preparar datos para impresión inmediata opcional
+      setContratoImpresionData({ id: docRef.id, ...dataCredito, fechaCreacionTexto: new Date().toLocaleDateString() });
+
+      alert('¡Crédito autorizado, guardado correctamente y enviado al panel del cajero!');
+      
       setNombreCliente('');
       setCedulaCliente('');
       setTelefonoCliente('');
@@ -205,10 +208,94 @@ export default function JefePanel({
       setFotosExtra([]);
       setMostrarFormCredito(false);
       cargarCreditosGlobales();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error al registrar el crédito');
+      alert('Error al registrar el crédito: ' + (err.message || 'Verifique el peso de las imágenes'));
+    } finally {
+      setCargandoCredito(false);
     }
+  };
+
+  const imprimirContrato = (tipoFormato: 'carta' | 'legal') => {
+    if (!contratoImpresionData && creditosGlobales.length === 0) {
+      alert('No hay datos de crédito para imprimir.');
+      return;
+    }
+    const datos = contratoImpresionData || creditosGlobales[0];
+    const ventana = window.open('', '_blank');
+    if (!ventana) return;
+
+    ventana.document.write(`
+      <html>
+        <head>
+          <title>Contrato de Crédito / Pagaré - ${tipoFormato.toUpperCase()}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 30px; color: #000; font-size: 13px; line-height: 1.5; }
+            .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }
+            .header h2 { margin: 0; font-size: 18px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+            .box { border: 1px solid #ccc; padding: 10px; border-radius: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+            .firmas { display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }
+            .firma-linea { width: 200px; border-top: 1px solid #000; padding-top: 5px; }
+            @page { size: ${tipoFormato === 'legal' ? 'legal' : 'letter'}; margin: 20mm; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>TIENDA-SS - CONTRATO DE FINANCIAMIENTO Y PAGARÉ</h2>
+            <p>Documento Oficial Autorizado - Formato ${tipoFormato.toUpperCase()}</p>
+          </div>
+          <div class="grid">
+            <div class="box">
+              <p><b>Cliente:</b> ${datos.nombreCliente}</p>
+              <p><b>Cédula:</b> ${datos.cedula}</p>
+              <p><b>Teléfono:</b> ${datos.telefono}</p>
+              <p><b>Dirección:</b> ${datos.direccion}</p>
+            </div>
+            <div class="box">
+              <p><b>Artículo:</b> ${datos.articulo}</p>
+              <p><b>Precio Base:</b> C$ ${datos.precioBase?.toLocaleString()}</p>
+              <p><b>Prima / Enganche:</b> C$ ${datos.prima?.toLocaleString()}</p>
+              <p><b>Plazo:</b> ${datos.plazoMeses} Meses</p>
+            </div>
+          </div>
+          <p><b>Fiador / Referencia:</b> ${datos.fiador || 'N/D'}</p>
+          <table>
+            <tr>
+              <th>Concepto Financiero</th>
+              <th>Monto / Detalle</th>
+            </tr>
+            <tr>
+              <td>Monto Financiado con Recargo (${datos.porcentajeRecargoApplied || 0}%)</td>
+              <td><b>C$ ${datos.saldoPendiente?.toLocaleString()}</b></td>
+            </tr>
+            <tr>
+              <td>Cuota Mensual Fija</td>
+              <td><b>C$ ${datos.cuotaMensual}</b></td>
+            </tr>
+          </table>
+          <p style="margin-top: 20px; text-align: justify;">
+            Por medio de la presente, el deudor acepta incondicionalmente las condiciones del crédito y se compromete a cancelar las cuotas mensuales establecidas en el plazo acordado.
+          </p>
+          <div class="firmas">
+            <div>
+              <div class="firma-linea">Firma del Cliente</div>
+            </div>
+            <div>
+              <div class="firma-linea">Firma del Fiador</div>
+            </div>
+            <div>
+              <div class="firma-linea">Autorizado por Tienda-SS</div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    ventana.document.close();
+    ventana.focus();
+    setTimeout(() => { ventana.print(); }, 500);
   };
 
   const hoy = new Date();
@@ -231,12 +318,6 @@ export default function JefePanel({
     }, 0);
     return s + u;
   }, 0);
-
-  const porPago: Record<string, number> = {};
-  ventasHoy.forEach(v => {
-    const m = v.medioPago || 'Otros';
-    porPago[m] = (porPago[m] || 0) + (v.total || 0);
-  });
 
   const ventasPorMes = (() => {
     const arr: { label: string; total: number }[] = [];
@@ -455,14 +536,20 @@ export default function JefePanel({
             <ProductosAdmin />
           )}
 
-          {/* MÓDULO DE CRÉDITOS Y FIADOS CON AUTOCALCULADORA Y CÁMARA */}
+          {/* MÓDULO DE CRÉDITOS Y FIADOS CON BOTONES DE IMPRESIÓN CARTA Y LEGAL */}
           {jefeSeccion === 'creditos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>💳 Gestión y Supervisión de Créditos / Fiados</p>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   <button onClick={() => setMostrarFormCredito(!mostrarFormCredito)} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                     {mostrarFormCredito ? '✕ Cerrar Formulario' : '➕ Nuevo Crédito / Fiado'}
+                  </button>
+                  <button onClick={() => imprimirContrato('carta')} style={{ background: '#0284c7', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    🖨️ Imprimir Carta
+                  </button>
+                  <button onClick={() => imprimirContrato('legal')} style={{ background: '#0d9488', color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    🖨️ Imprimir Legal
                   </button>
                   <button onClick={cargarCreditosGlobales} style={{ background: '#374151', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                     Actualizar
@@ -470,7 +557,6 @@ export default function JefePanel({
                 </div>
               </div>
 
-              {/* FORMULARIO DE NUEVO CRÉDITO Y AUTOCALCULADORA CON ESPACIADO CORREGIDO Y CÁMARA */}
               {mostrarFormCredito && (
                 <form onSubmit={guardarNuevoCredito} style={{ background: '#111827', border: '1px solid #4338ca', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <p style={{ fontWeight: 800, color: '#c7d2fe', margin: 0, fontSize: 14 }}>📝 Asignar Venta al Crédito (Requisitos Bancarios / Legales)</p>
@@ -525,7 +611,6 @@ export default function JefePanel({
                     </div>
                   </div>
 
-                  {/* Configuración de Plazos y Porcentajes Ajustables */}
                   <div style={{ background: '#1e1b4b', padding: 14, borderRadius: 12, border: '1px solid #312e81', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <p style={{ fontWeight: 700, fontSize: 12, color: '#c7d2fe', margin: 0 }}>⚡ Autocalculadora y Porcentajes de Financiamiento Ajustables</p>
                     
@@ -565,15 +650,14 @@ export default function JefePanel({
                     </div>
                   </div>
 
-                  {/* SECCIÓN DE CÁMARA Y FOTOS (Cédula y extras comprimidas a ~150 KB) */}
                   <div style={{ background: '#0f172a', padding: 14, borderRadius: 12, border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <p style={{ fontWeight: 700, fontSize: 12, color: '#38bdf8', margin: 0 }}>📸 Captura de Documentos y Evidencias (Comprimidas automáticamente)</p>
+                    <p style={{ fontWeight: 700, fontSize: 12, color: '#38bdf8', margin: 0 }}>📸 Captura de Documentos y Evidencias (Optimizado)</p>
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula (Adelante):</label>
                         <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'frontal')} style={{ fontSize: 11, color: '#cbd5e1' }} />
-                        {fotoCedulaFrontal && <img src={fotoCedulaFrontal} alt="Cédula Frontal" style={{ width: '1005', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
+                        {fotoCedulaFrontal && <img src={fotoCedulaFrontal} alt="Cédula Frontal" style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
                       </div>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -604,8 +688,8 @@ export default function JefePanel({
                     </div>
                   </div>
 
-                  <button type="submit" style={{ width: '100%', background: '#059669', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
-                    Aprobar y Enviar Crédito a Caja
+                  <button type="submit" disabled={cargandoCredito} style={{ width: '100%', background: '#059669', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                    {cargandoCredito ? 'Guardando y optimizando...' : 'Aprobar y Enviar Crédito a Caja'}
                   </button>
                 </form>
               )}
@@ -628,10 +712,13 @@ export default function JefePanel({
                         <div>
                           <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente} {c.articulo ? `(${c.articulo})` : ''}</p>
                           <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Cédula: {c.cedula || 'N/D'} · Plazo: <b>{c.plazoMeses} meses</b> · Fiador: {c.fiador || 'N/D'}</p>
-                          <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: C$ {c.cuotaMensual} · Abonos realizados: {c.abonos?.length || 0}</p>
+                          <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: C$ {c.cuotaMensual} · Abonos: {c.abonos?.length || 0}</p>
                         </div>
-                        <div style={{ textAlign: 'right' }}>
+                        <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
                           <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: C$ {c.saldoPendiente?.toLocaleString()}</p>
+                          <button onClick={() => { setContratoImpresionData(c); imprimirContrato('carta'); }} style={{ background: '#1f2937', color: '#38bdf8', border: 'none', padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+                            🖨️ Contrato
+                          </button>
                         </div>
                       </div>
                     ))
@@ -724,7 +811,6 @@ export default function JefePanel({
             </div>
           )}
 
-          {/* PERMISOS GENERALES INCLUYENDO CAJA */}
           {jefeSeccion === 'permisos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
