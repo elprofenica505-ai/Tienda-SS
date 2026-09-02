@@ -12,6 +12,9 @@ export interface Permisos {
   bodegaAjustarStock: boolean;
   bodegaRegistrarCompras: boolean;
   choferRegistrarCompras: boolean;
+  cajaAbrirCerrar: boolean;
+  cajaCobrarPreventas: boolean;
+  cajaGestionarCreditos: boolean;
 }
 
 export const PERMISOS_DEFAULT: Permisos = {
@@ -19,6 +22,9 @@ export const PERMISOS_DEFAULT: Permisos = {
   bodegaAjustarStock: true,
   bodegaRegistrarCompras: true,
   choferRegistrarCompras: false,
+  cajaAbrirCerrar: true,
+  cajaCobrarPreventas: true,
+  cajaGestionarCreditos: false,
 };
 
 export interface Producto {
