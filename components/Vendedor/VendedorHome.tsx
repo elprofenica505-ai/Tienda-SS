@@ -23,12 +23,10 @@ interface Props {
 }
 
 export default function VendedorHome({
-  user, productos, setProductos, turnos,
-  carrito, setCarrito, onCerrar, onCerrarCaja
+  user, productos, setProductos,
+  carrito, setCarrito, onCerrar
 }: Props) {
   const [busqueda, setBusqueda] = useState('');
-
-  const turnoAbierto = turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto');
 
   const filtrados = productos.filter(p =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -59,10 +57,6 @@ export default function VendedorHome({
 
   const crearPreventa = async () => {
     if (!user || carrito.length === 0) return;
-    if (!turnoAbierto) {
-      alert('Debes abrir caja antes de vender');
-      return;
-    }
     try {
       const dataOrden = {
         items: carrito.map(c => ({
@@ -74,7 +68,7 @@ export default function VendedorHome({
         estado: 'pending', // La orden queda en espera para que la cobre el cajero
         vendedorId: user.id,
         vendedorNombre: user.nombre,
-        turnoId: turnoAbierto ? turnoAbierto.id : null,
+        turnoId: null,
       };
 
       // Guardamos en la colección 'orders' para que la caja la procese
@@ -99,9 +93,6 @@ export default function VendedorHome({
             <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={onCerrarCaja} style={{ background: '#1e1b4b', color: '#a5b4fc', border: '1px solid #4f46e5', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-              Cerrar caja
-            </button>
             <button onClick={onCerrar} style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
               Salir
             </button>
@@ -150,7 +141,7 @@ export default function VendedorHome({
           )}
           {carrito.length > 0 && (
             <>
-              <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
+              <div style={{ borderTop: '1px solid #374151', marginTop: 10, paddingTop: 10, display: 'flex', justifyContent: 'space-name', justifyContent: 'space-between', fontWeight: 800, fontSize: 18 }}>
                 <span>Total Preventa</span>
                 <span style={{ color: '#34d399' }}>${totalCarrito.toLocaleString()}</span>
               </div>
