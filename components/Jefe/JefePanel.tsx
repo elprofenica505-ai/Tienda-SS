@@ -176,7 +176,6 @@ export default function JefePanel({
   })();
   const maxMes = Math.max(1, ...ventasPorMes.map(d => d.total));
 
-  // Gráfica de Dona (Métodos de Pago)
   const pagosMap: Record<string, number> = {};
   ventas.forEach(v => {
     const metodo = v.medioPago || v.tipo || 'Efectivo';
@@ -276,41 +275,83 @@ export default function JefePanel({
           </div>
         </div>
 
-        <div style={{ padding: 16, maxWidth: 1100, margin: '0 auto' }}>
+        <div style={{ padding: 16, maxWidth: 1000, margin: '0 auto' }}>
           
-          {/* PANTALLA DE INICIO PROFESIONAL (Estilo Dashboard Ejecutivo) */}
+          {/* PANTALLA DE INICIO MEJORADA */}
           {jefeSeccion === 'inicio' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               
-              {/* Tarjetas Superiores de Métricas */}
+              {/* Tarjetas KPI Mejoradas */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-                <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)', borderRadius: 16, padding: 18, color: '#fff' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Ventas del Día</span>
-                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {totalHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{ticketsHoy} transacciones hoy</p>
+                
+                <div style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)', border: '1px solid #4338ca', borderRadius: 16, padding: 18, color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Ventas del Día</span>
+                    <span style={{ fontSize: 18 }}>🧾</span>
+                  </div>
+                  <p style={{ fontSize: 28, fontWeight: 800, margin: '12px 0 4px', letterSpacing: '-0.5px' }}>C$ {totalHoy.toLocaleString()}</p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#c7d2fe' }}>
+                    <span>{ticketsHoy} transacciones</span>
+                    <span style={{ color: '#34d399', fontWeight: 'bold' }}>● En tiempo real</span>
+                  </div>
                 </div>
-                <div style={{ background: 'linear-gradient(135deg, #ec4899 0%, #d946ef 100%)', borderRadius: 16, padding: 18, color: '#fff' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Utilidad Estimada</span>
-                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>C$ {utilidadHoy.toLocaleString()}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Ganancia neta calculada</p>
+
+                <div style={{ background: 'linear-gradient(135deg, #581c87 0%, #701a75 100%)', border: '1px solid #a21caf', borderRadius: 16, padding: 18, color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#f5d0fe', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Utilidad Estimada</span>
+                    <span style={{ fontSize: 18 }}>📈</span>
+                  </div>
+                  <p style={{ fontSize: 28, fontWeight: 800, margin: '12px 0 4px', letterSpacing: '-0.5px' }}>C$ {utilidadHoy.toLocaleString()}</p>
+                  <p style={{ fontSize: 11, color: '#f5e8ff', margin: 0 }}>Ganancia neta calculada sobre costo</p>
                 </div>
-                <div style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)', borderRadius: 16, padding: 18, color: '#fff' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Inventario Activo</span>
-                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{productos.length} items</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>{stockBajo.length} en stock bajo</p>
+
+                <div style={{ background: 'linear-gradient(135deg, #0c4a6e 0%, #0369a1 100%)', border: '1px solid #0284c7', borderRadius: 16, padding: 18, color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#bae6fd', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Inventario Activo</span>
+                    <span style={{ fontSize: 18 }}>📦</span>
+                  </div>
+                  <p style={{ fontSize: 28, fontWeight: 800, margin: '12px 0 4px', letterSpacing: '-0.5px' }}>{productos.length} items</p>
+                  <p style={{ fontSize: 11, color: stockBajo.length > 0 ? '#fca5a5' : '#e0f2fe', margin: 0 }}>
+                    {stockBajo.length > 0 ? `⚠️ ${stockBajo.length} productos en stock bajo` : '✔️ Stock en niveles óptimos'}
+                  </p>
                 </div>
-                <div style={{ background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', borderRadius: 16, padding: 18, color: '#fff' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.9 }}>Créditos / Fiados</span>
-                  <p style={{ fontSize: 26, fontWeight: 800, margin: '10px 0 4px' }}>{creditosGlobales.length}</p>
-                  <p style={{ fontSize: 11, opacity: 0.8, margin: 0 }}>Financiamientos activos</p>
+
+                <div style={{ background: 'linear-gradient(135deg, #78350f 0%, #92400e 100%)', border: '1px solid #b45309', borderRadius: 16, padding: 18, color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#fde68a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Créditos Activos</span>
+                    <span style={{ fontSize: 18 }}>💳</span>
+                  </div>
+                  <p style={{ fontSize: 28, fontWeight: 800, margin: '12px 0 4px', letterSpacing: '-0.5px' }}>{creditosGlobales.length}</p>
+                  <p style={{ fontSize: 11, color: '#fef3c7', margin: 0 }}>Financiamientos en curso</p>
+                </div>
+
+              </div>
+
+              {/* Accesos Rápidos Operativos */}
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
+                <p style={{ fontSize: 13, fontWeight: 800, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>Acciones Rápidas</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                  <button onClick={() => setJefeSeccion('inventario')} style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: '12px 14px', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+                    <span style={{ fontSize: 16 }}>📦</span> Gestionar Stock
+                  </button>
+                  <button onClick={() => setJefeSeccion('reporte_vendedores')} style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: '12px 14px', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+                    <span style={{ fontSize: 16 }}>👨‍💼</span> Ver Vendedores
+                  </button>
+                  <button onClick={() => setJefeSeccion('creditos')} style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: '12px 14px', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+                    <span style={{ fontSize: 16 }}>💳</span> Nuevo Crédito
+                  </button>
+                  <button onClick={() => setJefeSeccion('reportes')} style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: '12px 14px', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+                    <span style={{ fontSize: 16 }}>📊</span> Analíticas Caja
+                  </button>
                 </div>
               </div>
 
-              {/* Sección Central de Gráficos (Tendencias y Meses) */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+              {/* Gráficos principales */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 16 }}>
+                
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18 }}>
-                  <p style={{ fontWeight: 800, margin: '0 0 10px', fontSize: 14 }}>📈 Tendencia de Crecimiento</p>
-                  <div style={{ height: 140, width: '100%' }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14 }}>Tendencia de Crecimiento</p>
+                  <div style={{ height: 130, width: '100%', marginTop: 10 }}>
                     <svg viewBox="0 0 500 150" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
                       <path d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60 L 500,150 L 0,150 Z" fill="#8b5cf6" fillOpacity="0.2" />
                       <path d="M 0,130 Q 100,40 200,90 T 400,30 T 500,60" fill="none" stroke="#a855f7" strokeWidth="3" />
@@ -319,26 +360,33 @@ export default function JefePanel({
                 </div>
 
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 18 }}>
-                  <p style={{ fontWeight: 800, margin: '0 0 10px', fontSize: 14 }}>📊 Ingresos por Mes</p>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 140 }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 14 }}>Ingresos por Mes</p>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 130, marginTop: 10 }}>
                     {ventasPorMes.map((m, i) => (
                       <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
-                        <div style={{ width: '100%', background: '#3b82f6', borderRadius: '6px 6px 0 0', height: `${Math.max(8, (m.total / maxMes) * 120)}px` }} />
+                        <div style={{ width: '100%', background: '#3b82f6', borderRadius: '6px 6px 0 0', height: `${Math.max(8, (m.total / maxMes) * 110)}px` }} />
                         <span style={{ fontSize: 10, color: '#d1d5db' }}>{m.label}</span>
                       </div>
                     ))}
                   </div>
                 </div>
+
               </div>
 
-              {/* Sección Inferior de Distribución por Método de Pago (Estilo Dona) */}
-              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 20 }}>
-                <p style={{ fontWeight: 800, margin: '0 0 4px', fontSize: 14 }}>🍩 Distribución de Ingresos por Método de Pago</p>
-                <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 16px' }}>Proporción de entradas de dinero en caja general.</p>
+            </div>
+          )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, alignItems: 'center' }}>
+          {/* SECCIÓN DE REPORTES CON GRÁFICA DE DONA */}
+          {jefeSeccion === 'reportes' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 20 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 4px', color: '#fff' }}>📊 Reportes y Distribución por Método de Pago</h2>
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 20px' }}>Análisis detallado de cómo ingresa el dinero a caja.</p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20, alignItems: 'center' }}>
+                  
                   <div style={{ display: 'flex', justifyContent: 'center', position: 'relative' }}>
-                    <svg width="160" height="160" viewBox="0 0 42 42" style={{ transform: 'rotate(-90deg)' }}>
+                    <svg width="180" height="180" viewBox="0 0 42 42" style={{ transform: 'rotate(-90deg)' }}>
                       <circle cx="21" cy="21" r="15.91549430918954" fill="transparent" stroke="#1f2937" strokeWidth="6"></circle>
                       {datosDona.map((d, i) => (
                         <circle
@@ -355,14 +403,14 @@ export default function JefePanel({
                       ))}
                     </svg>
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-                      <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>Total</span>
-                      <span style={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>{ventas.length} vtas</span>
+                      <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>Total Ventas</span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{ventas.length}</span>
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {datosDona.map((d, i) => (
-                      <div key={i} style={{ background: '#030712', border: '1px solid #1f2937', padding: '8px 12px', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div key={i} style={{ background: '#030712', border: '1px solid #1f2937', padding: '10px 12px', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <div style={{ width: 10, height: 10, borderRadius: '50%', background: d.color }} />
                           <span style={{ fontSize: 12, fontWeight: 600 }}>{d.nombre}</span>
@@ -374,20 +422,13 @@ export default function JefePanel({
                       </div>
                     ))}
                   </div>
+
                 </div>
               </div>
-
             </div>
           )}
 
-          {/* MÓDULOS FUNCIONALES RESTANTES */}
-          {jefeSeccion === 'reportes' && (
-            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 20 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 10px', color: '#fff' }}>📊 Reportes y Analíticas Avanzadas</h2>
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Sección dedicada a la auditoría general de rendimiento de su personal y cajas.</p>
-            </div>
-          )}
-
+          {/* OTRAS SECCIONES */}
           {jefeSeccion === 'ventas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Todas las ventas del sistema ({ventas.length})</p>
@@ -525,7 +566,6 @@ export default function JefePanel({
               <p style={{ fontSize: 13, color: '#9ca3af', margin: '8px 0 0' }}>Este módulo estará disponible pronto</p>
             </div>
           )}
-
         </div>
       </div>
     </div>
