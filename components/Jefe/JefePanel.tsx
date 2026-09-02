@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, query } from 'firebase/firestore';
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
