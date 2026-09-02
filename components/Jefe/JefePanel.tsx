@@ -6,7 +6,7 @@ import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from
 import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
-import type { Usuario } from '@/lib/auth';
+import RolesPanel from '@/components/Jefe/RolesPanel';
 
 interface Props {
   user: Usuario;
@@ -21,8 +21,6 @@ interface Props {
   onCerrar: () => void;
 }
 
-const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
-  { key: 'inicio', label: 'Inicio', icon: '🏠' },
 const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
   { key: 'inicio', label: 'Inicio', icon: '🏠' },
   { key: 'ventas', label: 'Ventas', icon: '🧾' },
@@ -42,7 +40,6 @@ const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; prox
 ];
 
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-
 
 export default function JefePanel({
   user, productos, ventas, turnos, compras,
@@ -82,6 +79,7 @@ export default function JefePanel({
     30: 50,
     36: 60
   });
+
   const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
   const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
   const [fotosExtra, setFotosExtra] = useState<string[]>([]);
@@ -434,6 +432,7 @@ export default function JefePanel({
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
+      {/* Menú lateral */}
       <div style={{
         position: 'fixed', top: 0, left: 0, bottom: 0, width: 260, background: '#111827',
         borderRight: '1px solid #1f2937', zIndex: 40, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)',
@@ -487,6 +486,8 @@ export default function JefePanel({
         </div>
 
         <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
+
+          {/* ========== INICIO ========== */}
           {jefeSeccion === 'inicio' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -524,6 +525,7 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== VENTAS ========== */}
           {jefeSeccion === 'ventas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Todas las ventas del sistema ({ventas.length})</p>
@@ -545,6 +547,7 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== REPORTE VENDEDORES ========== */}
           {jefeSeccion === 'reporte_vendedores' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
@@ -555,7 +558,6 @@ export default function JefePanel({
                   <p style={{ fontSize: 13, color: '#6b7280', textAlign: 'center', padding: '20px 0' }}>No hay ventas registradas el día de hoy.</p>
                 ) : (
                   (() => {
-                    // Agrupar ventas del día por vendedor
                     const porVendedor: Record<string, { totalMonto: number; totalUnidades: number; productos: Record<string, number> }> = {};
                     
                     ventasHoy.forEach(v => {
@@ -599,10 +601,12 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== INVENTARIO ========== */}
           {jefeSeccion === 'inventario' && (
             <ProductosAdmin />
           )}
 
+          {/* ========== CRÉDITOS ========== */}
           {jefeSeccion === 'creditos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -793,6 +797,7 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== CAJAS ========== */}
           {jefeSeccion === 'cajas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>Turnos / Cierres de caja</p>
@@ -828,6 +833,7 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== USUARIOS ========== */}
           {jefeSeccion === 'usuarios' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <form onSubmit={registrarNuevoUsuarioSistema} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -877,10 +883,16 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== ROLES (NUEVO) ========== */}
+          {jefeSeccion === 'roles' && (
+            <RolesPanel />
+          )}
+
+          {/* ========== PERMISOS ========== */}
           {jefeSeccion === 'permisos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
-                Activa o desactiva los permisos del personal en el sistema. Se guarda en tiempo real en Firebase.
+                Activa o desactiva los permisos del personal en el sistema.
               </p>
               {([
                 { key: 'bodegaCrearProductos' as const, label: 'Bodega: crear productos nuevos' },
@@ -908,6 +920,7 @@ export default function JefePanel({
             </div>
           )}
 
+          {/* ========== PRÓXIMAMENTE ========== */}
           {jefeSeccion === 'proximamente' && (
             <div style={{ textAlign: 'center', padding: 40, background: '#111827', borderRadius: 16, border: '1px solid #1f2937' }}>
               <p style={{ fontSize: 40, margin: '0 0 12px' }}>🚧</p>
@@ -915,6 +928,7 @@ export default function JefePanel({
               <p style={{ fontSize: 13, color: '#9ca3af', margin: '8px 0 0' }}>Este módulo estará disponible pronto</p>
             </div>
           )}
+
         </div>
       </div>
     </div>
