@@ -82,7 +82,6 @@ export default function JefePanel({
   const [fotosExtra, setFotosExtra] = useState<string[]>([]);
   const [cargandoCredito, setCargandoCredito] = useState(false);
 
-  // Referencias para impresión de contratos en tamaño Carta y Legal
   const contratoRef = useRef<HTMLDivElement>(null);
   const [contratoImpresionData, setContratoImpresionData] = useState<any>(null);
 
@@ -95,7 +94,7 @@ export default function JefePanel({
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 600; // Reducido para evitar exceder el límite de Firestore (1MB)
+          const maxDim = 600;
           if (width > height && width > maxDim) {
             height = Math.round((height * maxDim) / width);
             width = maxDim;
@@ -107,7 +106,7 @@ export default function JefePanel({
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.5); // Calidad 0.5 para bajo peso
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
           resolve(dataUrl);
         };
         img.src = e.target?.result as string;
@@ -185,15 +184,26 @@ export default function JefePanel({
         fechaCreacion: serverTimestamp(),
         creadoPor: user.nombre || user.email,
         abonos: [],
-        estadoCaja: 'pendiente' // Sincronizado para que el cajero lo reciba de inmediato
+        estadoCaja: 'pendiente'
       };
 
+      // 1. Guardar en colección créditos
       const docRef = await addDoc(collection(db, 'creditos'), dataCredito);
       
-      // Preparar datos para impresión inmediata opcional
+      // 2. Registrar simultáneamente en colección ventas para que aparezca en el panel de ventas
+      await addDoc(collection(db, 'ventas'), {
+        cliente: nombreCliente.trim(),
+        tipo: 'Crédito',
+        total: parseFloat(montoConRecargo.toFixed(2)),
+        vendedorNombre: user.nombre || 'Jefe / Sistema',
+        medioPago: 'Crédito',
+        items: [{ nombre: articuloFiado.trim() || 'Artículo financiado', cantidad: 1, precio: precioBaseNum }],
+        fecha: serverTimestamp()
+      });
+      
       setContratoImpresionData({ id: docRef.id, ...dataCredito, fechaCreacionTexto: new Date().toLocaleDateString() });
 
-      alert('¡Crédito autorizado, guardado correctamente y enviado al panel del cajero!');
+      alert('¡Crédito autorizado, sincronizado con ventas y enviado al panel del cajero!');
       
       setNombreCliente('');
       setCedulaCliente('');
@@ -536,7 +546,6 @@ export default function JefePanel({
             <ProductosAdmin />
           )}
 
-          {/* MÓDULO DE CRÉDITOS Y FIADOS CON BOTONES DE IMPRESIÓN CARTA Y LEGAL */}
           {jefeSeccion === 'creditos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
