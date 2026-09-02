@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
@@ -62,6 +62,7 @@ export default function TiendaSS() {
     setVista(prev);
   };
 
+  // Escuchar solo el cambio de sesión (esto sí es necesario)
   useEffect(() => {
     const unsub = escucharSesion((u) => {
       setUser(u);
@@ -80,77 +81,77 @@ export default function TiendaSS() {
     return () => unsub();
   }, []);
 
+  // Cargar datos UNA SOLA VEZ (sin tiempo real) → más barato / gratis
   useEffect(() => {
     if (!user) return;
 
-    const unsubProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
-      const lista: Producto[] = [];
-      snapshot.forEach(d => {
-        const x = d.data();
-        lista.push({
-          id: d.id,
-          codigo: x.codigo || '',
-          nombre: x.nombre || '',
-          stock: x.stock || 0,
-          stockMinimo: x.stockMinimo ?? 5,
-          precio: x.precio || 0,
-          costo: x.costo || 0,
-          imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
-          categoria: x.categoria || 'Otros',
+    const cargarDatos = async () => {
+      try {
+        // Productos
+        const ps = await getDocs(collection(db, 'productos'));
+        const listaProductos: Producto[] = [];
+        ps.forEach(d => {
+          const x = d.data();
+          listaProductos.push({
+            id: d.id,
+            codigo: x.codigo || '',
+            nombre: x.nombre || '',
+            stock: x.stock || 0,
+            stockMinimo: x.stockMinimo ?? 5,
+            precio: x.precio || 0,
+            costo: x.costo || 0,
+            imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
+            categoria: x.categoria || 'Otros',
+          });
         });
-      });
-      setProductos(lista);
-    });
+        setProductos(listaProductos);
 
-    const unsubVentas = onSnapshot(collection(db, 'ventas'), (snapshot) => {
-      const lv: Venta[] = [];
-      snapshot.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
-      setVentas(lv);
-    });
+        // Ventas
+        const vs = await getDocs(collection(db, 'ventas'));
+        const listaVentas: Venta[] = [];
+        vs.forEach(d => listaVentas.push({ id: d.id, ...d.data() } as Venta));
+        setVentas(listaVentas);
 
-    const unsubTurnos = onSnapshot(collection(db, 'turnos'), (snapshot) => {
-      const lt: Turno[] = [];
-      snapshot.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
-      setTurnos(lt);
-    });
+        // Turnos
+        const ts = await getDocs(collection(db, 'turnos'));
+        const listaTurnos: Turno[] = [];
+        ts.forEach(d => listaTurnos.push({ id: d.id, ...d.data() } as Turno));
+        setTurnos(listaTurnos);
 
-    const unsubCompras = onSnapshot(collection(db, 'compras'), (snapshot) => {
-      const lc: Compra[] = [];
-      snapshot.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
-      setCompras(lc);
-    });
+        // Compras
+        const cs = await getDocs(collection(db, 'compras'));
+        const listaCompras: Compra[] = [];
+        cs.forEach(d => listaCompras.push({ id: d.id, ...d.data() } as Compra));
+        setCompras(listaCompras);
 
-    const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
-      const listaUs: UsuarioSistema[] = [];
-      snapshot.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
-      setUsuariosSistema(listaUs);
-    });
+        // Usuarios
+        const us = await getDocs(collection(db, 'usuarios'));
+        const listaUsuarios: UsuarioSistema[] = [];
+        us.forEach(d => listaUsuarios.push({ id: d.id, ...d.data() } as UsuarioSistema));
+        setUsuariosSistema(listaUsuarios);
 
-    const unsubPermisos = onSnapshot(doc(db, 'config', 'permisos'), (snap) => {
-      if (snap.exists()) {
-        const x = snap.data();
-        setPermisos({
-          bodegaCrearProductos: x.bodegaCrearProductos !== false,
-          bodegaAjustarStock: x.bodegaAjustarStock !== false,
-          bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
-          choferRegistrarCompras: x.choferRegistrarCompras === true,
-          cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
-          cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
-          cajaGestionarCreditos: x.cajaGestionarCreditos === true,
-        });
-      } else {
-        setPermisos(PERMISOS_DEFAULT);
+        // Permisos
+        const permSnap = await getDoc(doc(db, 'config', 'permisos'));
+        if (permSnap.exists()) {
+          const x = permSnap.data();
+          setPermisos({
+            bodegaCrearProductos: x.bodegaCrearProductos !== false,
+            bodegaAjustarStock: x.bodegaAjustarStock !== false,
+            bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
+            choferRegistrarCompras: x.choferRegistrarCompras === true,
+            cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
+            cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
+            cajaGestionarCreditos: x.cajaGestionarCreditos === true,
+          });
+        } else {
+          setPermisos(PERMISOS_DEFAULT);
+        }
+      } catch (error) {
+        console.error('Error cargando datos:', error);
       }
-    });
-
-    return () => {
-      unsubProductos();
-      unsubVentas();
-      unsubTurnos();
-      unsubCompras();
-      unsubUsuarios();
-      unsubPermisos();
     };
+
+    cargarDatos();
   }, [user]);
 
   const cerrar = async () => {
