@@ -56,7 +56,7 @@ export default function JefePanel({
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
   const [busquedaCredito, setBusquedaCredito] = useState('');
   
-  // Formulario de Nuevo Crédito / Fiado
+  // Formulario de Nuevo Crédito / Fiado con mejor espaciado y campos expandidos
   const [mostrarFormCredito, setMostrarFormCredito] = useState(false);
   const [nombreCliente, setNombreCliente] = useState('');
   const [cedulaCliente, setCedulaCliente] = useState('');
@@ -79,6 +79,58 @@ export default function JefePanel({
     30: 50,
     36: 60
   });
+
+  // Estados para compresión de fotos (cédula delantera, trasera y extras)
+  const [fotoCedulaFrontal, setFotoCedulaFrontal] = useState<string | null>(null);
+  const [fotoCedulaTrasera, setFotoCedulaTrasera] = useState<string | null>(null);
+  const [fotosExtra, setFotosExtra] = useState<string[]>([]);
+
+  // Función utilitaria para comprimir imagen mediante Canvas a menor peso (~150 KB)
+  const comprimirImagen = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 900;
+          if (width > height && width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          // Calidad 0.7 para asegurar que pese alrededor de 150 KB o menos
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(dataUrl);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const manejarCambioFoto = async (e: React.ChangeEvent<HTMLInputElement>, tipo: 'frontal' | 'trasera' | 'extra') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const base64Comprimida = await comprimirImagen(file);
+    if (tipo === 'frontal') setFotoCedulaFrontal(base64Comprimida);
+    else if (tipo === 'trasera') setFotoCedulaTrasera(base64Comprimida);
+    else if (tipo === 'extra') {
+      if (fotosExtra.length < 2) {
+        setFotosExtra([...fotosExtra, base64Comprimida]);
+      } else {
+        alert('Solo se permiten máximo 2 fotos extra adicionales.');
+      }
+    }
+  };
 
   const cargarCreditosGlobales = async () => {
     try {
@@ -128,6 +180,9 @@ export default function JefePanel({
         porcentajeRecargoApplied: porcentajeRecargo,
         saldoPendiente: parseFloat(montoConRecargo.toFixed(2)),
         cuotaMensual: parseFloat(cuotaMensualCalculada),
+        fotoCedulaFrontal: fotoCedulaFrontal || null,
+        fotoCedulaTrasera: fotoCedulaTrasera || null,
+        fotosExtra: fotosExtra,
         fechaCreacion: serverTimestamp(),
         creadoPor: user.nombre || user.email,
         abonos: []
@@ -136,7 +191,7 @@ export default function JefePanel({
       await addDoc(collection(db, 'creditos'), dataCredito);
       alert('¡Crédito / Fiado autorizado y registrado exitosamente en el sistema y disponible para el cajero!');
       
-      // Limpiar formulario
+      // Limpiar formulario y fotos
       setNombreCliente('');
       setCedulaCliente('');
       setTelefonoCliente('');
@@ -145,6 +200,9 @@ export default function JefePanel({
       setArticuloFiado('');
       setPrecioBaseArticulo('');
       setPrimaMonto('');
+      setFotoCedulaFrontal(null);
+      setFotoCedulaTrasera(null);
+      setFotosExtra([]);
       setMostrarFormCredito(false);
       cargarCreditosGlobales();
     } catch (err) {
@@ -340,12 +398,12 @@ export default function JefePanel({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
                   <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Ventas hoy</p>
-                  <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#34d399' }}>${totalHoy.toLocaleString()}</p>
+                  <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#34d399' }}>C$ {totalHoy.toLocaleString()}</p>
                   <p style={{ fontSize: 11, color: '#6b7280', margin: '2px 0 0' }}>{ticketsHoy} tickets</p>
                 </div>
                 <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
                   <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Utilidad estimada</p>
-                  <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#a5b4fc' }}>${utilidadHoy.toLocaleString()}</p>
+                  <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#a5b4fc' }}>C$ {utilidadHoy.toLocaleString()}</p>
                 </div>
               </div>
 
@@ -383,7 +441,7 @@ export default function JefePanel({
                 <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre}</span>
-                    <span style={{ fontWeight: 800, color: '#34d399' }}>${(v.total || 0).toLocaleString()}</span>
+                    <span style={{ fontWeight: 800, color: '#34d399' }}>C$ {(v.total || 0).toLocaleString()}</span>
                   </div>
                   <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>
                     {v.medioPago} · {(v.items || []).length} items · {v.fecha?.toDate ? v.fecha.toDate().toLocaleString() : ''}
@@ -397,7 +455,7 @@ export default function JefePanel({
             <ProductosAdmin />
           )}
 
-          {/* MÓDULO DE CRÉDITOS Y FIADOS CON AUTOCALCULADORA PARA EL JEFE */}
+          {/* MÓDULO DE CRÉDITOS Y FIADOS CON AUTOCALCULADORA Y CÁMARA */}
           {jefeSeccion === 'creditos' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -412,88 +470,137 @@ export default function JefePanel({
                 </div>
               </div>
 
-              {/* FORMULARIO DE NUEVO CRÉDITO Y AUTOCALCULADORA */}
+              {/* FORMULARIO DE NUEVO CRÉDITO Y AUTOCALCULADORA CON ESPACIADO CORREGIDO Y CÁMARA */}
               {mostrarFormCredito && (
-                <form onSubmit={guardarNuevoCredito} style={{ background: '#111827', border: '1px solid #4338ca', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <form onSubmit={guardarNuevoCredito} style={{ background: '#111827', border: '1px solid #4338ca', borderRadius: 16, padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <p style={{ fontWeight: 800, color: '#c7d2fe', margin: 0, fontSize: 14 }}>📝 Asignar Venta al Crédito (Requisitos Bancarios / Legales)</p>
                   
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <label style={{ fontSize: 11, color: '#9ca3af' }}>Nombre Completo del Cliente:</label>
                       <input placeholder="Ej: Juan Pérez" value={nombreCliente} onChange={e => setNombreCliente(e.target.value)} required
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
-                    <div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula / Identificación:</label>
                       <input placeholder="Ej: 001-XXXXXX-XXXX" value={cedulaCliente} onChange={e => setCedulaCliente(e.target.value)} required
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <label style={{ fontSize: 11, color: '#9ca3af' }}>Teléfono de Contacto:</label>
                       <input placeholder="Ej: +505 88888888" value={telefonoCliente} onChange={e => setTelefonoCliente(e.target.value)}
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
-                    <div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <label style={{ fontSize: 11, color: '#9ca3af' }}>Nombre del Fiador / Referencia:</label>
                       <input placeholder="Ej: María Gómez" value={fiadorCliente} onChange={e => setFiadorCliente(e.target.value)}
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
                   </div>
 
-                  <div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <label style={{ fontSize: 11, color: '#9ca3af' }}>Dirección Domiciliar:</label>
                     <input placeholder="Ej: De los semáforos 2 cuadras al lago..." value={direccionCliente} onChange={e => setDireccionCliente(e.target.value)}
-                      style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                      style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
-                    <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <label style={{ fontSize: 11, color: '#9ca3af' }}>Electrodoméstico / Mueble / Artículo:</label>
                       <input placeholder="Ej: Refrigeradora LG 14 Pies" value={articuloFiado} onChange={e => setArticuloFiado(e.target.value)} required
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Precio Base ($):</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Precio Base (C$):</label>
                       <input type="number" placeholder="3000" value={precioBaseArticulo} onChange={e => setPrecioBaseArticulo(e.target.value)} required
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
-                    <div>
-                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Prima / Enganche ($):</label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label style={{ fontSize: 11, color: '#9ca3af' }}>Prima / Enganche (C$):</label>
                       <input type="number" placeholder="500" value={primaMonto} onChange={e => setPrimaMonto(e.target.value)}
-                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 9, color: '#fff', fontSize: 12, outline: 'none' }} />
+                        style={{ width: '100%', background: '#030712', border: '1px solid #374151', borderRadius: 8, padding: 10, color: '#fff', fontSize: 12, outline: 'none' }} />
                     </div>
                   </div>
 
-                  {/* Configuración de Plazos y Recargos */}
-                  <div style={{ background: '#1e1b4b', padding: 12, borderRadius: 10, border: '1px solid #312e81' }}>
-                    <p style={{ fontWeight: 700, fontSize: 12, color: '#c7d2fe', margin: '0 0 8px' }}>⚡ Autocalculadora de Plazo y Porcentajes de Financiamiento</p>
+                  {/* Configuración de Plazos y Porcentajes Ajustables */}
+                  <div style={{ background: '#1e1b4b', padding: 14, borderRadius: 12, border: '1px solid #312e81', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p style={{ fontWeight: 700, fontSize: 12, color: '#c7d2fe', margin: 0 }}>⚡ Autocalculadora y Porcentajes de Financiamiento Ajustables</p>
                     
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {[3, 6, 9, 12, 18, 24, 30, 36].map(meses => (
-                        <button
-                          type="button"
-                          key={meses}
-                          onClick={() => setPlazoSeleccionado(meses)}
-                          style={{
-                            background: plazoSeleccionado === meses ? '#4f46e5' : '#111827',
-                            color: '#fff', border: '1px solid #374151', padding: '6px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer'
-                          }}>
-                          {meses} Meses ({porcentajesPlazos[meses]}%)
-                        </button>
+                        <div key={meses} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: plazoSeleccionado === meses ? '#4f46e5' : '#111827', border: '1px solid #374151', borderRadius: 8, padding: 6, gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => setPlazoSeleccionado(meses)}
+                            style={{ background: 'none', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                            {meses} Meses
+                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <input
+                              type="number"
+                              value={porcentajesPlazos[meses]}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPorcentajesPlazos({ ...porcentajesPlazos, [meses]: val });
+                              }}
+                              style={{ width: 36, background: '#030712', border: '1px solid #4b5563', borderRadius: 4, color: '#34d399', fontSize: 11, textAlign: 'center', padding: 2 }}
+                            />
+                            <span style={{ fontSize: 10, color: '#9ca3af' }}>%</span>
+                          </div>
+                        </div>
                       ))}
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#e5e7eb', marginTop: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#e5e7eb', marginTop: 4 }}>
                       <span>Plazo seleccionado: <b>{plazoSeleccionado} meses</b></span>
                       <span>Porcentaje de recargo aplicado: <b>{porcentajeRecargo}%</b></span>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold', color: '#34d399', marginTop: 6, borderTop: '1px solid #374151', paddingTop: 6 }}>
-                      <span>Total Financiado con Intereses: <b>${montoConRecargo.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
-                      <span>Cuota Mensual: <b>${cuotaMensualCalculada}</b></span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold', color: '#34d399', marginTop: 4, borderTop: '1px solid #374151', paddingTop: 6 }}>
+                      <span>Total Financiado con Intereses: <b>C$ {montoConRecargo.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></span>
+                      <span>Cuota Mensual: <b>C$ {cuotaMensualCalculada}</b></span>
+                    </div>
+                  </div>
+
+                  {/* SECCIÓN DE CÁMARA Y FOTOS (Cédula y extras comprimidas a ~150 KB) */}
+                  <div style={{ background: '#0f172a', padding: 14, borderRadius: 12, border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p style={{ fontWeight: 700, fontSize: 12, color: '#38bdf8', margin: 0 }}>📸 Captura de Documentos y Evidencias (Comprimidas automáticamente)</p>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula (Adelante):</label>
+                        <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'frontal')} style={{ fontSize: 11, color: '#cbd5e1' }} />
+                        {fotoCedulaFrontal && <img src={fotoCedulaFrontal} alt="Cédula Frontal" style={{ width: '1005', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula (Atrás):</label>
+                        <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'trasera')} style={{ fontSize: 11, color: '#cbd5e1' }} />
+                        {fotoCedulaTrasera && <img src={fotoCedulaTrasera} alt="Cédula Trasera" style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label style={{ fontSize: 11, color: '#9ca3af' }}>Fotos Extra (Licencia, carta, producto - Máx 2):</label>
+                        {fotosExtra.length < 2 && (
+                          <label style={{ background: '#3b82f6', color: '#fff', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                            ➕ Agregar Foto
+                            <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'extra')} style={{ display: 'none' }} />
+                          </label>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {fotosExtra.map((foto, idx) => (
+                          <div key={idx} style={{ position: 'relative' }}>
+                            <img src={foto} alt={`Extra ${idx}`} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #3b82f6' }} />
+                            <button type="button" onClick={() => setFotosExtra(fotosExtra.filter((_, i) => i !== idx))} style={{ position: 'absolute', top: -4, right: -4, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', width: 18, height: 18, fontSize: 10, cursor: 'pointer' }}>✕</button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -521,10 +628,10 @@ export default function JefePanel({
                         <div>
                           <p style={{ fontWeight: 700, fontSize: 13, color: '#fff', margin: 0 }}>{c.nombreCliente} {c.articulo ? `(${c.articulo})` : ''}</p>
                           <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Cédula: {c.cedula || 'N/D'} · Plazo: <b>{c.plazoMeses} meses</b> · Fiador: {c.fiador || 'N/D'}</p>
-                          <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: ${c.cuotaMensual} · Abonos realizados: {c.abonos?.length || 0}</p>
+                          <p style={{ fontSize: 11, color: '#818cf8', margin: 0 }}>Cuota mensual: C$ {c.cuotaMensual} · Abonos realizados: {c.abonos?.length || 0}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: ${c.saldoPendiente?.toLocaleString()}</p>
+                          <p style={{ fontSize: 13, fontWeight: 800, color: '#ef4444', margin: 0 }}>Debe: C$ {c.saldoPendiente?.toLocaleString()}</p>
                         </div>
                       </div>
                     ))
@@ -555,9 +662,9 @@ export default function JefePanel({
                     }}>{t.estado}</span>
                   </div>
                   <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
-                    Inicial: ${t.montoInicial}
+                    Inicial: C$ {t.montoInicial}
                     {t.estado === 'cerrado' && (
-                      <> · Contado: ${t.montoContado} · Dif: <span style={{ color: (t.diferencia || 0) !== 0 ? '#f87171' : '#34d399' }}>{t.diferencia}</span></>
+                      <> · Contado: C$ {t.montoContado} · Dif: <span style={{ color: (t.diferencia || 0) !== 0 ? '#f87171' : '#34d399' }}>{t.diferencia}</span></>
                     )}
                   </p>
                 </div>
