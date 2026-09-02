@@ -47,15 +47,20 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
-  // Cargar créditos activos o aprobados de clientes para la libreta de abonos
+    // Cargar créditos activos de clientes para la libreta de abonos
   const cargarCreditos = async () => {
     try {
-      // Filtramos los créditos aprobados para que el cajero pueda gestionarlos
-      const q = query(collection(db, 'creditos'), where('estado', '==', 'aprobado'));
+      // Cargamos todos los créditos de la colección para evitar bloqueos por filtros de estado
+      const q = query(collection(db, 'creditos'));
       const querySnapshot = await getDocs(q);
       const lista: any[] = [];
       querySnapshot.forEach((d) => {
-        lista.push({ id: d.id, ...d.data() });
+        const data = d.data();
+        // Verificamos que tenga saldo pendiente mayor a 0 o que esté activo
+        if ((data.saldoPendiente ?? data.montoTotal ?? 0) > 0) {
+          lista.path = d.id;
+          lista.push({ id: d.id, ...data });
+        }
       });
       setCreditosClientes(lista);
     } catch (e) {
