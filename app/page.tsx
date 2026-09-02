@@ -131,16 +131,15 @@ export default function TiendaSS() {
     const unsubPermisos = onSnapshot(doc(db, 'config', 'permisos'), (snap) => {
       if (snap.exists()) {
         const x = snap.data();
-                  setPermisos({
-            bodegaCrearProductos: x.bodegaCrearProductos !== false,
-            bodegaAjustarStock: x.bodegaAjustarStock !== false,
-            bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
-            choferRegistrarCompras: x.choferRegistrarCompras === true,
-            cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
-            cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
-            cajaGestionarCreditos: x.cajaGestionarCreditos === true,
-          });
-
+        setPermisos({
+          bodegaCrearProductos: x.bodegaCrearProductos !== false,
+          bodegaAjustarStock: x.bodegaAjustarStock !== false,
+          bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
+          choferRegistrarCompras: x.choferRegistrarCompras === true,
+          cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
+          cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
+          cajaGestionarCreditos: x.cajaGestionarCreditos === true,
+        });
       } else {
         setPermisos(PERMISOS_DEFAULT);
       }
@@ -241,8 +240,6 @@ export default function TiendaSS() {
     return (
       <BodegaCompra
         user={user}
-        productos={productos}
-        setProductos={setProductos}
         compras={compras}
         setCompras={setCompras}
         volver={volver}
