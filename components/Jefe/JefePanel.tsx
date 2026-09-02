@@ -22,17 +22,20 @@ interface Props {
 
 const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
   { key: 'inicio', label: 'Inicio', icon: '🏠' },
+const MENU_ITEMS: { key: JefeSeccion | string; label: string; icon: string; proximamente?: boolean }[] = [
+  { key: 'inicio', label: 'Inicio', icon: '🏠' },
   { key: 'ventas', label: 'Ventas', icon: '🧾' },
   { key: 'reporte_vendedores', label: 'Ventas por Vendedor', icon: '👨‍💼' },
   { key: 'inventario', label: 'Inventario', icon: '📦' },
   { key: 'compras', label: 'Compras', icon: '🚚' },
   { key: 'clientes', label: 'Clientes', icon: '👤', proximamente: true },
   { key: 'proveedores', label: 'Proveedores', icon: '🏭', proximamente: true },
-  { key: 'creditos', label: 'Créditos / Fiados', icon: '💳' }, 
+  { key: 'creditos', label: 'Créditos / Fiados', icon: '💳' },
   { key: 'cajas', label: 'Cierres de caja', icon: '💰' },
   { key: 'gastos', label: 'Gastos', icon: '📉', proximamente: true },
   { key: 'reportes', label: 'Reportes', icon: '📊', proximamente: true },
   { key: 'usuarios', label: 'Usuarios', icon: '🧑‍💼' },
+  { key: 'roles', label: 'Roles', icon: '🎭' },
   { key: 'permisos', label: 'Permisos', icon: '🔐' },
   { key: 'configuracion', label: 'Configuración', icon: '⚙️', proximamente: true },
 ];
