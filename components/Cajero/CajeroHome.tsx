@@ -15,8 +15,9 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   const [codigoBusqueda, setCodigoBusqueda] = useState('');
   const [cargando, setCargando] = useState(false);
   const [ordenSeleccionada, setOrdenSeleccionada] = useState<Orden | null>(null);
+  const [ultimaOrdenCobrada, setUltimaOrdenCobrada] = useState<Orden | null>(null);
 
-  // Función para buscar órdenes pendientes en Firestore
+  // Cargar órdenes pendientes desde Firestore
   const cargarPendientes = async () => {
     setCargando(true);
     try {
@@ -39,15 +40,19 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     cargarPendientes();
   }, []);
 
-  // Manejar el escaneo por láser o búsqueda manual por código/ID
+  // Manejo optimizado para escáner láser y búsqueda manual insensible a espacios y saltos de línea
   const handleBusquedaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const valor = e.target.value;
-    setCodigoBusqueda(valor);
+    // Limpiamos saltos de línea accidentales que manda el escáner láser
+    const valorLimpio = valor.replace(/[\n\r]+/g, '').trim();
+    setCodigoBusqueda(valorLimpio);
 
-    if (!valor.trim()) return;
+    if (!valorLimpio) return;
 
+    // Búsqueda flexible por coincidencia exacta de ID o parcial si escanean código de barras completo
     const encontrada = ordenesPendientes.find(
-      o => o.id?.toLowerCase() === valor.trim().toLowerCase()
+      o => o.id?.toLowerCase() === valorLimpio.toLowerCase() ||
+           o.id?.toLowerCase().includes(valorLimpio.toLowerCase())
     );
 
     if (encontrada) {
@@ -56,19 +61,20 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     }
   };
 
-  // Función para procesar el cobro, descontar stock en Firebase y abrir la gaveta física
-  const cobrarOrden = async (ordenId: string, items: any[]) => {
+  // Procesar cobro, descuento de inventario en Firebase e impresión limpia
+  const cobrarOrden = async (orden: Orden) => {
+    if (!orden.id) return;
     try {
-      // 1. Cambiamos el estado de la orden a 'completed' y guardamos el ID del cajero
-      const ordenRef = doc(db, 'orders', ordenId);
+      // 1. Cambiar estado de orden a completado
+      const ordenRef = doc(db, 'orders', orden.id);
       await updateDoc(ordenRef, {
         estado: 'completed',
         cashierId: user.id,
         completedAt: serverTimestamp(),
       });
 
-      // 2. Descontamos oficialmente el stock de cada producto en Firebase
-      for (const item of items) {
+      // 2. Descontar stock oficialmente en Firebase
+      for (const item of orden.items || []) {
         if (!item.id) continue;
         const prodRef = doc(db, 'productos', item.id);
         const prodSnap = await getDoc(prodRef);
@@ -84,14 +90,15 @@ export default function CajeroHome({ user, onCerrar }: Props) {
         }
       }
 
-      // 3. Disparamos la impresión térmica y la apertura automática de la gaveta física
-      window.print();
+      // 3. Establecer la orden para el recibo térmico y lanzar impresión
+      setUltimaOrdenCobrada(orden);
+      setTimeout(() => {
+        window.print();
+      }, 300);
 
-      alert('¡Cobro exitoso, stock descontado y caja abierta!');
-      
-      // Actualizamos la lista local quitando la orden ya cobrada y limpiando la selección
-      setOrdenesPendientes(ordenesPendientes.filter(o => o.id !== ordenId));
-      if (ordenSeleccionada?.id === ordenId) {
+      // 4. Actualizar lista local de pendientes
+      setOrdenesPendientes(prev => prev.filter(o => o.id !== orden.id));
+      if (ordenSeleccionada?.id === orden.id) {
         setOrdenSeleccionada(null);
       }
     } catch (e) {
@@ -102,6 +109,57 @@ export default function CajeroHome({ user, onCerrar }: Props) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', padding: 12, fontFamily: 'sans-serif' }}>
+      
+      {/* ESTILOS CSS PARA AISLAR LA IMPRESIÓN TÉRMICA Y OCULTAR LA INTERFAZ OSCURA */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #ticket-impresion, #ticket-impresion * {
+            visibility: visible !important;
+          }
+          #ticket-impresion {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white !important;
+            color: black !important;
+            padding: 10px;
+            font-family: monospace;
+          }
+        }
+      `}</style>
+
+      {/* TICKET OCULTO PARA IMPRESIÓN TÉRMICA */}
+      {ultimaOrdenCobrada && (
+        <div id="ticket-impresion" style={{ display: 'none' }}>
+          <div style={{ textAlign: 'center', marginBottom: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 16 }}>TIENDA SS</h2>
+            <p style={{ fontSize: 11, margin: '2px 0' }}>Comprobante de Caja</p>
+            <p style={{ fontSize: 10, margin: '2px 0' }}>Orden: {ultimaOrdenCobrada.id}</p>
+            <p style={{ fontSize: 10, margin: '2px 0' }}>Cajero: {user.nombre || user.email}</p>
+            <p style={{ fontSize: 10, margin: '2px 0' }}>Fecha: {new Date().toLocaleString()}</p>
+          </div>
+          <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
+          <div style={{ fontSize: 11 }}>
+            {ultimaOrdenCobrada.items?.map((item: any, i: number) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span>{item.cantidad}x {item.nombre}</span>
+                <span>${(item.precio * item.cantidad)?.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+          <hr style={{ border: 'dashed 1px #000', margin: '8px 0' }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 'bold' }}>
+            <span>TOTAL:</span>
+            <span>${ultimaOrdenCobrada.total?.toLocaleString()}</span>
+          </div>
+          <p style={{ textAlign: 'center', fontSize: 10, marginTop: 15 }}>¡Gracias por su compra!</p>
+        </div>
+      )}
+
       <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
         
         {/* Cabecera del Cajero */}
@@ -115,10 +173,10 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           </button>
         </div>
 
-        {/* Barra de escáner / Sincronización */}
+        {/* Barra de escáner láser optimizada */}
         <div style={{ display: 'flex', gap: 8 }}>
           <input
-            placeholder="🔍 Escanear código QR o ID de orden con láser..."
+            placeholder="🔍 Escanear código o ID de orden con láser..."
             value={codigoBusqueda}
             onChange={handleBusquedaChange}
             autoFocus
@@ -129,7 +187,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
           </button>
         </div>
 
-        {/* Detalle de Preventa Seleccionada mediante Escáner o Clic */}
+        {/* Detalle de Preventa Seleccionada */}
         {ordenSeleccionada && (
           <div style={{ background: '#1e1b4b', border: '1px solid #4338ca', borderRadius: 16, padding: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -155,7 +213,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <p style={{ fontSize: 14, fontWeight: 800, margin: 0, color: '#34d399' }}>Total: ${ordenSeleccionada.total?.toLocaleString()}</p>
               <button 
-                onClick={() => ordenSeleccionada.id && cobrarOrden(ordenSeleccionada.id, ordenSeleccionada.items)}
+                onClick={() => cobrarOrden(ordenSeleccionada)}
                 style={{ background: '#059669', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                 Cobrar y Abrir Caja
               </button>
@@ -193,7 +251,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                 <button 
                   onClick={(e) => {
                     e.stopPropagation();
-                    orden.id && cobrarOrden(orden.id, orden.items);
+                    cobrarOrden(orden);
                   }}
                   style={{ background: '#059669', color: '#fff', border: 'none', padding: '10px 14px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                   Cobrar y Abrir Caja
