@@ -187,28 +187,6 @@ export default function TiendaSS() {
     );
   }
 
-  const turnoAbierto = turnos.find(t => t.vendedorId === user.id && t.estado === 'abierto');
-
-  if (vista === 'vendedor_home' && !turnoAbierto) {
-    return (
-      <AbrirCaja user={user} turnos={turnos} setTurnos={setTurnos} onCerrar={cerrar} />
-    );
-  }
-
-  if (vista === 'vendedor_cerrar_caja' && turnoAbierto) {
-    return (
-      <CerrarCaja
-        user={user}
-        turno={turnoAbierto}
-        ventas={ventas}
-        turnos={turnos}
-        setTurnos={setTurnos}
-        onVolver={volver}
-        onCerrar={cerrar}
-      />
-    );
-  }
-
   if (vista === 'vendedor_ticket' && ultimaVenta) {
     return (
       <Ticket
@@ -237,7 +215,7 @@ export default function TiendaSS() {
         setUltimaVenta={setUltimaVenta}
         irA={irA}
         onCerrar={cerrar}
-        onCerrarCaja={() => irA('vendedor_cerrar_caja')}
+        onCerrarCaja={() => {}}
       />
     );
   }
