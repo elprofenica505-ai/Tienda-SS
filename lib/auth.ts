@@ -6,16 +6,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-
-export type Rol = "jefe" | "vendedor" | "bodega" | "chofer";
-
-export interface Usuario {
-  id: string;
-  email: string;
-  nombre: string;
-  rol: Rol;
-  activo: boolean;
-}
+import type { Usuario, RolAntiguo } from "@/components/shared/types";
 
 export async function login(email: string, password: string): Promise<Usuario> {
   const cred = await signInWithEmailAndPassword(auth, email, password);
@@ -31,13 +22,18 @@ export async function obtenerPerfil(uid: string): Promise<Usuario> {
   const ref = doc(db, "usuarios", uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error("Este usuario no tiene perfil asignado.");
+  
   const data = snap.data();
+  
   return {
     id: uid,
     email: data.email || "",
     nombre: data.nombre || data.email || "Sin nombre",
-    rol: data.rol,
+    rol: (data.rol || "vendedor") as RolAntiguo,
     activo: data.activo !== false,
+    // Campos nuevos (por ahora vacíos, los usaremos después)
+    orgActualId: data.orgActualId || undefined,
+    organizaciones: data.organizaciones || undefined,
   };
 }
 
