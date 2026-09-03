@@ -11,6 +11,7 @@ import { PERMISOS_DEFAULT } from '@/components/shared/types';
 
 import dynamic from 'next/dynamic';
 
+const PanelGenerico = dynamic(() => import('@/components/Generico/PanelGenerico'), { ssr: false });
 const Login = dynamic(() => import('@/components/Login'), { ssr: false });
 const JefePanel = dynamic(() => import('@/components/Jefe/JefePanel'), { ssr: false });
 const VendedorHome = dynamic(() => import('@/components/Vendedor/VendedorHome'), { ssr: false });
