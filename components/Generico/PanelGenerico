@@ -1,1 +1,231 @@
+'use client';
 
+import React, { useState, useEffect } from 'react';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { Usuario } from '@/lib/auth';
+
+interface Props {
+  user: Usuario;
+  productos: any[];
+  ventas: any[];
+  turnos: any[];
+  compras: any[];
+  entregas: any[];
+  onCerrar: () => void;
+}
+
+const SECCIONES: { key: string; label: string; icon: string; permisoRequerido: string | null }[] = [
+  { key: 'inicio', label: 'Inicio', icon: '🏠', permisoRequerido: null },
+  { key: 'ventas', label: 'Ventas', icon: '🧾', permisoRequerido: 'ventas.ver' },
+  { key: 'inventario', label: 'Inventario', icon: '📦', permisoRequerido: 'inventario.ver' },
+  { key: 'compras', label: 'Compras', icon: '🚚', permisoRequerido: 'compras.ver' },
+  { key: 'entregas', label: 'Entregas', icon: '🛵', permisoRequerido: 'entregas.ver' },
+  { key: 'creditos', label: 'Créditos / Fiados', icon: '💳', permisoRequerido: 'creditos.ver' },
+  { key: 'cajas', label: 'Cierres de caja', icon: '💰', permisoRequerido: 'caja.ver_cierres' },
+  { key: 'reportes', label: 'Reportes', icon: '📊', permisoRequerido: 'reportes.ver' },
+];
+
+function capitalizarPrimeraLetra(s: string) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+export default function PanelGenerico({ user, productos, ventas, turnos, compras, entregas, onCerrar }: Props) {
+  const [permisos, setPermisos] = useState<string[]>([]);
+  const [nombreRol, setNombreRol] = useState('');
+  const [cargando, setCargando] = useState(true);
+  const [seccionActiva, setSeccionActiva] = useState('inicio');
+  const [menuAbierto, setMenuAbierto] = useState(false);
+
+  useEffect(() => {
+    const cargarPermisosDelRol = async () => {
+      try {
+        if (!user.rol) {
+          setCargando(false);
+          return;
+        }
+        const q = query(collection(db, 'roles_personalizados'), where('nombre', '==', capitalizarPrimeraLetra(user.rol)));
+        let snap = await getDocs(q);
+
+        if (snap.empty) {
+          const todos = await getDocs(collection(db, 'roles_personalizados'));
+          const match = todos.docs.find(d => (d.data().nombre || '').toLowerCase() === user.rol.toLowerCase());
+          if (match) {
+            const data = match.data();
+            setPermisos(data.permisos || []);
+            setNombreRol(data.nombre);
+          }
+        } else {
+          const data = snap.docs[0].data();
+          setPermisos(data.permisos || []);
+          setNombreRol(data.nombre);
+        }
+      } catch (error) {
+        console.error('Error cargando permisos del rol:', error);
+      } finally {
+        setCargando(false);
+      }
+    };
+    cargarPermisosDelRol();
+  }, [user.rol]);
+
+  const tiene = (permiso: string) => permisos.includes(permiso);
+
+  const seccionesVisibles = SECCIONES.filter(s => s.permisoRequerido === null || tiene(s.permisoRequerido));
+
+  const hoy = new Date();
+  const esHoy = (f: any) => {
+    if (!f) return false;
+    const d = f.toDate ? f.toDate() : new Date(f);
+    return d.getDate() === hoy.getDate() && d.getMonth() === hoy.getMonth() && d.getFullYear() === hoy.getFullYear();
+  };
+  const ventasHoy = ventas.filter(v => esHoy(v.fecha));
+  const totalHoy = ventasHoy.reduce((s, v) => s + (v.total || 0), 0);
+
+  if (cargando) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#030712', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+        Cargando tu panel...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
+      <div style={{
+        position: 'fixed', top: 0, left: 0, bottom: 0, width: 260, background: '#111827',
+        borderRight: '1px solid #1f2937', zIndex: 40, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 0.25s ease', display: 'flex', flexDirection: 'column'
+      }}>
+        <div style={{ padding: '16px 18px', borderBottom: '1px solid #1f2937', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <p style={{ fontWeight: 800, fontSize: 16, margin: 0 }}>Tienda-SS</p>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{user.nombre} · {nombreRol || user.rol}</p>
+          </div>
+          <button onClick={() => setMenuAbierto(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0' }}>
+          {seccionesVisibles.map(item => (
+            <button
+              key={item.key}
+              onClick={() => { setSeccionActiva(item.key); setMenuAbierto(false); }}
+              style={{
+                width: '100%', textAlign: 'left',
+                background: seccionActiva === item.key ? '#1e1b4b' : 'transparent',
+                border: 'none', padding: '11px 18px', color: '#e5e7eb',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10
+              }}
+            >
+              <span>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ padding: 14, borderTop: '1px solid #1f2937' }}>
+          <button onClick={onCerrar} style={{ width: '100%', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+
+      {menuAbierto && (
+        <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 30 }} />
+      )}
+
+      <div style={{ flex: 1, minHeight: '100vh' }}>
+        <div style={{ background: '#111827', borderBottom: '1px solid #1f2937', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, position: 'sticky', top: 0, zIndex: 20 }}>
+          <button onClick={() => setMenuAbierto(true)} style={{ background: '#1f2937', border: 'none', color: '#fff', width: 40, height: 40, borderRadius: 10, fontSize: 18, cursor: 'pointer' }}>☰</button>
+          <div>
+            <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
+              {seccionesVisibles.find(s => s.key === seccionActiva)?.label || 'Panel'}
+            </h1>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{nombreRol || user.rol} · acceso según permisos</p>
+          </div>
+        </div>
+
+        <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
+          {permisos.length === 0 && (
+            <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+              <p style={{ color: '#f87171', margin: 0, fontSize: 13 }}>
+                ⚠️ Tu rol ("{user.rol}") no tiene permisos asignados todavía. Pídele al Jefe que revise el rol en el módulo de Roles.
+              </p>
+            </div>
+          )}
+
+          {seccionActiva === 'inicio' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 16, padding: 16 }}>
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>Ventas hoy</p>
+                <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#34d399' }}>C$ {totalHoy.toLocaleString()}</p>
+                <p style={{ fontSize: 11, color: '#6b7280', margin: '2px 0 0' }}>{ventasHoy.length} tickets</p>
+              </div>
+              <p style={{ fontSize: 12, color: '#9ca3af' }}>Bienvenido/a, {user.nombre || user.correo}.</p>
+            </div>
+          )}
+
+          {seccionActiva === 'ventas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Ventas del sistema ({ventas.length})</p>
+              {ventas.slice(0, 50).map((v: any) => (
+                <div key={v.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre || 'Vendedor'}</span>
+                    <span style={{ fontWeight: 800, color: '#34d399' }}>C$ {(v.total || 0).toLocaleString()}</span>
+                  </div>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{v.medioPago || 'Efectivo'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {seccionActiva === 'inventario' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {productos.map((p: any) => (
+                <div key={p.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 13 }}>{p.nombre}</span>
+                  <span style={{ fontSize: 13, color: (p.stock || 0) <= (p.stockMinimo || 5) ? '#f87171' : '#9ca3af' }}>Stock: {p.stock}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {seccionActiva === 'compras' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {compras.map((c: any) => (
+                <div key={c.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <p style={{ fontSize: 13, margin: 0 }}>{c.proveedor || 'Proveedor'}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {seccionActiva === 'entregas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {entregas.map((e: any) => (
+                <div key={e.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <p style={{ fontSize: 13, margin: 0 }}>{e.cliente || 'Cliente'} · {e.estado}</p>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{e.direccion}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {seccionActiva === 'cajas' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {turnos.map((t: any) => (
+                <div key={t.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <p style={{ fontSize: 13, margin: 0 }}>{t.vendedorNombre} · {t.estado}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {seccionActiva === 'reportes' && (
+            <p style={{ fontSize: 13, color: '#9ca3af' }}>Módulo de reportes en desarrollo.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
