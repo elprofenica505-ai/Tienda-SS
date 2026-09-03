@@ -7,6 +7,8 @@ import ProductosAdmin from '@/components/ProductosAdmin';
 import type { Producto, Venta, Turno, Compra, UsuarioSistema, JefeSeccion, Permisos } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
 import RolesPanel from '@/components/Jefe/RolesPanel';
+import { obtenerRolesPersonalizados } from '@/lib/roles';
+import type { Rol } from '@/components/shared/types';
 
 interface Props {
   user: Usuario;
@@ -54,7 +56,8 @@ export default function JefePanel({
   const [nuevoNombreUsuario, setNuevoNombreUsuario] = useState('');
   const [nuevoRolUsuario, setNuevoRolUsuario] = useState('vendedor');
   const [guardandoUsuario, setGuardandoUsuario] = useState(false);
-
+  const [rolesPersonalizados, setRolesPersonalizados] = useState<Rol[]>([]);
+  
   const [creditosGlobales, setCreditosGlobales] = useState<any[]>([]);
   const [busquedaCredito, setBusquedaCredito] = useState('');
   
@@ -148,8 +151,16 @@ export default function JefePanel({
   };
 
   useEffect(() => {
-    cargarCreditosGlobales();
-  }, []);
+  cargarCreditosGlobales();
+}, []);
+
+useEffect(() => {
+  const cargarRoles = async () => {
+    const roles = await obtenerRolesPersonalizados();
+    setRolesPersonalizados(roles);
+  };
+  cargarRoles();
+}, []);
 
   const precioBaseNum = parseFloat(precioBaseArticulo) || 0;
   const primaNum = parseFloat(primaMonto) || 0;
@@ -854,6 +865,12 @@ export default function JefePanel({
   <option value="chofer">Chofer</option>
   <option value="cajero">Cajero</option>
   <option value="jefe">Jefe</option>
+  
+  {rolesPersonalizados.map(rol => (
+    <option key={rol.id} value={rol.nombre.toLowerCase()}>
+      {rol.nombre}
+    </option>
+  ))}
 </select>
                 <button type="submit" disabled={guardandoUsuario}
                   style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>
