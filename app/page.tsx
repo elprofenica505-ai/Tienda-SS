@@ -170,6 +170,20 @@ else setVista('generico_home'); // 👈 cualquier rol personalizado (gerente, me
     return <Login onLogin={loginFirebase} />;
   }
 
+  if (vista === 'generico_home') {
+  return (
+    <PanelGenerico 
+      user={user!} 
+      productos={productos} 
+      ventas={ventas} 
+      turnos={turnos} 
+      compras={compras} 
+      entregas={entregas} 
+      onCerrar={cerrar} 
+    />
+  );
+}
+
   if (vista === 'jefe_home') {
     return (
       <JefePanel
