@@ -3,22 +3,20 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Producto, Venta, Turno, Compra, Entrega, Permission, Rol } from '@/components/shared/types';
 import type { Usuario } from '@/lib/auth';
 
 interface Props {
   user: Usuario;
-  productos: Producto[];
-  ventas: Venta[];
-  turnos: Turno[];
-  compras: Compra[];
-  entregas: Entrega[];
+  productos: any[];
+  ventas: any[];
+  turnos: any[];
+  compras: any[];
+  entregas: any[];
   onCerrar: () => void;
 }
 
-// Mapa: cada sección del menú requiere un permiso puntual para aparecer
-const SECCIONES: { key: string; label: string; icon: string; permisoRequerido: Permission | null }[] = [
-  { key: 'inicio', label: 'Inicio', icon: '🏠', permisoRequerido: null }, // siempre visible
+const SECCIONES: { key: string; label: string; icon: string; permisoRequerido: string | null }[] = [
+  { key: 'inicio', label: 'Inicio', icon: '🏠', permisoRequerido: null },
   { key: 'ventas', label: 'Ventas', icon: '🧾', permisoRequerido: 'ventas.ver' },
   { key: 'inventario', label: 'Inventario', icon: '📦', permisoRequerido: 'inventario.ver' },
   { key: 'compras', label: 'Compras', icon: '🚚', permisoRequerido: 'compras.ver' },
@@ -34,7 +32,7 @@ function capitalizarPrimeraLetra(s: string) {
 }
 
 export default function PanelGenerico({ user, productos, ventas, turnos, compras, entregas, onCerrar }: Props) {
-  const [permisos, setPermisos] = useState<Permission[]>([]);
+  const [permisos, setPermisos] = useState<string[]>([]);
   const [nombreRol, setNombreRol] = useState('');
   const [cargando, setCargando] = useState(true);
   const [seccionActiva, setSeccionActiva] = useState('inicio');
@@ -43,20 +41,23 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
   useEffect(() => {
     const cargarPermisosDelRol = async () => {
       try {
+        if (!user.rol) {
+          setCargando(false);
+          return;
+        }
         const q = query(collection(db, 'roles_personalizados'), where('nombre', '==', capitalizarPrimeraLetra(user.rol)));
         let snap = await getDocs(q);
 
-        // Fallback: si el nombre se guardó con otra capitalización, buscamos por todos y comparamos en minúsculas
         if (snap.empty) {
           const todos = await getDocs(collection(db, 'roles_personalizados'));
           const match = todos.docs.find(d => (d.data().nombre || '').toLowerCase() === user.rol.toLowerCase());
           if (match) {
-            const data = match.data() as Rol;
+            const data = match.data();
             setPermisos(data.permisos || []);
             setNombreRol(data.nombre);
           }
         } else {
-          const data = snap.docs[0].data() as Rol;
+          const data = snap.docs[0].data();
           setPermisos(data.permisos || []);
           setNombreRol(data.nombre);
         }
@@ -69,7 +70,7 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
     cargarPermisosDelRol();
   }, [user.rol]);
 
-  const tiene = (permiso: Permission) => permisos.includes(permiso);
+  const tiene = (permiso: string) => permisos.includes(permiso);
 
   const seccionesVisibles = SECCIONES.filter(s => s.permisoRequerido === null || tiene(s.permisoRequerido));
 
@@ -92,7 +93,6 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
 
   return (
     <div style={{ minHeight: '100vh', background: '#030712', color: '#f3f4f6', fontFamily: 'sans-serif', display: 'flex' }}>
-      {/* Menú lateral */}
       <div style={{
         position: 'fixed', top: 0, left: 0, bottom: 0, width: 260, background: '#111827',
         borderRight: '1px solid #1f2937', zIndex: 40, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)',
@@ -145,7 +145,6 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
         </div>
 
         <div style={{ padding: 16, maxWidth: 900, margin: '0 auto' }}>
-
           {permisos.length === 0 && (
             <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <p style={{ color: '#f87171', margin: 0, fontSize: 13 }}>
@@ -161,20 +160,20 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
                 <p style={{ fontSize: 22, fontWeight: 800, margin: '4px 0 0', color: '#34d399' }}>C$ {totalHoy.toLocaleString()}</p>
                 <p style={{ fontSize: 11, color: '#6b7280', margin: '2px 0 0' }}>{ventasHoy.length} tickets</p>
               </div>
-              <p style={{ fontSize: 12, color: '#9ca3af' }}>Bienvenido/a, {user.nombre}.</p>
+              <p style={{ fontSize: 12, color: '#9ca3af' }}>Bienvenido/a, {user.nombre || user.correo}.</p>
             </div>
           )}
 
           {seccionActiva === 'ventas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>Ventas del sistema ({ventas.length})</p>
-              {ventas.slice(0, 50).map(v => (
-                <div key={v.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+              {ventas.slice(0, 50).map((v: any) => (
+                <div key={v.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre}</span>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{v.vendedorNombre || 'Vendedor'}</span>
                     <span style={{ fontWeight: 800, color: '#34d399' }}>C$ {(v.total || 0).toLocaleString()}</span>
                   </div>
-                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{v.medioPago}</p>
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{v.medioPago || 'Efectivo'}</p>
                 </div>
               ))}
             </div>
@@ -182,22 +181,19 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
 
           {seccionActiva === 'inventario' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {productos.map(p => (
-                <div key={p.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
+              {productos.map((p: any) => (
+                <div key={p.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontSize: 13 }}>{p.nombre}</span>
-                  <span style={{ fontSize: 13, color: p.stock <= p.stockMinimo ? '#f87171' : '#9ca3af' }}>Stock: {p.stock}</span>
+                  <span style={{ fontSize: 13, color: (p.stock || 0) <= (p.stockMinimo || 5) ? '#f87171' : '#9ca3af' }}>Stock: {p.stock}</span>
                 </div>
               ))}
-              {!tiene('inventario.crear') && !tiene('inventario.editar') && (
-                <p style={{ fontSize: 11, color: '#6b7280' }}>Solo lectura (tu rol no tiene permiso de crear/editar productos).</p>
-              )}
             </div>
           )}
 
           {seccionActiva === 'compras' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {compras.map(c => (
-                <div key={c.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+              {compras.map((c: any) => (
+                <div key={c.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
                   <p style={{ fontSize: 13, margin: 0 }}>{c.proveedor || 'Proveedor'}</p>
                 </div>
               ))}
@@ -206,9 +202,9 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
 
           {seccionActiva === 'entregas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {entregas.map(e => (
-                <div key={e.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
-                  <p style={{ fontSize: 13, margin: 0 }}>{e.cliente} · {e.estado}</p>
+              {entregas.map((e: any) => (
+                <div key={e.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+                  <p style={{ fontSize: 13, margin: 0 }}>{e.cliente || 'Cliente'} · {e.estado}</p>
                   <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>{e.direccion}</p>
                 </div>
               ))}
@@ -217,8 +213,8 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
 
           {seccionActiva === 'cajas' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {turnos.map(t => (
-                <div key={t.id} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
+              {turnos.map((t: any) => (
+                <div key={t.id || Math.random()} style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 12, padding: 12 }}>
                   <p style={{ fontSize: 13, margin: 0 }}>{t.vendedorNombre} · {t.estado}</p>
                 </div>
               ))}
@@ -226,9 +222,8 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
           )}
 
           {seccionActiva === 'reportes' && (
-            <p style={{ fontSize: 13, color: '#9ca3af' }}>Reportes: módulo en construcción.</p>
+            <p style={{ fontSize: 13, color: '#9ca3af' }}>Módulo de reportes en desarrollo.</p>
           )}
-
         </div>
       </div>
     </div>
