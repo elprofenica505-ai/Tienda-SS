@@ -234,4 +234,3 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
     </div>
   );
 }
-jj
