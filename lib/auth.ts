@@ -55,3 +55,5 @@ export function escucharSesion(callback: (usuario: Usuario | null) => void) {
     }
   });
 }
+
+export type { Usuario };
