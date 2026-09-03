@@ -28,6 +28,11 @@ const SECCIONES: { key: string; label: string; icon: string; permisoRequerido: P
   { key: 'reportes', label: 'Reportes', icon: '📊', permisoRequerido: 'reportes.ver' },
 ];
 
+function capitalizarPrimeraLetra(s: string) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 export default function PanelGenerico({ user, productos, ventas, turnos, compras, entregas, onCerrar }: Props) {
   const [permisos, setPermisos] = useState<Permission[]>([]);
   const [nombreRol, setNombreRol] = useState('');
@@ -228,9 +233,4 @@ export default function PanelGenerico({ user, productos, ventas, turnos, compras
       </div>
     </div>
   );
-}
-
-function capitalizarPrimeraLetra(s: string) {
-  if (!s) return s;
-  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
