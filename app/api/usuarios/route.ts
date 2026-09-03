@@ -29,8 +29,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
     }
 
-    const rolesValidos = ['jefe', 'vendedor', 'bodega', 'chofer'];
-    if (!rolesValidos.includes(rol)) {
+    // 1. Definir roles fijos y consultar los roles personalizados desde Firestore
+    const rolesFijos = ['jefe', 'vendedor', 'bodega', 'chofer', 'cajero', 'dueño'];
+    const rolesSnap = await adminDb.collection('roles').get();
+    const rolesPersonalizados = rolesSnap.docs.map(doc => doc.data().nombre?.toLowerCase());
+
+    // 2. Unir ambos en una lista global y validar de forma flexible (ignorando mayúsculas/minúsculas)
+    const todosLosRolesValidos = [...rolesFijos, ...rolesPersonalizados.filter(Boolean)];
+    const rolLower = String(rol).trim().toLowerCase();
+
+    if (!todosLosRolesValidos.includes(rolLower)) {
       return NextResponse.json({ error: 'Rol inválido' }, { status: 400 });
     }
 
@@ -48,7 +56,7 @@ export async function POST(req: NextRequest) {
     await adminDb.collection('usuarios').doc(userRecord.uid).set({
       email: String(email).trim().toLowerCase(),
       nombre: String(nombre).trim(),
-      rol,
+      rol: rolLower,
       activo: true,
       creadoEn: new Date(),
     });
