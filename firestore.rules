@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+
+    function isMember(tenantId) {
+      return signedIn()
+        && exists(memberPath(tenantId))
+        && get(memberPath(tenantId)).data.status == 'active';
+    }
+
+    function hasRole(tenantId, role) {
+      return isMember(tenantId)
+        && get(memberPath(tenantId)).data.role == role;
+    }
+
+    function isManager(tenantId) {
+      return hasRole(tenantId, 'owner')
+        || hasRole(tenantId, 'admin')
+        || hasRole(tenantId, 'jefe');
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isMember(tenantId);
+      allow create: if signedIn() && request.auth.uid == tenantId;
+      allow update: if isManager(tenantId);
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(tenantId);
+        allow create, update, delete: if isManager(tenantId);
+      }
+
+      match /products/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId)
+          || hasRole(tenantId, 'bodega');
+        allow delete: if isManager(tenantId);
+      }
+
+      match /sales/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if isMember(tenantId);
+        allow update: if isManager(tenantId)
+          || hasRole(tenantId, 'vendedor')
+          || hasRole(tenantId, 'cajero');
+        allow delete: if false;
+      }
+
+      match /{collectionName}/{documentId} {
+        allow read, write: if isMember(tenantId);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
