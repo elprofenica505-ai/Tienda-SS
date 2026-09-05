@@ -1,109 +1,110 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebaseAdmin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 
 export const runtime = 'nodejs';
 
-async function verificarJefe(req: NextRequest) {
-  const authHeader = req.headers.get('authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) throw new Error('No autorizado');
+async function verifyManager(request: NextRequest) {
+  const header = request.headers.get('authorization') || '';
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7).trim()
+    : '';
 
-  const decoded = await adminAuth.verifyIdToken(token);
-  const perfil = await adminDb.collection('usuarios').doc(decoded.uid).get();
-  if (!perfil.exists) throw new Error('Perfil no encontrado');
+  if (!token) throw new Error('UNAUTHENTICATED');
 
-  const data = perfil.data() || {};
-  if (data.rol !== 'jefe') throw new Error('Solo el jefe puede gestionar usuarios');
-  if (data.activo === false) throw new Error('Usuario desactivado');
+  const decoded = await getAdminAuth().verifyIdToken(token);
+  const tenantId = request.headers.get('x-tenant-id')?.trim();
+  if (!tenantId) throw new Error('TENANT_REQUIRED');
 
-  return decoded.uid;
+  const member = await getAdminDb()
+    .collection('tenants')
+    .doc(tenantId)
+    .collection('members')
+    .doc(decoded.uid)
+    .get();
+
+  const role = member.data()?.role;
+  const active = member.data()?.status === 'active';
+  if (!member.exists || !active || !['owner', 'admin', 'jefe'].includes(role)) {
+    throw new Error('FORBIDDEN');
+  }
+
+  return { tenantId, uid: decoded.uid };
 }
 
-export async function POST(req: NextRequest) {
+function errorResponse(error: unknown) {
+  const code = error instanceof Error ? error.message : '';
+  if (code === 'UNAUTHENTICATED') return NextResponse.json({ error: 'Autenticación requerida.' }, { status: 401 });
+  if (code === 'TENANT_REQUIRED') return NextResponse.json({ error: 'Falta identificar la empresa.' }, { status: 400 });
+  if (code === 'FORBIDDEN') return NextResponse.json({ error: 'No tienes permisos suficientes.' }, { status: 403 });
+  console.error('users_api_error', { code });
+  return NextResponse.json({ error: 'Error interno del servidor.' }, { status: 500 });
+}
+
+export async function POST(request: NextRequest) {
   try {
-    await verificarJefe(req);
-    const body = await req.json();
-    const { nombre, email, password, rol } = body;
+    const { tenantId } = await verifyManager(request);
+    const body = await request.json();
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const role = typeof body.role === 'string' ? body.role : '';
+    const validRoles = ['admin', 'jefe', 'vendedor', 'bodega', 'chofer', 'cajero'];
 
-    if (!nombre || !email || !password || !rol) {
-      return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
+    if (name.length < 2 || name.length > 120 || !email || password.length < 8 || !validRoles.includes(role)) {
+      return NextResponse.json({ error: 'Datos de usuario inválidos.' }, { status: 400 });
     }
 
-    const rolesValidos = ['jefe', 'vendedor', 'bodega', 'chofer'];
-    if (!rolesValidos.includes(rol)) {
-      return NextResponse.json({ error: 'Rol inválido' }, { status: 400 });
-    }
-
-    if (String(password).length < 6) {
-      return NextResponse.json({ error: 'La contraseña debe tener al menos 6 caracteres' }, { status: 400 });
-    }
-
-    const userRecord = await adminAuth.createUser({
-      email: String(email).trim().toLowerCase(),
-      password: String(password),
-      displayName: String(nombre).trim(),
-      disabled: false,
+    const user = await getAdminAuth().createUser({ email, password, displayName: name, disabled: false });
+    await getAdminDb().collection('tenants').doc(tenantId).collection('members').doc(user.uid).set({
+      uid: user.uid,
+      tenantId,
+      name,
+      email,
+      role,
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
 
-    await adminDb.collection('usuarios').doc(userRecord.uid).set({
-      email: String(email).trim().toLowerCase(),
-      nombre: String(nombre).trim(),
-      rol,
-      activo: true,
-      creadoEn: new Date(),
-    });
-
-    return NextResponse.json({
-      ok: true,
-      uid: userRecord.uid,
-      email: userRecord.email,
-    });
-  } catch (err: any) {
-    console.error(err);
-    const msg =
-      err?.code === 'auth/email-already-exists'
-        ? 'Ese correo ya está registrado'
-        : err?.message || 'Error al crear usuario';
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json({ ok: true, uid: user.uid, email }, { status: 201 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('email-already-exists')) return NextResponse.json({ error: 'Ese correo ya está registrado.' }, { status: 409 });
+    return errorResponse(error);
   }
 }
 
-export async function PATCH(req: NextRequest) {
+export async function PATCH(request: NextRequest) {
   try {
-    await verificarJefe(req);
-    const body = await req.json();
-    const { uid, activo } = body;
+    const { tenantId } = await verifyManager(request);
+    const body = await request.json();
+    const uid = typeof body.uid === 'string' ? body.uid.trim() : '';
+    const active = body.active;
+    if (!uid || typeof active !== 'boolean') return NextResponse.json({ error: 'Datos inválidos.' }, { status: 400 });
 
-    if (!uid || typeof activo !== 'boolean') {
-      return NextResponse.json({ error: 'Datos inválidos' }, { status: 400 });
-    }
-
-    await adminDb.collection('usuarios').doc(uid).update({ activo });
-    await adminAuth.updateUser(uid, { disabled: !activo });
-
+    await getAdminDb().collection('tenants').doc(tenantId).collection('members').doc(uid).update({
+      status: active ? 'active' : 'disabled',
+      updatedAt: new Date()
+    });
+    await getAdminAuth().updateUser(uid, { disabled: !active });
     return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ error: err?.message || 'Error al actualizar' }, { status: 400 });
+  } catch (error: unknown) {
+    return errorResponse(error);
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function DELETE(request: NextRequest) {
   try {
-    await verificarJefe(req);
-    const body = await req.json();
-    const { uid } = body;
+    const { tenantId, uid: actorUid } = await verifyManager(request);
+    const body = await request.json();
+    const uid = typeof body.uid === 'string' ? body.uid.trim() : '';
+    if (!uid || uid === actorUid) return NextResponse.json({ error: 'No puedes eliminar tu propio usuario.' }, { status: 400 });
 
-    if (!uid) {
-      return NextResponse.json({ error: 'Falta uid' }, { status: 400 });
-    }
-
-    await adminAuth.deleteUser(uid);
-    await adminDb.collection('usuarios').doc(uid).delete();
-
+    const memberRef = getAdminDb().collection('tenants').doc(tenantId).collection('members').doc(uid);
+    await memberRef.update({ status: 'deleted', updatedAt: new Date() });
+    await getAdminAuth().updateUser(uid, { disabled: true });
     return NextResponse.json({ ok: true });
-  } catch (err: any) {
-    console.error(err);
-    return NextResponse.json({ error: err?.message || 'Error al eliminar' }, { status: 400 });
+  } catch (error: unknown) {
+    return errorResponse(error);
   }
 }
