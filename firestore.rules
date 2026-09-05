@@ -72,6 +72,14 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /receivablePayments/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if isManager(tenantId)
+          || hasRole(tenantId, 'vendedor')
+          || hasRole(tenantId, 'cajero');
+        allow update, delete: if false;
+      }
+
       match /sales/{documentId} {
         allow read: if isMember(tenantId);
         allow create: if isMember(tenantId);
