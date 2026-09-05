@@ -50,6 +50,13 @@ service cloud.firestore {
         allow create, update, delete: if isManager(tenantId);
       }
 
+      match /inventoryMovements/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if isManager(tenantId)
+          || hasRole(tenantId, 'bodega');
+        allow update, delete: if false;
+      }
+
       match /sales/{documentId} {
         allow read: if isMember(tenantId);
         allow create: if isMember(tenantId);
