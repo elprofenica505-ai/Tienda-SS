@@ -39,9 +39,13 @@ export async function requireTenantMember(
     throw new Error('TENANT_REQUIRED');
   }
 
-  const member = await getAdminDb()
-    .collection('tenants')
-    .doc(requestedTenant)
+  const tenantRef = getAdminDb().collection('tenants').doc(requestedTenant);
+  const tenantSnapshot = await tenantRef.get();
+  if (tenantSnapshot.exists && tenantSnapshot.data()?.platformStatus === 'suspended') {
+    throw new Error('FORBIDDEN');
+  }
+
+  const member = await tenantRef
     .collection('members')
     .doc(decoded.uid)
     .get();
