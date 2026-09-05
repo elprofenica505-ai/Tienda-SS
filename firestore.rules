@@ -57,6 +57,21 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      match /customers/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId)
+          || hasRole(tenantId, 'vendedor')
+          || hasRole(tenantId, 'cajero');
+        allow delete: if false;
+      }
+
+      match /suppliers/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId)
+          || hasRole(tenantId, 'bodega');
+        allow delete: if false;
+      }
+
       match /sales/{documentId} {
         allow read: if isMember(tenantId);
         allow create: if isMember(tenantId);
