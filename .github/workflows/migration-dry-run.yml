@@ -1,0 +1,59 @@
+name: Migration dry-run report
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: 'Tenant destino'
+        required: true
+        default: 'tienda-principal'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Descargar el código de la rama
+        uses: actions/checkout@v4
+        with:
+          ref: SaaS-MultiTenant-Profesional
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Ejecutar migración en modo dry-run
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_KEY"
+          mkdir -p reports
+          npx tsx scripts/migrate-global-data.ts \
+            --tenant-id="${{ inputs.tenant_id }}" \
+            --report=reports/migration-products-categories-dry-run.json
+
+      - name: Verificar que no hubo escrituras
+        run: |
+          test -f reports/migration-products-categories-dry-run.json
+          grep -q '"writesPerformed": 0' reports/migration-products-categories-dry-run.json
+
+      - name: Publicar el reporte como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-products-categories-dry-run
+          path: reports/migration-products-categories-dry-run.json
+          if-no-files-found: error
+          retention-days: 7
