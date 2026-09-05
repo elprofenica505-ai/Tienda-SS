@@ -20,10 +20,13 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantMember(request);
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
-    const [categories, products] = await Promise.all([
+    const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true';
+    const [categorySnapshot, productSnapshot] = await Promise.all([
       tenant.collection('categories').orderBy('name').get(),
-      tenant.collection('products').where('active', '==', true).orderBy('name').get()
+      tenant.collection('products').orderBy('name').get()
     ]);
+    const categories = includeArchived ? categorySnapshot : { docs: categorySnapshot.docs.filter((item) => item.data().active !== false) };
+    const products = includeArchived ? productSnapshot : { docs: productSnapshot.docs.filter((item) => item.data().active !== false) };
 
     return NextResponse.json({
       ok: true,
