@@ -2,6 +2,8 @@
 
 import { FormEvent, useState } from 'react';
 import { login as loginWithFirebase } from '@/lib/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 
 type View = 'home' | 'login' | 'register';
 
@@ -108,8 +110,8 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         const response = await fetch('/api/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: company, ownerName: name, email, password }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudo crear la empresa.');
-        setMessage('Empresa creada. Ya puedes iniciar sesión con tu correo.');
-        setTimeout(() => onNavigate('login'), 1200);
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+        window.location.href = '/onboarding';
       } else {
         await loginWithFirebase(email.trim(), password);
         window.location.href = '/dashboard';
