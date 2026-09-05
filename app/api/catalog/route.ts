@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 
@@ -17,7 +17,7 @@ function cleanNumber(value: unknown, fallback = 0) {
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'catalog', 'view');
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
     const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true';
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const type = body.type === 'category' ? 'category' : body.type === 'product' ? 'product' : '';
-    const context = await requireTenantMember(request, type === 'category' ? categoryRoles : productRoles);
+    const context = await requireTenantPermission(request, 'catalog', 'create');
     const db = getAdminDb();
     const now = new Date();
 
@@ -91,7 +91,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
     const type = body.type === 'category' ? 'category' : body.type === 'product' ? 'product' : '';
-    const context = await requireTenantMember(request, type === 'category' ? categoryRoles : productRoles);
+    const context = await requireTenantPermission(request, 'catalog', 'edit');
     const id = cleanText(body.id, 120);
     if (!type || !id) return NextResponse.json({ error: 'Tipo o identificador inválido.' }, { status: 400 });
 

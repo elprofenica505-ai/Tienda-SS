@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 const manageRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -12,7 +12,7 @@ function collectionFor(type: 'customer' | 'supplier') { return type === 'supplie
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'contacts', 'view');
     const type = typeOf(new URL(request.url).searchParams.get('type'));
     const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true';
     const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection(collectionFor(type)).orderBy('name').get();
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const type = typeOf(body.type);
-    const context = await requireTenantMember(request, type === 'supplier' ? supplierRoles : manageRoles);
+    const context = await requireTenantPermission(request, 'contacts', 'create');
     const name = text(body.name);
     const email = text(body.email, 160).toLowerCase();
     const phone = text(body.phone, 40);
@@ -55,7 +55,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
     const type = typeOf(body.type);
-    const context = await requireTenantMember(request, type === 'supplier' ? supplierRoles : manageRoles);
+    const context = await requireTenantPermission(request, 'contacts', 'edit');
     const id = text(body.id, 120);
     if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 });
     const ref = getAdminDb().collection('tenants').doc(context.tenantId).collection(collectionFor(type)).doc(id);

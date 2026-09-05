@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -14,7 +14,7 @@ type SaleLine = { productId: string; name: string; sku: string; quantity: number
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'sales', 'view');
     const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection('sales').orderBy('createdAt', 'desc').limit(50).get();
     return NextResponse.json({ ok: true, sales: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request, salesRoles);
+    const context = await requireTenantPermission(request, 'sales', 'create');
     const body = await request.json();
     const rawLines = Array.isArray(body.items) ? body.items as SaleLineInput[] : [];
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';

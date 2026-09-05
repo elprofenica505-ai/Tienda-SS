@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import { normalizePermissions } from '@/lib/permissions';
+import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 
 export type TenantRole =
   | 'owner'
@@ -60,6 +62,20 @@ export async function requireTenantMember(
     role,
     email: decoded.email
   };
+}
+
+export async function requireTenantPermission(
+  request: NextRequest,
+  module: PermissionModule,
+  action: PermissionAction
+): Promise<TenantContext> {
+  const context = await requireTenantMember(request);
+  if (context.role === 'owner') return context;
+  const settings = await getAdminDb().collection('tenants').doc(context.tenantId).collection('settings').doc('permissions').get();
+  const saved = settings.exists ? settings.data()?.roles : undefined;
+  const permissions = normalizePermissions((saved as Record<string, unknown> | undefined)?.[context.role], context.role);
+  if (!permissions[module][action]) throw new Error('FORBIDDEN');
+  return context;
 }
 
 export function tenantErrorResponse(error: unknown) {

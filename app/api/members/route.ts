@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 const managerRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
@@ -10,7 +10,7 @@ function errorResponse(error: unknown) { const response = tenantErrorResponse(er
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'members', 'view');
     const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection('members').orderBy('name').get();
     return NextResponse.json({ ok: true, members: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { return errorResponse(error); }
@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request, managerRoles);
+    const context = await requireTenantPermission(request, 'members', 'create');
     const body = await request.json(); const name = text(body.name); const email = text(body.email, 160).toLowerCase(); const password = typeof body.password === 'string' ? body.password : ''; const role = text(body.role, 30) as TenantRole;
     if (name.length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !assignableRoles.includes(role)) return NextResponse.json({ error: 'Nombre, correo, contraseña y rol son obligatorios.' }, { status: 400 });
     const db = getAdminDb(); const memberRef = db.collection('tenants').doc(context.tenantId).collection('members');
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request, managerRoles); const body = await request.json(); const uid = text(body.uid, 160); const memberRef = getAdminDb().collection('tenants').doc(context.tenantId).collection('members').doc(uid); const member = await memberRef.get();
+    const context = await requireTenantPermission(request, 'members', 'edit'); const body = await request.json(); const uid = text(body.uid, 160); const memberRef = getAdminDb().collection('tenants').doc(context.tenantId).collection('members').doc(uid); const member = await memberRef.get();
     if (!uid || !member.exists) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     const current = member.data() || {}; if (uid === context.uid) return NextResponse.json({ error: 'No puedes cambiar tu propio acceso desde aquí.' }, { status: 400 }); if (current.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede modificarse desde este módulo.' }, { status: 403 });
     const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid };

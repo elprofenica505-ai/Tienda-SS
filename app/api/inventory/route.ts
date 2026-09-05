@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +16,7 @@ function positiveNumber(value: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'inventory', 'view');
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
     const [products, movements] = await Promise.all([
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request, inventoryRoles);
+    const context = await requireTenantPermission(request, 'inventory', 'create');
     const body = await request.json();
     const productId = text(body.productId, 120);
     const movementType = body.movementType === 'receive' || body.movementType === 'remove' || body.movementType === 'set'

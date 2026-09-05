@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
@@ -8,7 +8,7 @@ function dayKey(value: unknown) { const date = value && typeof value === 'object
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'reports', 'view');
     const days = Math.min(365, Math.max(7, Number(new URL(request.url).searchParams.get('days') || 30)));
     const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
     const [salesSnapshot, expensesSnapshot, cashSnapshot, receivablesSnapshot] = await Promise.all([

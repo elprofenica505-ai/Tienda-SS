@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantMember, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 const financeRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'cajero'];
@@ -9,7 +9,7 @@ function money(value: unknown) { return typeof value === 'number' && Number.isFi
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request);
+    const context = await requireTenantPermission(request, 'finance', 'view');
     const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
     const [expensesSnapshot, salesSnapshot, cashSnapshot] = await Promise.all([
       tenant.collection('expenses').orderBy('createdAt', 'desc').limit(100).get(),
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await requireTenantMember(request, financeRoles);
+    const context = await requireTenantPermission(request, 'finance', 'create');
     const body = await request.json();
     const type = body.type === 'cash' ? 'cash' : 'expense';
     const amount = money(body.amount);

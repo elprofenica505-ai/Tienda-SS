@@ -38,6 +38,12 @@ service cloud.firestore {
         allow create, update, delete: if isManager(tenantId);
       }
 
+      match /settings/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if false;
+      }
+
       match /products/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId)
