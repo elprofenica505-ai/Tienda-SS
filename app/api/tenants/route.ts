@@ -5,8 +5,8 @@ import { tenantErrorResponse } from '@/lib/tenant';
 export const runtime = 'nodejs';
 
 function validEmail(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value.trim());
+    return typeof value === 'string'
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 export async function POST(request: NextRequest) {
