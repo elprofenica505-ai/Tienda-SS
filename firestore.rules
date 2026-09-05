@@ -44,6 +44,12 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      match /notifications/{documentId} {
+        allow read: if isMember(tenantId);
+        allow update: if isMember(tenantId);
+        allow create, delete: if false;
+      }
+
       match /products/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId)
