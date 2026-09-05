@@ -127,7 +127,7 @@ function analyzeCategory(id: string, data: AnyRecord): CategoryAnalysis {
 }
 
 function unique(values: string[]) {
-  return [...new Set(values.filter(Boolean))].sort((left, right) => left.localeCompare(right));
+  return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right));
 }
 
 async function main() {
