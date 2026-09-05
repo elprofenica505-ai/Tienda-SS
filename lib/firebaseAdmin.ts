@@ -1,16 +1,37 @@
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { cert, getApps, initializeApp, App } from 'firebase-admin/app';
+import { getAuth, Auth } from 'firebase-admin/auth';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
-function getServiceAccount() {
+let adminApp: App | undefined;
+
+function readServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
-  if (!raw) throw new Error("Falta la variable FIREBASE_SERVICE_ACCOUNT_KEY");
-  return JSON.parse(raw);
+
+  if (!raw) {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY no está configurada.');
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('FIREBASE_SERVICE_ACCOUNT_KEY no contiene JSON válido.');
+  }
 }
 
-const app = getApps().length === 0
-  ? initializeApp({ credential: cert(getServiceAccount()) })
-  : getApps()[0];
+function getAdminApp() {
+  if (adminApp) return adminApp;
 
-export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app);
+  adminApp = getApps()[0] || initializeApp({
+    credential: cert(readServiceAccount())
+  });
+
+  return adminApp;
+}
+
+export function getAdminAuth(): Auth {
+  return getAuth(getAdminApp());
+}
+
+export function getAdminDb(): Firestore {
+  return getFirestore(getAdminApp());
+}
