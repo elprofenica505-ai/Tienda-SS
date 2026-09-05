@@ -33,6 +33,7 @@ type MigrationReport = {
     products: string;
     categories: string;
   };
+  destinationTenantExists: boolean;
   sourceCounts: {
     products: number;
     categories: number;
@@ -145,13 +146,6 @@ async function main() {
   const destinationTenant = db.collection('tenants').doc(options.tenantId);
   const destinationTenantSnapshot = await destinationTenant.get();
 
-  if (!destinationTenantSnapshot.exists) {
-    throw new Error(
-      `El tenant destino tenants/${options.tenantId} no existe. ` +
-      'El dry-run no lo creará automáticamente.'
-    );
-  }
-
   const [productsSnapshot, categoriesSnapshot] = await Promise.all([
     db.collection(LEGACY_PRODUCTS).get(),
     db.collection(LEGACY_CATEGORIES).get()
@@ -171,8 +165,12 @@ async function main() {
     (category) => category !== 'Sin categoría' && !categoryNames.includes(category)
   );
 
-  const destinationProductsSnapshot = await destinationTenant.collection('products').get();
-  const destinationCategoriesSnapshot = await destinationTenant.collection('categories').get();
+  const [destinationProductsSnapshot, destinationCategoriesSnapshot] = destinationTenantSnapshot.exists
+    ? await Promise.all([
+      destinationTenant.collection('products').get(),
+      destinationTenant.collection('categories').get()
+    ])
+    : [{ docs: [] }, { docs: [] }];
   const destinationProductIds = new Set(destinationProductsSnapshot.docs.map((document) => document.id));
   const destinationCategoryIds = new Set(destinationCategoriesSnapshot.docs.map((document) => document.id));
 
@@ -185,6 +183,9 @@ async function main() {
     'No se escribieron documentos: este informe es exclusivamente dry-run.',
     'La colección legacy permanece intacta.',
     'La migración no se debe ejecutar hasta revisar los registros con issues.',
+    ...(destinationTenantSnapshot.exists
+      ? []
+      : [`El tenant destino tenants/${options.tenantId} todavía no existe; el análisis no lo creó.`]),
     ...(missingReferencedCategories.length > 0
       ? [`Hay categorías usadas por productos que no aparecen en categorias: ${missingReferencedCategories.join(', ')}`]
       : []),
@@ -205,6 +206,7 @@ async function main() {
       products: `tenants/${options.tenantId}/products`,
       categories: `tenants/${options.tenantId}/categories`
     },
+    destinationTenantExists: destinationTenantSnapshot.exists,
     sourceCounts: {
       products: products.length,
       categories: categories.length
