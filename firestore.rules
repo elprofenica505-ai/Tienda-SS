@@ -80,6 +80,20 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      match /expenses/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if isManager(tenantId)
+          || hasRole(tenantId, 'cajero');
+        allow update, delete: if false;
+      }
+
+      match /cashMovements/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if isManager(tenantId)
+          || hasRole(tenantId, 'cajero');
+        allow update, delete: if false;
+      }
+
       match /sales/{documentId} {
         allow read: if isMember(tenantId);
         allow create: if isMember(tenantId);
