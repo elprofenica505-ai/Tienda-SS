@@ -115,9 +115,6 @@ service cloud.firestore {
         allow delete: if false;
       }
 
-      match /{collectionName}/{documentId} {
-        allow read, write: if isMember(tenantId);
-      }
     }
 
     match /{document=**} {
