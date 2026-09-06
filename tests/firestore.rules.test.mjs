@@ -16,6 +16,11 @@ const SELLER_A = 'seller-a';
 const WAREHOUSE_A = 'warehouse-a';
 const INACTIVE_A = 'inactive-a';
 const OWNER_B = 'owner-b';
+const MANAGER_A = 'manager-a';
+const SUPERVISOR_A = 'supervisor-a';
+const PURCHASES_A = 'purchases-a';
+const READ_ONLY_A = 'read-only-a';
+const DISPATCHER_A = 'dispatcher-a';
 
 let testEnv;
 
@@ -68,6 +73,11 @@ before(async () => {
   await seedMember(TENANT_A, SELLER_A, 'vendedor');
   await seedMember(TENANT_A, WAREHOUSE_A, 'bodega');
   await seedMember(TENANT_A, INACTIVE_A, 'admin', 'inactive');
+  await seedMember(TENANT_A, MANAGER_A, 'gerente');
+  await seedMember(TENANT_A, SUPERVISOR_A, 'supervisor_sucursal');
+  await seedMember(TENANT_A, PURCHASES_A, 'compras');
+  await seedMember(TENANT_A, READ_ONLY_A, 'solo_lectura');
+  await seedMember(TENANT_A, DISPATCHER_A, 'despachador');
   await seedDocument(TENANT_A, 'products', 'product-a', { name: 'Product A', stock: 10 });
   await seedDocument(TENANT_B, 'products', 'product-b', { name: 'Product B', stock: 20 });
 });
@@ -130,6 +140,15 @@ describe('Firestore tenant isolation', () => {
       role: 'vendedor',
       status: 'pending',
     }));
+  });
+
+  it('allows the expanded operational roles to perform only their permitted actions', async () => {
+    await assertSucceeds(setDoc(doc(dbFor(MANAGER_A), path(TENANT_A, 'products', 'manager-product')), { name: 'Manager product' }));
+    await assertSucceeds(setDoc(doc(dbFor(SUPERVISOR_A), path(TENANT_A, 'sales', 'supervisor-sale')), { total: 100 }));
+    await assertSucceeds(setDoc(doc(dbFor(PURCHASES_A), path(TENANT_A, 'suppliers', 'purchase-supplier')), { name: 'Supplier' }));
+    await assertSucceeds(setDoc(doc(dbFor(DISPATCHER_A), path(TENANT_A, 'orders', 'dispatch-order')), { status: 'ready' }));
+    await assertFails(setDoc(doc(dbFor(READ_ONLY_A), path(TENANT_A, 'sales', 'read-only-sale')), { total: 10 }));
+    await assertSucceeds(getDoc(doc(dbFor(READ_ONLY_A), path(TENANT_A, 'products', 'product-a'))));
   });
 
   it('denies direct access to legacy global collections', async () => {

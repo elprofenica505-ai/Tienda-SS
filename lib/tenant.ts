@@ -6,11 +6,16 @@ import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 export type TenantRole =
   | 'owner'
   | 'admin'
-  | 'jefe'
+  | 'gerente'
+  | 'supervisor_sucursal'
   | 'vendedor'
+  | 'cajero'
   | 'bodega'
+  | 'compras'
   | 'chofer'
-  | 'cajero';
+  | 'despachador'
+  | 'solo_lectura'
+  | 'jefe';
 
 export interface TenantContext {
   uid: string;
@@ -23,11 +28,16 @@ const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const TENANT_ROLES: readonly TenantRole[] = [
   'owner',
   'admin',
-  'jefe',
+  'gerente',
+  'supervisor_sucursal',
   'vendedor',
-  'bodega',
-  'chofer',
   'cajero',
+  'bodega',
+  'compras',
+  'chofer',
+  'despachador',
+  'solo_lectura',
+  'jefe',
 ];
 
 function isTenantRole(value: unknown): value is TenantRole {

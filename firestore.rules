@@ -1,135 +1,139 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
     }
-
     function memberPath(tenantId) {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
-
     function isMember(tenantId) {
       return signedIn()
         && exists(memberPath(tenantId))
         && get(memberPath(tenantId)).data.status == 'active';
     }
-
     function hasRole(tenantId, role) {
       return isMember(tenantId)
         && get(memberPath(tenantId)).data.role == role;
     }
-
     function isManager(tenantId) {
       return hasRole(tenantId, 'owner')
         || hasRole(tenantId, 'admin')
+        || hasRole(tenantId, 'gerente')
         || hasRole(tenantId, 'jefe');
     }
-
-    function validMemberRole() {
-      return request.resource.data.role in ['owner', 'admin', 'jefe', 'vendedor', 'bodega', 'chofer', 'cajero'];
+    function isBranchSupervisor(tenantId) {
+      return isManager(tenantId) || hasRole(tenantId, 'supervisor_sucursal');
     }
-
+    function canOperateSales(tenantId) {
+      return isBranchSupervisor(tenantId)
+        || hasRole(tenantId, 'vendedor')
+        || hasRole(tenantId, 'cajero')
+        || hasRole(tenantId, 'despachador');
+    }
+    function canOperateInventory(tenantId) {
+      return isBranchSupervisor(tenantId)
+        || hasRole(tenantId, 'bodega')
+        || hasRole(tenantId, 'compras')
+        || hasRole(tenantId, 'despachador');
+    }
+    function validMemberRole() {
+      return request.resource.data.role in [
+        'owner', 'admin', 'gerente', 'supervisor_sucursal',
+        'vendedor', 'cajero', 'bodega', 'compras', 'chofer',
+        'despachador', 'solo_lectura', 'jefe'
+      ];
+    }
     function validMemberStatus() {
       return request.resource.data.status in ['active', 'inactive'];
     }
-
     function validMemberWrite() {
       return validMemberRole() && validMemberStatus();
     }
-
     match /tenants/{tenantId} {
       allow read: if isMember(tenantId);
       allow create: if signedIn() && request.auth.uid == tenantId;
       allow update: if isManager(tenantId);
       allow delete: if false;
-
       match /members/{uid} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId) && validMemberWrite();
         allow delete: if isManager(tenantId);
       }
-
       match /settings/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId);
         allow delete: if false;
       }
-
       match /notifications/{documentId} {
         allow read: if isMember(tenantId);
         allow update: if isMember(tenantId);
         allow create, delete: if false;
       }
-
       match /products/{documentId} {
         allow read: if isMember(tenantId);
-        allow create, update: if isManager(tenantId)
-          || hasRole(tenantId, 'bodega');
+        allow create, update: if canOperateInventory(tenantId);
         allow delete: if isManager(tenantId);
       }
-
       match /categories/{documentId} {
         allow read: if isMember(tenantId);
-        allow create, update, delete: if isManager(tenantId);
+        allow create, update, delete: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'compras');
       }
-
       match /inventoryMovements/{documentId} {
         allow read: if isMember(tenantId);
-        allow create: if isManager(tenantId)
-          || hasRole(tenantId, 'bodega');
+        allow create: if canOperateInventory(tenantId);
         allow update, delete: if false;
       }
-
       match /customers/{documentId} {
         allow read: if isMember(tenantId);
-        allow create, update: if isManager(tenantId)
+        allow create, update: if isBranchSupervisor(tenantId)
           || hasRole(tenantId, 'vendedor')
           || hasRole(tenantId, 'cajero');
         allow delete: if false;
       }
-
       match /suppliers/{documentId} {
         allow read: if isMember(tenantId);
-        allow create, update: if isManager(tenantId)
+        allow create, update: if isBranchSupervisor(tenantId)
+          || hasRole(tenantId, 'compras')
           || hasRole(tenantId, 'bodega');
         allow delete: if false;
       }
-
       match /receivablePayments/{documentId} {
         allow read: if isMember(tenantId);
-        allow create: if isManager(tenantId)
+        allow create: if isBranchSupervisor(tenantId)
           || hasRole(tenantId, 'vendedor')
           || hasRole(tenantId, 'cajero');
         allow update, delete: if false;
       }
-
       match /expenses/{documentId} {
         allow read: if isMember(tenantId);
-        allow create: if isManager(tenantId)
-          || hasRole(tenantId, 'cajero');
+        allow create: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'cajero');
         allow update, delete: if false;
       }
-
       match /cashMovements/{documentId} {
         allow read: if isMember(tenantId);
-        allow create: if isManager(tenantId)
-          || hasRole(tenantId, 'cajero');
+        allow create: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'cajero');
         allow update, delete: if false;
       }
-
       match /sales/{documentId} {
         allow read: if isMember(tenantId);
-        allow create: if isMember(tenantId);
-        allow update: if isManager(tenantId)
+        allow create: if canOperateSales(tenantId);
+        allow update: if isBranchSupervisor(tenantId)
           || hasRole(tenantId, 'vendedor')
-          || hasRole(tenantId, 'cajero');
+          || hasRole(tenantId, 'cajero')
+          || hasRole(tenantId, 'despachador');
         allow delete: if false;
       }
-
+      match /orders/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isBranchSupervisor(tenantId)
+          || hasRole(tenantId, 'vendedor')
+          || hasRole(tenantId, 'cajero')
+          || hasRole(tenantId, 'despachador')
+          || hasRole(tenantId, 'chofer');
+        allow delete: if false;
+      }
     }
-
     match /{document=**} {
       allow read, write: if false;
     }

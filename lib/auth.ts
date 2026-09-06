@@ -7,7 +7,20 @@ import {
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
-export const ROLES = ["jefe", "vendedor", "bodega", "chofer"] as const;
+export const ROLES = [
+  "owner",
+  "admin",
+  "gerente",
+  "supervisor_sucursal",
+  "vendedor",
+  "cajero",
+  "bodega",
+  "compras",
+  "chofer",
+  "despachador",
+  "solo_lectura",
+  "jefe",
+] as const;
 export type Rol = (typeof ROLES)[number];
 
 function isRol(value: unknown): value is Rol {
