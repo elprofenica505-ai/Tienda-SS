@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "start": "next start",
     "lint": "eslint .",
+    "migrate:user-roles": "tsx scripts/migrate-user-roles.ts",
     "emulators:start": "firebase emulators:start --only firestore",
     "test:permissions": "node --import tsx --test tests/permissions.test.ts",
     "test:rules": "firebase emulators:exec --only firestore \"node --test tests/firestore.rules.test.mjs\""
