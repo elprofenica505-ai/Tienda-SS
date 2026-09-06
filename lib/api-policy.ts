@@ -1,0 +1,40 @@
+import type { PermissionAction, PermissionModule } from '@/lib/permissions';
+
+export type ApiPolicy = {
+  module: PermissionModule;
+  action: PermissionAction;
+};
+
+const publicRoutes = new Set([
+  'POST /api/tenants',
+  'POST /api/billing/webhook',
+]);
+
+const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
+  { pattern: /^\/api\/(catalog|inventory)$/, policy: { module: 'catalog', action: 'view' } },
+  { pattern: /^\/api\/contacts$/, policy: { module: 'contacts', action: 'view' } },
+  { pattern: /^\/api\/finance$/, policy: { module: 'finance', action: 'view' } },
+  { pattern: /^\/api\/(members|usuarios)$/, policy: { module: 'members', action: 'view' } },
+  { pattern: /^\/api\/notifications$/, policy: { module: 'dashboard', action: 'view' } },
+  { pattern: /^\/api\/permissions$/, policy: { module: 'members', action: 'view' } },
+  { pattern: /^\/api\/receivables$/, policy: { module: 'receivables', action: 'view' } },
+  { pattern: /^\/api\/reports$/, policy: { module: 'reports', action: 'view' } },
+  { pattern: /^\/api\/sales$/, policy: { module: 'sales', action: 'view' } },
+  { pattern: /^\/api\/billing$/, policy: { module: 'finance', action: 'view' } },
+];
+
+export function isPublicApiRoute(pathname: string, method: string): boolean {
+  return publicRoutes.has(`${method.toUpperCase()} ${pathname}`);
+}
+
+export function getApiPolicy(pathname: string, method: string): ApiPolicy | null {
+  if (pathname === '/api/tenants/me') return { module: 'dashboard', action: 'view' };
+  const match = routePolicies.find(({ pattern }) => pattern.test(pathname));
+  if (!match) return null;
+  const normalizedMethod = method.toUpperCase();
+  if (normalizedMethod === 'GET') return match.policy;
+  if (normalizedMethod === 'POST') return { ...match.policy, action: 'create' };
+  if (normalizedMethod === 'PATCH' || normalizedMethod === 'PUT') return { ...match.policy, action: 'edit' };
+  if (normalizedMethod === 'DELETE') return { ...match.policy, action: 'delete' };
+  return null;
+}
