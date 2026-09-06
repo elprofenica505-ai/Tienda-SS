@@ -74,6 +74,9 @@ export async function POST(request: NextRequest) {
     }
 
     console.error('tenant_creation_failed', { message });
+    if (message.includes('FIREBASE_PROJECT_MISMATCH')) {
+      return NextResponse.json({ error: 'Vercel está usando una cuenta de servicio de otro proyecto Firebase. Genera una nueva clave en ConexiaX y reemplaza FIREBASE_SERVICE_ACCOUNT_KEY.' }, { status: 503 });
+    }
     if (message.includes('FIREBASE_SERVICE_ACCOUNT_KEY')) {
       return NextResponse.json({ error: 'La conexión del servidor con Firebase no está configurada correctamente en Vercel.' }, { status: 503 });
     }
