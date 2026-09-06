@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, deleteDoc, doc, onSnapshot, getDocs } from 'firebase/firestore';
@@ -85,8 +86,8 @@ export default function ProductosAdmin() {
     return () => {
       unsubscribeProductos();
       unsubscribeCategorias();
-    };
-  }, []);
+    }
+  }, [categoriaSeleccionada]);
 
   const categoriasDeProductos = productos.map((p) => p.categoria).filter(Boolean);
   const todasLasCategoriasMap = new Map<string, string>();
@@ -290,7 +291,7 @@ export default function ProductosAdmin() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ width: '56px', height: '56px', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
                 {imagen ? (
-                  <img src={imagen} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <NextImage src={imagen} alt="Preview" width={56} height={56} unoptimized style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
                   <span style={{ fontSize: '20px' }}>📷</span>
                 )}
@@ -450,7 +451,7 @@ export default function ProductosAdmin() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
                 <div style={{ width: '48px', height: '48px', backgroundColor: '#030712', border: '1px solid #374151', borderRadius: '10px', overflow: 'hidden', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {prod.imagen ? (
-                    <img src={prod.imagen} alt={prod.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <NextImage src={prod.imagen} alt={prod.nombre} width={48} height={48} unoptimized style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
                     <span style={{ fontSize: '16px' }}>📦</span>
                   )}

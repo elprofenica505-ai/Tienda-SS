@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -25,7 +25,7 @@ function SalesContent() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try {
@@ -43,8 +43,8 @@ function SalesContent() {
       setProducts(catalog.products || []); setSales(salesData.sales || []); setCustomers(customersData.contacts || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo cargar el punto de venta.'); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
 
   const filtered = products.filter((item) => `${item.name} ${item.sku || ''}`.toLowerCase().includes(query.toLowerCase()));
   const filteredCustomers = customers.filter((item) => `${item.name} ${item.email || ''} ${item.phone || ''}`.toLowerCase().includes(customerQuery.toLowerCase()));

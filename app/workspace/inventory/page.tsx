@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -23,7 +23,7 @@ function InventoryContent() {
   const [query, setQuery] = useState('');
   const [form, setForm] = useState<MovementForm>({ productId: '', movementType: 'receive', quantity: '', reason: '' });
 
-  async function loadInventory() {
+  const loadInventory = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try {
@@ -33,9 +33,9 @@ function InventoryContent() {
       setProducts(data.products || []); setLowStock(data.lowStock || []); setMovements(data.movements || []); setSummary(data.summary || { products: 0, totalUnits: 0, lowStock: 0 });
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando inventario.'); }
     finally { setLoading(false); }
-  }
+  }, [authUser, tenant]);
 
-  useEffect(() => { void loadInventory(); }, [authUser, tenant]);
+  useEffect(() => { void loadInventory(); }, [loadInventory]);
 
   async function submitMovement(event: FormEvent) {
     event.preventDefault();

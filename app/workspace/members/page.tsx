@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -11,8 +11,8 @@ const roles = ['admin', 'jefe', 'vendedor', 'bodega', 'chofer', 'cajero'];
 function MembersContent() {
   const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant();
   const [members, setMembers] = useState<Member[]>([]); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [message, setMessage] = useState(''); const [query, setQuery] = useState(''); const [showForm, setShowForm] = useState(false); const [form, setForm] = useState({ name: '', email: '', password: '', role: 'vendedor' });
-  async function load() { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/members', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los usuarios.'); setMembers(data.members || []); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando usuarios.'); } finally { setLoading(false); } }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/members', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los usuarios.'); setMembers(data.members || []); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando usuarios.'); } finally { setLoading(false); } }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
   async function create(event: FormEvent) { event.preventDefault(); if (!authUser || !tenant) return; setSaving(true); setMessage(''); try { const response = await fetch('/api/members', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify(form) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo agregar el usuario.'); setMessage('Usuario agregado al tenant.'); setShowForm(false); setForm({ name: '', email: '', password: '', role: 'vendedor' }); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo agregar el usuario.'); } finally { setSaving(false); } }
   async function update(uid: string, payload: Record<string, unknown>, success: string) { if (!authUser || !tenant) return; setSaving(true); try { const response = await fetch('/api/members', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ uid, ...payload }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo actualizar el usuario.'); setMessage(success); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo actualizar el usuario.'); } finally { setSaving(false); } }
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando usuarios...</div>;

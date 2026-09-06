@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -10,8 +10,8 @@ type Report = { summary: { income: number; expenses: number; cashAdjustments: nu
 function ReportsContent() {
   const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant();
   const [days, setDays] = useState(30); const [report, setReport] = useState<Report | null>(null); const [loading, setLoading] = useState(true); const [message, setMessage] = useState('');
-  async function load() { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch(`/api/reports?days=${days}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los reportes.'); setReport(data); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando reportes.'); } finally { setLoading(false); } }
-  useEffect(() => { void load(); }, [authUser, tenant, days]);
+  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch(`/api/reports?days=${days}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los reportes.'); setReport(data); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando reportes.'); } finally { setLoading(false); } }, [authUser, tenant, days]);
+  useEffect(() => { void load(); }, [load]);
   if (tenantLoading || loading || !report) return <div className="workspace-loading">Generando análisis financiero...</div>;
   if (!authUser || !tenant || !member) { router.replace('/'); return null; }
   const maxChart = Math.max(...report.daily.map((item) => Math.max(item.income, item.expenses)), 1); const maxProduct = Math.max(...report.topProducts.map((item) => item.revenue), 1); const methodNames: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Crédito' };

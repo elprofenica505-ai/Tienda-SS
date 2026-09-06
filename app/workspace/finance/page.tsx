@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -11,8 +11,8 @@ function FinanceContent() {
   const router = useRouter();
   const { authUser, tenant, member, loading: tenantLoading } = useTenant();
   const [expenses, setExpenses] = useState<Expense[]>([]); const [cashMovements, setCashMovements] = useState<CashMovement[]>([]); const [summary, setSummary] = useState({ income: 0, expenses: 0, adjustments: 0, net: 0 }); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [message, setMessage] = useState(''); const [modal, setModal] = useState<'expense' | 'cash' | null>(null); const [form, setForm] = useState({ description: '', amount: '', category: 'General', paymentMethod: 'cash', direction: 'out', notes: '' });
-  async function load() { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/finance', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar las finanzas.'); setExpenses(data.expenses || []); setCashMovements(data.cashMovements || []); setSummary(data.summary || { income: 0, expenses: 0, adjustments: 0, net: 0 }); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando finanzas.'); } finally { setLoading(false); } }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/finance', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar las finanzas.'); setExpenses(data.expenses || []); setCashMovements(data.cashMovements || []); setSummary(data.summary || { income: 0, expenses: 0, adjustments: 0, net: 0 }); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando finanzas.'); } finally { setLoading(false); } }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
   function open(type: 'expense' | 'cash') { setForm({ description: '', amount: '', category: 'General', paymentMethod: 'cash', direction: type === 'cash' ? 'in' : 'out', notes: '' }); setModal(type); }
   async function save(event: FormEvent) { event.preventDefault(); if (!authUser || !tenant || !modal) return; setSaving(true); setMessage(''); try { const response = await fetch('/api/finance', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ ...form, type: modal, amount: Number(form.amount) }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo registrar.'); setMessage(modal === 'expense' ? 'Gasto registrado.' : 'Movimiento de caja registrado.'); setModal(null); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo registrar.'); } finally { setSaving(false); } }
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando flujo de caja...</div>;

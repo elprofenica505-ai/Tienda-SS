@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
 type Notice = { id: string; type: string; title: string; message: string; read: boolean; createdAt?: unknown };
 function NotificationsContent() { const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant(); const [items, setItems] = useState<Notice[]>([]); const [loading, setLoading] = useState(true); const [message, setMessage] = useState('');
-  async function load() { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/notifications', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar las alertas.'); setItems(data.notifications || []); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando alertas.'); } finally { setLoading(false); } }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/notifications', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar las alertas.'); setItems(data.notifications || []); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando alertas.'); } finally { setLoading(false); } }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
   async function markRead(id: string) { if (!authUser || !tenant) return; try { await fetch('/api/notifications', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ id }) }); setItems((current) => current.map((item) => item.id === id ? { ...item, read: true } : item)); } catch { setMessage('No se pudo marcar la alerta.'); } }
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando alertas...</div>; if (!authUser || !tenant || !member) { router.replace('/'); return null; }
   const unread = items.filter((item) => !item.read).length; const icon: Record<string, string> = { payment_failed: '!', renewal_upcoming: '◷', subscription_updated: '✓' };

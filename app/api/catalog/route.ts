@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
 
 export const runtime = 'nodejs';
 
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
     const type = body.type === 'category' ? 'category' : body.type === 'product' ? 'product' : '';
     const context = await requireTenantPermission(request, 'catalog', 'create');
     const db = getAdminDb();
+    const tenantRef = db.collection('tenants').doc(context.tenantId);
     const now = new Date();
 
     if (type === 'category') {
@@ -59,6 +61,10 @@ export async function POST(request: NextRequest) {
     }
 
     const name = cleanText(body.name);
+    const tenantSnapshot = await tenantRef.get();
+    const activeProducts = await tenantRef.collection('products').where('active', '==', true).get();
+    const plan = tenantSnapshot.data()?.plan;
+    if (!hasCapacity(plan, 'products', activeProducts.size)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para agregar más.` }, { status: 402 });
     const sku = cleanText(body.sku, 50).toUpperCase();
     const categoryId = cleanText(body.categoryId, 80);
     const itemType = body.itemType === 'service' ? 'service' : 'physical';

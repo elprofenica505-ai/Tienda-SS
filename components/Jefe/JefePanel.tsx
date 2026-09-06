@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import React, { useState, useEffect, useRef } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { doc, setDoc, collection, getDocs, query, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -719,13 +720,13 @@ export default function JefePanel({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula (Adelante):</label>
                         <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'frontal')} style={{ fontSize: 11, color: '#cbd5e1' }} />
-                        {fotoCedulaFrontal && <img src={fotoCedulaFrontal} alt="Cédula Frontal" style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
+                        {fotoCedulaFrontal && <NextImage src={fotoCedulaFrontal} alt="Cédula Frontal" width={140} height={70} unoptimized style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
                       </div>
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <label style={{ fontSize: 11, color: '#9ca3af' }}>Cédula (Atrás):</label>
                         <input type="file" accept="image/*" capture="environment" onChange={e => manejarCambioFoto(e, 'trasera')} style={{ fontSize: 11, color: '#cbd5e1' }} />
-                        {fotoCedulaTrasera && <img src={fotoCedulaTrasera} alt="Cédula Trasera" style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
+                        {fotoCedulaTrasera && <NextImage src={fotoCedulaTrasera} alt="Cédula Trasera" width={140} height={70} unoptimized style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #34d399' }} />}
                       </div>
                     </div>
 
@@ -742,7 +743,7 @@ export default function JefePanel({
                       <div style={{ display: 'flex', gap: 8 }}>
                         {fotosExtra.map((foto, idx) => (
                           <div key={idx} style={{ position: 'relative' }}>
-                            <img src={foto} alt={`Extra ${idx}`} style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #3b82f6' }} />
+                            <NextImage src={foto} alt={`Extra ${idx}`} width={70} height={70} unoptimized style={{ width: 70, height: 70, objectFit: 'cover', borderRadius: 6, border: '1px solid #3b82f6' }} />
                             <button type="button" onClick={() => setFotosExtra(fotosExtra.filter((_, i) => i !== idx))} style={{ position: 'absolute', top: -4, right: -4, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', width: 18, height: 18, fontSize: 10, cursor: 'pointer' }}>✕</button>
                           </div>
                         ))}

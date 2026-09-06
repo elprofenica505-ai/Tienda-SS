@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
 
 export const runtime = 'nodejs';
 const managerRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
@@ -21,7 +22,11 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'members', 'create');
     const body = await request.json(); const name = text(body.name); const email = text(body.email, 160).toLowerCase(); const password = typeof body.password === 'string' ? body.password : ''; const role = text(body.role, 30) as TenantRole;
     if (name.length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !assignableRoles.includes(role)) return NextResponse.json({ error: 'Nombre, correo, contraseña y rol son obligatorios.' }, { status: 400 });
-    const db = getAdminDb(); const memberRef = db.collection('tenants').doc(context.tenantId).collection('members');
+    const db = getAdminDb(); const tenantRef = db.collection('tenants').doc(context.tenantId); const memberRef = tenantRef.collection('members');
+    const tenantSnapshot = await tenantRef.get();
+    const activeMembers = await memberRef.where('status', '==', 'active').get();
+    const plan = tenantSnapshot.data()?.plan;
+    if (!hasCapacity(plan, 'members', activeMembers.size)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para agregar más.` }, { status: 402 });
     const existing = await memberRef.where('email', '==', email).limit(1).get();
     if (!existing.empty && existing.docs[0].data().status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     let user;

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -23,7 +23,7 @@ function CatalogContent() {
   const [categoryName, setCategoryName] = useState('');
   const [product, setProduct] = useState({ name: '', sku: '', price: '', stock: '', categoryId: '', itemType: 'physical' });
 
-  async function loadCatalog() {
+  const loadCatalog = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try {
@@ -33,9 +33,9 @@ function CatalogContent() {
       setCategories(data.categories || []); setProducts(data.products || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando el catálogo.'); }
     finally { setLoading(false); }
-  }
+  }, [authUser, tenant, showArchived]);
 
-  useEffect(() => { void loadCatalog(); }, [authUser, tenant, showArchived]);
+  useEffect(() => { void loadCatalog(); }, [loadCatalog]);
 
   async function saveMutation(body: Record<string, unknown>, success: string) {
     if (!authUser || !tenant) return;

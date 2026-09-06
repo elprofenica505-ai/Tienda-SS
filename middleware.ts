@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiPolicy, isPublicApiRoute } from '@/lib/api-policy';
 
+function withSecurityHeaders(response: NextResponse) {
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
+}
+
 function unauthorized(message: string, status = 401) {
-  return NextResponse.json({ error: message }, { status });
+  return withSecurityHeaders(NextResponse.json({ error: message }, { status }));
 }
 
 export function middleware(request: NextRequest) {
@@ -10,7 +19,7 @@ export function middleware(request: NextRequest) {
   if (!pathname.startsWith('/api/')) return NextResponse.next();
 
   const method = request.method.toUpperCase();
-  if (isPublicApiRoute(pathname, method)) return NextResponse.next();
+  if (isPublicApiRoute(pathname, method)) return withSecurityHeaders(NextResponse.next());
 
   const authorization = request.headers.get('authorization')?.trim() || '';
   if (!/^Bearer\s+\S+$/i.test(authorization)) {
@@ -18,7 +27,7 @@ export function middleware(request: NextRequest) {
   }
 
   if (pathname.startsWith('/api/superadmin/')) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   if (!request.headers.get('x-tenant-id')?.trim()) {
@@ -36,7 +45,7 @@ export function middleware(request: NextRequest) {
     headers.set('x-api-permission-action', policy.action);
   }
 
-  return NextResponse.next({ request: { headers } });
+  return withSecurityHeaders(NextResponse.next({ request: { headers } }));
 }
 
 export const config = {

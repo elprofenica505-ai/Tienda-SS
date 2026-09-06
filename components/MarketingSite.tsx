@@ -1,8 +1,9 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { login as loginWithFirebase } from '@/lib/auth';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 type View = 'home' | 'login' | 'register';
@@ -18,7 +19,7 @@ const modules = [
 
 const plans = [
   { name: 'Starter', price: '19', description: 'Para comenzar con orden', features: ['1 empresa', '3 usuarios', 'Catálogo e inventario', 'Ventas y caja'] },
-  { name: 'Growth', price: '49', description: 'Para equipos que crecen', features: ['10 usuarios', 'Sucursales', 'Compras y proveedores', 'Reportes avanzados'], featured: true },
+  { name: 'Growth', price: '49', description: 'Para equipos que crecen', features: ['15 usuarios', 'Sucursales', 'Compras y proveedores', 'Reportes avanzados'], featured: true },
   { name: 'Scale', price: '99', description: 'Para operaciones exigentes', features: ['Usuarios ilimitados', 'Automatizaciones', 'API e integraciones', 'Soporte prioritario'] },
 ];
 
@@ -87,7 +88,7 @@ function Landing({ onNavigate }: { onNavigate: (view: View) => void }) {
       <section className="section page-container" id="precios"><div className="section-heading pricing-heading"><div><div className="eyebrow">Planes simples</div><h2>Elige tu ritmo.<br /><em>Crece a tu manera.</em></h2></div><p>Comienza con lo esencial. Cambia de plan cuando tu operación lo necesite, sin contratos complicados.</p></div><div className="pricing-grid">{plans.map((plan) => <article className={`pricing-card ${plan.featured ? 'featured' : ''}`} key={plan.name}>{plan.featured && <div className="popular-label">Más elegido</div>}<h3>{plan.name}</h3><p>{plan.description}</p><div className="price"><strong>${plan.price}</strong><span>/ mes</span></div><button className={`button ${plan.featured ? 'button-lime' : 'button-outline'}`} onClick={() => onNavigate('register')}>Comenzar ahora <Arrow /></button><ul>{plan.features.map((feature) => <li key={feature}><span>✓</span>{feature}</li>)}</ul></article>)}</div></section>
 
       <section className="cta-section page-container"><div className="cta-inner"><div><div className="eyebrow">Tu próximo capítulo comienza aquí</div><h2>Haz que tu negocio<br /><em>se mueva mejor.</em></h2></div><button className="button button-large button-dark" onClick={() => onNavigate('register')}>Crear mi empresa <Arrow /></button></div></section>
-      <footer className="footer page-container"><Logo /><span>© 2025 NexoFlow. Operaciones claras para negocios ambiciosos.</span><div><a href="#modulos">Módulos</a><a href="#precios">Precios</a><a href="#">Privacidad</a></div></footer>
+      <footer className="footer page-container"><Logo /><span>© 2025 NexoFlow. Operaciones claras para negocios ambiciosos.</span><div><a href="#modulos">Módulos</a><a href="#precios">Precios</a><a href="/privacy">Privacidad</a></div></footer>
     </main>
   );
 }
@@ -100,6 +101,23 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+
+  async function resetPassword() {
+    if (!email.trim()) {
+      setMessage('Escribe tu correo para enviarte un enlace de recuperación.');
+      return;
+    }
+    setLoading(true);
+    setMessage('');
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      setMessage('Te enviamos un enlace para restablecer tu contraseña.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo enviar el enlace de recuperación.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -121,7 +139,17 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
     } finally { setLoading(false); }
   }
 
-  return <main className="auth-page"><div className="auth-orb orb-left" /><div className="auth-orb orb-right" /><nav className="auth-nav page-container"><button className="brand-button" onClick={() => onNavigate('home')}><Logo /></button><button className="back-link" onClick={() => onNavigate('home')}>← Volver al inicio</button></nav><div className="auth-layout page-container"><div className="auth-pitch"><div className="eyebrow">{isRegister ? 'Empieza con claridad' : 'Bienvenido de vuelta'}</div><h1>{isRegister ? <>Construye un negocio<br /><em>que avance.</em></> : <>Todo tu negocio.<br /><em>En control.</em></>}</h1><p>{isRegister ? 'Crea tu espacio de trabajo y descubre una forma más simple de operar, medir y crecer.' : 'Accede a tu espacio de trabajo y continúa donde lo dejaste.'}</p><div className="auth-benefits"><span>✦ Multiempresa desde el inicio</span><span>✦ Datos aislados y seguros</span><span>✦ Sin tarjeta de crédito</span></div></div><div className="auth-card"><div className="auth-card-top"><span className="eyebrow">{isRegister ? 'Crear espacio' : 'Acceder'}</span><h2>{isRegister ? 'Tu operación empieza aquí.' : 'Hola de nuevo.'}</h2><p>{isRegister ? 'Configura tu empresa en menos de dos minutos.' : 'Ingresa tus datos para continuar.'}</p></div><form onSubmit={submit}>{isRegister && <><label>Nombre de la empresa<input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Ej. Grupo Horizonte" required minLength={2} /></label><label>Tu nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Carlos Sequeira" required minLength={2} /></label></>}<label>Correo electrónico<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></label>{!isRegister && <div className="form-helper"><label className="checkbox-label"><input type="checkbox" /> Recordarme</label><a href="#">¿Olvidaste tu contraseña?</a></div>}{message && <div className={`form-message ${message.includes('creada') ? 'success' : ''}`}>{message}</div>}<button className="button button-large auth-submit" disabled={loading}>{loading ? 'Procesando...' : isRegister ? 'Crear mi empresa ↗' : 'Iniciar sesión ↗'}</button></form><div className="auth-switch">{isRegister ? '¿Ya tienes una cuenta?' : '¿Todavía no tienes un espacio?'} <button onClick={() => onNavigate(isRegister ? 'login' : 'register')}>{isRegister ? 'Inicia sesión' : 'Crea tu empresa'}</button></div></div></div></main>;
+  return <main className="auth-page"><div className="auth-orb orb-left" /><div className="auth-orb orb-right" /><nav className="auth-nav page-container"><button className="brand-button" onClick={() => onNavigate('home')}><Logo /></button><button className="back-link" onClick={() => onNavigate('home')}>← Volver al inicio</button></nav><div className="auth-layout page-container"><div className="auth-pitch"><div className="eyebrow">{isRegister ? 'Empieza con claridad' : 'Bienvenido de vuelta'}</div><h1>{isRegister ? <>Construye un negocio<br /><em>que avance.</em></> : <>Todo tu negocio.<br /><em>En control.</em></>}</h1><p>{isRegister ? 'Crea tu espacio de trabajo y descubre una forma más simple de operar, medir y crecer.' : 'Accede a tu espacio de trabajo y continúa donde lo dejaste.'}</p><div className="auth-benefits"><span>✦ Multiempresa desde el inicio</span><span>✦ Datos aislados y seguros</span><span>✦ Sin tarjeta de crédito</span></div></div><div className="auth-card"><div className="auth-card-top"><span className="eyebrow">{isRegister ? 'Crear espacio' : 'Acceder'}</span><h2>{isRegister ? 'Tu operación empieza aquí.' : 'Hola de nuevo.'}</h2><p>{isRegister ? 'Configura tu empresa en menos de dos minutos.' : 'Ingresa tus datos para continuar.'}</p></div><form onSubmit={submit}>{isRegister && <><label>Nombre de la empresa<input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Ej. Grupo Horizonte" required minLength={2} /></label><label>Tu nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Carlos Sequeira" required minLength={2} /></label></>}<label>Correo electrónico<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></label>{!isRegister && <div className="form-helper"><label className="checkbox-label"><input type="checkbox" /> Recordarme</label><button type="button" className="text-link" onClick={() => void resetPassword()} disabled={loading}>¿Olvidaste tu contraseña?</button></div>}{message && <div className={`form-message ${message.includes('creada') ? 'success' : ''}`}>{message}</div>}<button className="button button-large auth-submit" disabled={loading}>{loading ? 'Procesando...' : isRegister ? 'Crear mi empresa ↗' : 'Iniciar sesión ↗'}</button></form><div className="auth-switch">{isRegister ? '¿Ya tienes una cuenta?' : '¿Todavía no tienes un espacio?'} <button onClick={() => onNavigate(isRegister ? 'login' : 'register')}>{isRegister ? 'Inicia sesión' : 'Crea tu empresa'}</button></div></div></div></main>;
+}
+
+export function LoginPage() {
+  const router = useRouter();
+  return <AuthCard mode="login" onNavigate={(view) => router.push(view === 'home' ? '/' : '/register')} />;
+}
+
+export function RegisterPage() {
+  const router = useRouter();
+  return <AuthCard mode="register" onNavigate={(view) => router.push(view === 'home' ? '/' : '/login')} />;
 }
 
 export default function MarketingSite() {

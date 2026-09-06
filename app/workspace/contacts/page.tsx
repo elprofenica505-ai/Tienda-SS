@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -21,14 +21,14 @@ function ContactsContent() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try { const response = await fetch(`/api/contacts?type=${tab}${showArchived ? '&includeArchived=true' : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los contactos.'); setContacts(data.contacts || []); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando contactos.'); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { void load(); }, [authUser, tenant, tab, showArchived]);
+  }, [authUser, tenant, tab, showArchived]);
+  useEffect(() => { void load(); }, [load]);
 
   function openNew() { setEditing(null); setForm({ name: '', email: '', phone: '', taxId: '', address: '', notes: '' }); setShowForm(true); }
   function openEdit(item: Contact) { setShowForm(false); setEditing({ ...item, type: tab }); }

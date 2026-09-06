@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -22,14 +22,14 @@ function ReceivablesContent() {
   const [showPayment, setShowPayment] = useState(false);
   const [form, setForm] = useState<PaymentForm>({ saleId: '', amount: '', paymentMethod: 'cash', notes: '' });
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try { const response = await fetch('/api/receivables', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar las cuentas.'); setCustomers(data.customers || []); setSales(data.sales || []); setSummary(data.summary || { receivables: 0, balance: 0, collected: 0 }); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando cuentas por cobrar.'); }
     finally { setLoading(false); }
-  }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
   async function pay(event: FormEvent) { event.preventDefault(); if (!authUser || !tenant) return; setSaving(true); setMessage(''); try { const response = await fetch('/api/receivables', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ ...form, amount: Number(form.amount) }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo registrar el pago.'); setMessage(`Pago registrado. Saldo restante: $${Number(data.balanceDue).toFixed(2)}.`); setShowPayment(false); setForm({ saleId: '', amount: '', paymentMethod: 'cash', notes: '' }); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo registrar el pago.'); } finally { setSaving(false); } }
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando cuentas por cobrar...</div>;
   if (!authUser || !tenant || !member) { router.replace('/'); return null; }

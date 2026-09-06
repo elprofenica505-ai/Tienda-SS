@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 
@@ -44,5 +45,18 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     console.error('tenant_me_failed', { message: error instanceof Error ? error.message : 'unknown' });
     return NextResponse.json({ error: 'No se pudo cargar el espacio de trabajo.' }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const context = await requireTenantPermission(request, 'dashboard', 'edit');
+    const body = await request.json();
+    if (typeof body.onboardingCompleted !== 'boolean') return NextResponse.json({ error: 'Estado de onboarding inválido.' }, { status: 400 });
+    await getAdminDb().collection('tenants').doc(context.tenantId).update({ onboardingCompleted: body.onboardingCompleted, updatedAt: new Date() });
+    return NextResponse.json({ ok: true, onboardingCompleted: body.onboardingCompleted }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) {
+    const response = tenantErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
   }
 }

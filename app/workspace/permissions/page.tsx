@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -69,7 +69,7 @@ function PermissionsContent() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
     try {
@@ -89,11 +89,11 @@ function PermissionsContent() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [authUser, tenant]);
 
   useEffect(() => {
     void load();
-  }, [authUser, tenant]);
+  }, [load]);
 
   function toggle(moduleKey: string, action: Action) {
     if (selectedRole === 'owner') return;

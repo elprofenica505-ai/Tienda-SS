@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 
@@ -9,8 +9,8 @@ type Billing = { plans: Record<string, Plan>; subscription: { plan: string; stat
 
 function BillingContent() {
   const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant(); const [billing, setBilling] = useState<Billing | null>(null); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [message, setMessage] = useState('');
-  async function load() { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/billing', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar facturación.'); setBilling(data); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando facturación.'); } finally { setLoading(false); } }
-  useEffect(() => { void load(); }, [authUser, tenant]);
+  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch('/api/billing', { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar facturación.'); setBilling(data); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando facturación.'); } finally { setLoading(false); } }, [authUser, tenant]);
+  useEffect(() => { void load(); }, [load]);
   useEffect(() => { const params = new URLSearchParams(window.location.search); if (params.get('success')) setMessage('Checkout completado. Stripe confirmará la suscripción mediante webhook.'); if (params.get('canceled')) setMessage('El checkout fue cancelado; no se realizó ningún cobro.'); }, []);
   async function action(action: string, plan?: string) { if (!authUser || !tenant) return; setSaving(true); setMessage(''); try { const response = await fetch('/api/billing', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ action, plan }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo abrir facturación.'); if (data.url) window.location.assign(data.url); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo iniciar la operación.'); } finally { setSaving(false); } }
   if (tenantLoading || loading || !billing) return <div className="workspace-loading">Cargando suscripción...</div>;

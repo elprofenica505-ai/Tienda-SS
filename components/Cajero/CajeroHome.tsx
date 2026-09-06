@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { collection, getDocs, updateDoc, doc, query, where, serverTimestamp, getDoc, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Orden, UsuarioSistema } from '@/components/shared/types';
@@ -73,7 +73,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
   };
 
   // Cargar ventas completadas del día por este cajero para el cierre
-  const cargarVentasDelTurno = async () => {
+  const cargarVentasDelTurno = useCallback(async () => {
     try {
       const q = query(collection(db, 'orders'), where('estado', '==', 'completed'));
       const querySnapshot = await getDocs(q);
@@ -88,10 +88,10 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     } catch (e) {
       console.error('Error al cargar ventas del turno:', e);
     }
-  };
+  }, [user]);
 
   // Cargar abonos realizados por este cajero en la fecha actual para el cierre
-  const cargarAbonosDelTurno = async () => {
+  const cargarAbonosDelTurno = useCallback(async () => {
     try {
       const q = query(collection(db, 'creditos'));
       const querySnapshot = await getDocs(q);
@@ -114,14 +114,14 @@ export default function CajeroHome({ user, onCerrar }: Props) {
     } catch (e) {
       console.error('Error al cargar abonos del turno:', e);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     cargarPendientes();
     cargarCreditos();
     cargarVentasDelTurno();
     cargarAbonosDelTurno();
-  }, []);
+  }, [cargarVentasDelTurno, cargarAbonosDelTurno]);
 
   // Manejo de escáner láser o búsqueda por ID de orden
   const handleBusquedaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -472,7 +472,7 @@ export default function CajeroHome({ user, onCerrar }: Props) {
                       <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0' }}>Vendedor: {orden.vendedorNombre}</p>
                       <p style={{ fontSize: 13, fontWeight: 800, margin: 0, color: '#34d399' }}>Total: ${orden.total?.toLocaleString()}</p>
                     </div>
-                    <button style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); setOrdenSeleccionada(orden); }} style={{ background: '#4f46e5', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
                       Seleccionar
                     </button>
                   </div>
