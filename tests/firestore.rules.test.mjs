@@ -21,6 +21,7 @@ const SUPERVISOR_A = 'supervisor-a';
 const PURCHASES_A = 'purchases-a';
 const READ_ONLY_A = 'read-only-a';
 const DISPATCHER_A = 'dispatcher-a';
+const CASHIER_A = 'cashier-a';
 
 let testEnv;
 
@@ -78,6 +79,7 @@ before(async () => {
   await seedMember(TENANT_A, PURCHASES_A, 'compras');
   await seedMember(TENANT_A, READ_ONLY_A, 'solo_lectura');
   await seedMember(TENANT_A, DISPATCHER_A, 'despachador');
+  await seedMember(TENANT_A, CASHIER_A, 'cajero');
   await seedDocument(TENANT_A, 'products', 'product-a', { name: 'Product A', stock: 10 });
   await seedDocument(TENANT_B, 'products', 'product-b', { name: 'Product B', stock: 20 });
 });
@@ -149,6 +151,24 @@ describe('Firestore tenant isolation', () => {
     await assertSucceeds(setDoc(doc(dbFor(DISPATCHER_A), path(TENANT_A, 'orders', 'dispatch-order')), { status: 'ready' }));
     await assertFails(setDoc(doc(dbFor(READ_ONLY_A), path(TENANT_A, 'sales', 'read-only-sale')), { total: 10 }));
     await assertSucceeds(getDoc(doc(dbFor(READ_ONLY_A), path(TENANT_A, 'products', 'product-a'))));
+  });
+
+  it('validates Supervisor de Sucursal permissions in Firestore', async () => {
+    const supervisorDb = dbFor(SUPERVISOR_A);
+    await assertSucceeds(setDoc(doc(supervisorDb, path(TENANT_A, 'sales', 'supervisor-sale-2')), { total: 150 }));
+    await assertSucceeds(setDoc(doc(supervisorDb, path(TENANT_A, 'expenses', 'supervisor-expense')), { total: 25 }));
+    await assertSucceeds(setDoc(doc(supervisorDb, path(TENANT_A, 'members', 'supervisor-member')), { role: 'cajero', status: 'active' }));
+    await assertSucceeds(setDoc(doc(supervisorDb, path(TENANT_A, 'products', 'supervisor-product')), { name: 'Supervisor product' }));
+    await assertFails(deleteDoc(doc(supervisorDb, path(TENANT_A, 'products', 'product-a'))));
+  });
+
+  it('validates Cajero permissions in Firestore', async () => {
+    const cashierDb = dbFor(CASHIER_A);
+    await assertSucceeds(setDoc(doc(cashierDb, path(TENANT_A, 'sales', 'cashier-sale')), { total: 80 }));
+    await assertSucceeds(setDoc(doc(cashierDb, path(TENANT_A, 'cashMovements', 'cashier-movement')), { amount: 80 }));
+    await assertSucceeds(setDoc(doc(cashierDb, path(TENANT_A, 'customers', 'cashier-customer')), { name: 'Customer' }));
+    await assertFails(setDoc(doc(cashierDb, path(TENANT_A, 'products', 'cashier-product')), { name: 'Should be denied' }));
+    await assertFails(setDoc(doc(cashierDb, path(TENANT_A, 'members', 'cashier-member')), { role: 'vendedor', status: 'active' }));
   });
 
   it('denies direct access to legacy global collections', async () => {

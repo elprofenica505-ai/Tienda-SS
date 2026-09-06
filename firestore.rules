@@ -50,6 +50,10 @@ service cloud.firestore {
     function validMemberWrite() {
       return validMemberRole() && validMemberStatus();
     }
+    function validBranchMemberWrite() {
+      return validMemberStatus()
+        && request.resource.data.role in ['vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura'];
+    }
     match /tenants/{tenantId} {
       allow read: if isMember(tenantId);
       allow create: if signedIn() && request.auth.uid == tenantId;
@@ -57,7 +61,8 @@ service cloud.firestore {
       allow delete: if false;
       match /members/{uid} {
         allow read: if isMember(tenantId);
-        allow create, update: if isManager(tenantId) && validMemberWrite();
+        allow create, update: if (isManager(tenantId) && validMemberWrite())
+          || (hasRole(tenantId, 'supervisor_sucursal') && validBranchMemberWrite());
         allow delete: if isManager(tenantId);
       }
       match /settings/{documentId} {
