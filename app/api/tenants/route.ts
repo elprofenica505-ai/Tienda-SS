@@ -74,7 +74,16 @@ export async function POST(request: NextRequest) {
     }
 
     console.error('tenant_creation_failed', { message });
-    return NextResponse.json({ error: 'No se pudo crear la empresa.' }, { status: 500 });
+    if (message.includes('FIREBASE_SERVICE_ACCOUNT_KEY')) {
+      return NextResponse.json({ error: 'La conexión del servidor con Firebase no está configurada correctamente en Vercel.' }, { status: 503 });
+    }
+    if (message.includes('permission-denied') || message.includes('Missing or insufficient permissions')) {
+      return NextResponse.json({ error: 'Firebase rechazó el acceso del servidor. Revisa la cuenta de servicio y que Firestore esté creado en este proyecto.' }, { status: 503 });
+    }
+    if (message.includes('5 NOT_FOUND') || message.includes('The database')) {
+      return NextResponse.json({ error: 'Firestore todavía no está creado en el proyecto de Firebase.' }, { status: 503 });
+    }
+    return NextResponse.json({ error: 'No se pudo crear la empresa. Revisa los registros de Vercel para ver el detalle.' }, { status: 500 });
   }
 }
 
