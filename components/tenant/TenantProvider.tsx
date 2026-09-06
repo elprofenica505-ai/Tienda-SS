@@ -4,7 +4,19 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
-export type TenantRole = 'owner' | 'admin' | 'jefe' | 'vendedor' | 'bodega' | 'chofer' | 'cajero';
+export type TenantRole =
+  | 'owner'
+  | 'admin'
+  | 'gerente'
+  | 'supervisor_sucursal'
+  | 'vendedor'
+  | 'cajero'
+  | 'bodega'
+  | 'compras'
+  | 'chofer'
+  | 'despachador'
+  | 'solo_lectura'
+  | 'jefe';
 
 export type Tenant = {
   id: string;
