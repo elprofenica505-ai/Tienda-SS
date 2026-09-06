@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getAdminDb } from '../lib/firebaseAdmin';
 
 type AnyRecord = Record<string, unknown>;
@@ -103,7 +104,7 @@ function normalize(value: string): string {
     .replace(/[\s-]+/g, '_');
 }
 
-function roleFor(value: unknown): { role: TargetRole; reason: string } {
+export function roleFor(value: unknown): { role: TargetRole; reason: string } {
   const raw = text(value);
   const normalized = normalize(raw);
   if (VALID_ROLES.has(normalized as TargetRole)) {
@@ -241,7 +242,9 @@ async function main() {
   console.log(JSON.stringify({ mode: report.mode, counts: report.counts, report: options.report, warnings: report.warnings }, null, 2));
 }
 
-main().catch((error: unknown) => {
-  console.error('migration_user_roles_failed', { message: error instanceof Error ? error.message : 'Unknown error' });
-  process.exitCode = 1;
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main().catch((error: unknown) => {
+    console.error('migration_user_roles_failed', { message: error instanceof Error ? error.message : 'Unknown error' });
+    process.exitCode = 1;
+  });
+}
