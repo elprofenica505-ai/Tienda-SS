@@ -114,7 +114,7 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         window.location.href = '/onboarding';
       } else {
         await loginWithFirebase(email.trim(), password);
-        window.location.href = '/dashboard';
+        window.location.href = '/onboarding';
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Ocurrió un error.');
