@@ -19,15 +19,32 @@ export interface TenantContext {
   email?: string;
 }
 
+const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const TENANT_ROLES: readonly TenantRole[] = [
+  'owner',
+  'admin',
+  'jefe',
+  'vendedor',
+  'bodega',
+  'chofer',
+  'cajero',
+];
+
+function isTenantRole(value: unknown): value is TenantRole {
+  return typeof value === 'string' && TENANT_ROLES.includes(value as TenantRole);
+}
+
+function getBearerToken(request: NextRequest): string {
+  const header = request.headers.get('authorization')?.trim() || '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match?.[1].trim() || '';
+}
+
 export async function requireTenantMember(
   request: NextRequest,
   allowedRoles?: TenantRole[]
 ): Promise<TenantContext> {
-  const header = request.headers.get('authorization') || '';
-  const token = header.startsWith('Bearer ')
-    ? header.slice(7).trim()
-    : '';
-
+  const token = getBearerToken(request);
   if (!token) {
     throw new Error('UNAUTHENTICATED');
   }
@@ -36,6 +53,9 @@ export async function requireTenantMember(
   const requestedTenant = request.headers.get('x-tenant-id')?.trim();
 
   if (!requestedTenant) {
+    throw new Error('TENANT_REQUIRED');
+  }
+  if (!TENANT_ID_PATTERN.test(requestedTenant)) {
     throw new Error('TENANT_REQUIRED');
   }
 
@@ -54,7 +74,11 @@ export async function requireTenantMember(
     throw new Error('FORBIDDEN');
   }
 
-  const role = member.data()?.role as TenantRole;
+  const roleValue = member.data()?.role;
+  if (!isTenantRole(roleValue)) {
+    throw new Error('FORBIDDEN');
+  }
+  const role = roleValue;
 
   if (allowedRoles && !allowedRoles.includes(role)) {
     throw new Error('FORBIDDEN');

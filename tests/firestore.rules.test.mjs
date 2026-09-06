@@ -120,6 +120,18 @@ describe('Firestore tenant isolation', () => {
     await assertFails(deleteDoc(doc(dbFor(OWNER_A), path(TENANT_B, 'members', OWNER_B))));
   });
 
+  it('rejects invalid member roles and statuses', async () => {
+    const ownerDb = dbFor(OWNER_A);
+    await assertFails(setDoc(doc(ownerDb, path(TENANT_A, 'members', 'invalid-role')), {
+      role: 'superadmin',
+      status: 'active',
+    }));
+    await assertFails(setDoc(doc(ownerDb, path(TENANT_A, 'members', 'invalid-status')), {
+      role: 'vendedor',
+      status: 'pending',
+    }));
+  });
+
   it('denies direct access to legacy global collections', async () => {
     await assertFails(getDoc(doc(dbFor(OWNER_A), 'products', 'legacy-product')));
     await assertFails(setDoc(doc(dbFor(OWNER_A), 'products', 'legacy-write'), { name: 'Legacy write' }));

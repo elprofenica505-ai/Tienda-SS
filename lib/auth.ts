@@ -7,7 +7,12 @@ import {
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 
-export type Rol = "jefe" | "vendedor" | "bodega" | "chofer";
+export const ROLES = ["jefe", "vendedor", "bodega", "chofer"] as const;
+export type Rol = (typeof ROLES)[number];
+
+function isRol(value: unknown): value is Rol {
+  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
+}
 
 export interface Usuario {
   id: string;
@@ -32,10 +37,18 @@ export async function obtenerPerfil(uid: string): Promise<Usuario> {
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error("Este usuario no tiene perfil asignado.");
   const data = snap.data();
+  if (!isRol(data.rol)) {
+    throw new Error("El perfil del usuario tiene un rol inválido.");
+  }
+
   return {
     id: uid,
-    email: data.email || "",
-    nombre: data.nombre || data.email || "Sin nombre",
+    email: typeof data.email === "string" ? data.email : "",
+    nombre: typeof data.nombre === "string" && data.nombre.trim()
+      ? data.nombre.trim()
+      : typeof data.email === "string" && data.email.trim()
+        ? data.email.trim()
+        : "Sin nombre",
     rol: data.rol,
     activo: data.activo !== false,
   };
