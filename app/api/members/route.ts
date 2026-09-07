@@ -4,7 +4,6 @@ import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/
 import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
 
 export const runtime = 'nodejs';
-const managerRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function errorResponse(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
@@ -47,5 +46,24 @@ export async function PATCH(request: NextRequest) {
     if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     await memberRef.update(changes);
     return NextResponse.json({ ok: true, uid, changes });
+  } catch (error: unknown) { return errorResponse(error); }
+}
+
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const context = await requireTenantPermission(request, 'members', 'delete');
+    const body = await request.json();
+    const uid = text(body.uid, 160);
+    if (!uid || uid === context.uid) return NextResponse.json({ error: 'No puedes eliminar tu propio usuario.' }, { status: 400 });
+
+    const memberRef = getAdminDb().collection('tenants').doc(context.tenantId).collection('members').doc(uid);
+    const member = await memberRef.get();
+    if (!member.exists) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
+    if (member.data()?.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede eliminarse desde este módulo.' }, { status: 403 });
+
+    await memberRef.update({ status: 'disabled', updatedAt: new Date(), updatedBy: context.uid });
+    await getAdminAuth().updateUser(uid, { disabled: true });
+    return NextResponse.json({ ok: true, uid, status: 'disabled' });
   } catch (error: unknown) { return errorResponse(error); }
 }

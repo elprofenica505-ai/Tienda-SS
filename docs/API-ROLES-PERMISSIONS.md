@@ -90,7 +90,7 @@ La política global de API cubre las siguientes rutas. El módulo indicado es la
 | `/api/contacts` | `GET`, `POST`, `PATCH`, `DELETE` | `contacts` | Clientes y proveedores. |
 | `/api/finance` | `GET`, `POST`, `PATCH`, `DELETE` | `finance` | Gastos y movimientos financieros. |
 | `/api/members` | `GET`, `POST`, `PATCH`, `DELETE` | `members` | Miembros, roles y estado de acceso. |
-| `/api/usuarios` | `GET`, `POST`, `PATCH`, `DELETE` | `members` | Compatibilidad con usuarios legacy. |
+| `/api/usuarios` | `GET`, `POST`, `PATCH`, `DELETE` | `members` | Alias de compatibilidad; delega en `/api/members` y no contiene autorización propia. |
 | `/api/permissions` | `GET`, `PATCH` | `members` | Consultar y guardar la matriz configurable del tenant. |
 | `/api/notifications` | `GET`, `PATCH` | `dashboard` | Notificaciones del espacio de trabajo. |
 | `/api/receivables` | `GET`, `POST`, `PATCH`, `DELETE` | `receivables` | Cuentas por cobrar y pagos. |
@@ -110,7 +110,7 @@ Estas rutas no utilizan la autorización de tenant normal:
 | `/api/tenants` | `POST` | Alta inicial de una empresa y su propietario. |
 | `/api/billing/webhook` | `POST` | Webhook de Stripe; debe validar su firma propia. |
 
-Cualquier endpoint nuevo debe añadirse explícitamente a la política centralizada en `lib/api-policy.ts`. Si no está registrado, el middleware responde `403` para evitar que una ruta nueva quede expuesta accidentalmente.
+`/api/members` es la implementación única para listar, crear, editar y deshabilitar miembros. `/api/usuarios` se conserva únicamente como alias legacy para no romper clientes antiguos; no debe recibir lógica nueva. Cualquier endpoint nuevo debe añadirse explícitamente a la política centralizada en `lib/api-policy.ts`. Si no está registrado, el middleware responde `403` para evitar que una ruta nueva quede expuesta accidentalmente.
 
 ## Configuración personalizada por tenant
 
