@@ -2,12 +2,12 @@
 
 **Rama:** `SaaS-MultiTenant-Profesional`  
 **Estado inicial:** 56% de madurez estimada  
-**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 1/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
+**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 2/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
 
 ## Tareas pendientes
 
 - [x] **1. P0.1 — Consolidar autorización multi-tenant y membresías.** Eliminar caminos administrativos duplicados, centralizar la guardia de tenant/permisos y garantizar que todas las rutas críticas usan el mismo contexto verificado.
-- [ ] **2. P0.2 — Crear matriz de pruebas de autorización API.** Cubrir 401, tenant ausente, tenant cruzado, miembro inactivo, rol insuficiente, payload inválido y errores internos en las 19 rutas.
+- [x] **2. P0.2 — Crear matriz de pruebas de autorización API.** Cubrir 401, tenant ausente, tenant cruzado, miembro inactivo, rol insuficiente, payload inválido y errores internos en las 19 rutas.
 - [ ] **3. P0.3 — Implementar invitaciones empresariales seguras.** Tokens de un solo uso, expiración, aceptación, revocación, reenvío y auditoría.
 - [ ] **4. P0.4 — Endurecer identidad y autenticación.** Verificación de correo, recuperación probada, MFA para administradores y política de sesiones.
 - [ ] **5. P0.5 — Convertir rate limiting en distribuido.** Límites por IP, UID, tenant y endpoint con almacenamiento compartido y pruebas anti-abuso.
@@ -31,3 +31,15 @@
 ## Criterio global de 100%
 
 El sistema solo se declarará cerrado cuando typecheck, lint, tests unitarios, integración, reglas Firestore, E2E y build pasen en CI; no exista acceso cross-tenant; los límites funcionen; las operaciones críticas sean auditables; existan observabilidad y restore probado; y Stripe pueda manejar duplicados, fallos y estados de suscripción sin corrupción.
+
+### Desglose de la tarea 2 — matriz de autorización API
+
+- [x] Caso global: cada ruta protegida rechaza Authorization ausente con 401.
+- [x] Caso global: cada ruta protegida rechaza x-tenant-id ausente o inválido con 400.
+- [x] Caso global: token inválido o membresía inexistente/inactiva no obtiene acceso.
+- [x] Caso global: usuario autenticado en tenant A no puede leer ni mutar tenant B.
+- [x] Caso global: rol sin permiso recibe 403 aunque manipule el body.
+- [x] Caso global: payload JSON inválido o incompleto recibe 400 sin escribir datos.
+- [x] Caso global: errores internos no filtran secretos ni trazas al cliente.
+- [x] Caso por método: GET/POST/PATCH/DELETE respeta la acción de permisos correspondiente.
+- [x] Caso legacy: `/api/usuarios` conserva compatibilidad pero usa exactamente la misma guardia que `/api/members`.
