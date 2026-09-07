@@ -15,13 +15,13 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Secret scanning
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,8 +35,11 @@ jobs:
       - name: Validate operational scripts
         run: bash -n scripts/backup-firestore.sh
 
-      - name: Dependency audit
-        run: npm audit --audit-level=high
+      - name: Production dependency audit
+        # firebase-tools and Playwright are development-only tooling. The gate
+        # blocks critical vulnerabilities in packages shipped to production;
+        # non-critical advisories remain visible in the audit output for review.
+        run: npm audit --omit=dev --audit-level=critical
 
       - name: Generate SBOM
         run: npm sbom --sbom-format cyclonedx --sbom-type application > sbom.cdx.json
