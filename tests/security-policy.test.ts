@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { assertTokenSessionPolicy } from '@/lib/auth-policy';
+import { assertTokenSessionPolicy, isValidAuthEmail, normalizeAuthEmail } from '@/lib/auth-policy';
 import { assertBranchAccess, assertWritableFields, filterByBranch } from '@/lib/data-scope';
 import { buildRateLimitKey } from '@/lib/rate-limit';
 
@@ -14,6 +14,12 @@ const baseToken = {
 test('la política rechaza sesiones antiguas y exige MFA a administradores', () => {
   assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_000 + 12 * 60 * 60 + 1), /SESSION_EXPIRED/);
   assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001), /MFA_REQUIRED/);
+});
+
+test('recuperación normaliza y valida el correo de forma determinista', () => {
+  assert.equal(normalizeAuthEmail('  Admin@Example.COM '), 'admin@example.com');
+  assert.equal(isValidAuthEmail('admin@example.com'), true);
+  assert.equal(isValidAuthEmail('correo-inválido'), false);
 });
 
 test('la política exige correo verificado', () => {

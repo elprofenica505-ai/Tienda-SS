@@ -2,14 +2,14 @@
 
 **Rama:** `SaaS-MultiTenant-Profesional`  
 **Estado inicial:** 56% de madurez estimada  
-**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 3/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
+**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 4/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
 
 ## Tareas pendientes
 
 - [x] **1. P0.1 — Consolidar autorización multi-tenant y membresías.** Eliminar caminos administrativos duplicados, centralizar la guardia de tenant/permisos y garantizar que todas las rutas críticas usan el mismo contexto verificado.
 - [x] **2. P0.2 — Crear matriz de pruebas de autorización API.** Cubrir 401, tenant ausente, tenant cruzado, miembro inactivo, rol insuficiente, payload inválido y errores internos en las 19 rutas.
 - [x] **3. P0.3 — Implementar invitaciones empresariales seguras.** Tokens de un solo uso, expiración, aceptación, revocación, reenvío y auditoría.
-- [ ] **4. P0.4 — Endurecer identidad y autenticación.** Verificación de correo, recuperación probada, MFA para administradores y política de sesiones.
+- [x] **4. P0.4 — Endurecer identidad y autenticación.** Verificación de correo, recuperación probada, MFA para administradores y política de sesiones.
 - [ ] **5. P0.5 — Convertir rate limiting en distribuido.** Límites por IP, UID, tenant y endpoint con almacenamiento compartido y pruebas anti-abuso.
 - [ ] **6. P0.6 — Aplicar autorización por campo, sucursal y sensibilidad.** Evitar que roles operativos lean o modifiquen información fuera de su ámbito.
 - [ ] **7. P1.1 — Ampliar entitlements por plan.** Limitar sucursales, ventas, almacenamiento, exportaciones, API y funcionalidades premium desde backend.

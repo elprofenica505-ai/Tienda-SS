@@ -2,8 +2,9 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { login as loginWithFirebase } from '@/lib/auth';
-import { sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import { login as loginWithFirebase, requestPasswordRecovery, sendVerification } from '@/lib/auth';
+import { completeMfaSignIn, beginMfaSignIn, type MfaChallenge } from '@/lib/mfa';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 type View = 'home' | 'login' | 'register';
@@ -101,6 +102,8 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState<MfaChallenge | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   async function resetPassword() {
     if (!email.trim()) {
@@ -110,13 +113,27 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
     setLoading(true);
     setMessage('');
     try {
-      await sendPasswordResetEmail(auth, email.trim());
-      setMessage('Te enviamos un enlace para restablecer tu contraseña.');
+      await requestPasswordRecovery(email);
+      setMessage('Te enviamos un enlace para restablecer tu contraseña. Revisa también la carpeta de spam.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo enviar el enlace de recuperación.');
     } finally {
       setLoading(false);
     }
+  }
+
+  async function finishMfa() {
+    if (!mfaChallenge) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      await completeMfaSignIn(mfaChallenge.resolver, mfaChallenge.verificationId, mfaCode);
+      mfaChallenge.verifier.clear();
+      setMfaChallenge(null);
+      window.location.href = '/onboarding';
+    } catch (error) {
+      setMessage(error instanceof Error && error.message === 'CODE_FORMAT' ? 'El código MFA debe tener seis dígitos.' : 'No se pudo verificar el segundo factor.');
+    } finally { setLoading(false); }
   }
 
   async function submit(event: FormEvent) {
@@ -129,13 +146,24 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudo crear la empresa.');
         const createdUser = await signInWithEmailAndPassword(auth, email.trim(), password);
-        await sendEmailVerification(createdUser.user);
+        await sendVerification(createdUser.user);
+        await signOut(auth);
         setMessage('Cuenta creada. Revisa tu correo y confirma la dirección antes de entrar al espacio de trabajo.');
       } else {
-        await loginWithFirebase(email.trim(), password);
+        try {
+          await loginWithFirebase(email.trim(), password);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'auth/multi-factor-auth-required') {
+            setMfaChallenge(await beginMfaSignIn(error, 'mfa-login-recaptcha'));
+            setMessage('Te enviamos un código al segundo factor inscrito.');
+            return;
+          }
+          throw error;
+        }
         const signedInUser = auth.currentUser;
         if (!signedInUser?.emailVerified) {
-          if (signedInUser) await sendEmailVerification(signedInUser);
+          if (signedInUser) await sendVerification(signedInUser);
+          await signOut(auth);
           throw new Error('Verifica tu correo electrónico. Te enviamos un nuevo enlace de confirmación.');
         }
         window.location.href = '/onboarding';
@@ -145,7 +173,7 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
     } finally { setLoading(false); }
   }
 
-  return <main className="auth-page"><div className="auth-orb orb-left" /><div className="auth-orb orb-right" /><nav className="auth-nav page-container"><button className="brand-button" onClick={() => onNavigate('home')}><Logo /></button><button className="back-link" onClick={() => onNavigate('home')}>← Volver al inicio</button></nav><div className="auth-layout page-container"><div className="auth-pitch"><div className="eyebrow">{isRegister ? 'Empieza con claridad' : 'Bienvenido de vuelta'}</div><h1>{isRegister ? <>Construye un negocio<br /><em>que avance.</em></> : <>Todo tu negocio.<br /><em>En control.</em></>}</h1><p>{isRegister ? 'Crea tu espacio de trabajo y descubre una forma más simple de operar, medir y crecer.' : 'Accede a tu espacio de trabajo y continúa donde lo dejaste.'}</p><div className="auth-benefits"><span>✦ Multiempresa desde el inicio</span><span>✦ Datos aislados y seguros</span><span>✦ Sin tarjeta de crédito</span></div></div><div className="auth-card"><div className="auth-card-top"><span className="eyebrow">{isRegister ? 'Crear espacio' : 'Acceder'}</span><h2>{isRegister ? 'Tu operación empieza aquí.' : 'Hola de nuevo.'}</h2><p>{isRegister ? 'Configura tu empresa en menos de dos minutos.' : 'Ingresa tus datos para continuar.'}</p></div><form onSubmit={submit}>{isRegister && <><label>Nombre de la empresa<input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Ej. Grupo Horizonte" required minLength={2} /></label><label>Tu nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Carlos Sequeira" required minLength={2} /></label></>}<label>Correo electrónico<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></label>{!isRegister && <div className="form-helper"><label className="checkbox-label"><input type="checkbox" /> Recordarme</label><button type="button" className="text-link" onClick={() => void resetPassword()} disabled={loading}>¿Olvidaste tu contraseña?</button></div>}{message && <div className={`form-message ${message.includes('creada') ? 'success' : ''}`}>{message}</div>}<button className="button button-large auth-submit" disabled={loading}>{loading ? 'Procesando...' : isRegister ? 'Crear mi empresa ↗' : 'Iniciar sesión ↗'}</button></form><div className="auth-switch">{isRegister ? '¿Ya tienes una cuenta?' : '¿Todavía no tienes un espacio?'} <button onClick={() => onNavigate(isRegister ? 'login' : 'register')}>{isRegister ? 'Inicia sesión' : 'Crea tu empresa'}</button></div></div></div></main>;
+  return <main className="auth-page"><div className="auth-orb orb-left" /><div className="auth-orb orb-right" /><nav className="auth-nav page-container"><button className="brand-button" onClick={() => onNavigate('home')}><Logo /></button><button className="back-link" onClick={() => onNavigate('home')}>← Volver al inicio</button></nav><div className="auth-layout page-container"><div className="auth-pitch"><div className="eyebrow">{isRegister ? 'Empieza con claridad' : 'Bienvenido de vuelta'}</div><h1>{isRegister ? <>Construye un negocio<br /><em>que avance.</em></> : <>Todo tu negocio.<br /><em>En control.</em></>}</h1><p>{isRegister ? 'Crea tu espacio de trabajo y descubre una forma más simple de operar, medir y crecer.' : 'Accede a tu espacio de trabajo y continúa donde lo dejaste.'}</p><div className="auth-benefits"><span>✦ Multiempresa desde el inicio</span><span>✦ Datos aislados y seguros</span><span>✦ Sin tarjeta de crédito</span></div></div><div className="auth-card"><div className="auth-card-top"><span className="eyebrow">{isRegister ? 'Crear espacio' : 'Acceder'}</span><h2>{isRegister ? 'Tu operación empieza aquí.' : 'Hola de nuevo.'}</h2><p>{isRegister ? 'Configura tu empresa en menos de dos minutos.' : 'Ingresa tus datos para continuar.'}</p></div><form onSubmit={mfaChallenge ? (event) => { event.preventDefault(); void finishMfa(); } : submit}>{mfaChallenge ? <><label>Código MFA<input value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="123456" inputMode="numeric" required /></label><div id="mfa-login-recaptcha" /></> : isRegister && <><label>Nombre de la empresa<input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Ej. Grupo Horizonte" required minLength={2} /></label><label>Tu nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Carlos Sequeira" required minLength={2} /></label></>}<label>Correo electrónico<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></label>{!isRegister && <div className="form-helper"><label className="checkbox-label"><input type="checkbox" /> Recordarme</label><button type="button" className="text-link" onClick={() => void resetPassword()} disabled={loading}>¿Olvidaste tu contraseña?</button></div>}{message && <div className={`form-message ${message.includes('creada') ? 'success' : ''}`}>{message}</div>}<button className="button button-large auth-submit" disabled={loading}>{loading ? 'Procesando...' : mfaChallenge ? 'Verificar MFA ↗' : isRegister ? 'Crear mi empresa ↗' : 'Iniciar sesión ↗'}</button></form><div className="auth-switch">{isRegister ? '¿Ya tienes una cuenta?' : '¿Todavía no tienes un espacio?'} <button onClick={() => onNavigate(isRegister ? 'login' : 'register')}>{isRegister ? 'Inicia sesión' : 'Crea tu empresa'}</button></div></div></div></main>;
 }
 
 export function LoginPage() {

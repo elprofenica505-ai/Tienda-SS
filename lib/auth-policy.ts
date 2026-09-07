@@ -2,6 +2,14 @@ import type { DecodedIdToken } from 'firebase-admin/auth';
 
 const DEFAULT_MAX_SESSION_AGE_SECONDS = 12 * 60 * 60;
 
+export function normalizeAuthEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function isValidAuthEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.\S+$/.test(normalizeAuthEmail(value));
+}
+
 export type SessionPolicy = {
   maxAgeSeconds: number;
   requireVerifiedEmail: boolean;

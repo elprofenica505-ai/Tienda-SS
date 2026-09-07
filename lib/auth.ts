@@ -1,10 +1,13 @@
 import {
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
 } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { isValidAuthEmail, normalizeAuthEmail } from '@/lib/auth-policy';
 
 export const ROLES = [
   'owner',
@@ -44,8 +47,33 @@ function userToLegacyProfile(user: FirebaseUser): Usuario {
  * Firebase Auth is the source of truth for login. Tenant membership and role
  * are loaded by TenantProvider through /api/tenants/me.
  */
-export async function login(email: string, password: string): Promise<void> {
-  await signInWithEmailAndPassword(auth, email, password);
+function normalizedEmail(email: string): string {
+  return normalizeAuthEmail(email);
+}
+
+export async function login(email: string, password: string): Promise<FirebaseUser> {
+  const credential = await signInWithEmailAndPassword(auth, normalizedEmail(email), password);
+  return credential.user;
+}
+
+export async function sendVerification(user: FirebaseUser): Promise<void> {
+  await sendEmailVerification(user, {
+    url: `${window.location.origin}/login?verified=1`,
+    handleCodeInApp: false,
+  });
+}
+
+export async function requestPasswordRecovery(email: string): Promise<void> {
+  const value = normalizedEmail(email);
+  if (!isValidAuthEmail(value)) throw new Error('Introduce un correo válido.');
+  await sendPasswordResetEmail(auth, value, {
+    url: `${window.location.origin}/login?reset=1`,
+    handleCodeInApp: false,
+  });
+}
+
+export async function refreshSessionClaims(user: FirebaseUser) {
+  return user.getIdTokenResult(true);
 }
 
 /**
