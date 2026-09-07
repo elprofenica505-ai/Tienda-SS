@@ -20,6 +20,11 @@ test('middleware bloquea una API protegida sin tenant', async () => {
   assert.equal((await response.json()).error, 'Falta identificar la empresa.');
 });
 
+test('middleware permite descubrir el tenant sin cabecera previa', () => {
+  const response = middleware(request('/api/tenants/me', { Authorization: 'Bearer token' }));
+  assert.equal(response.status, 200);
+});
+
 test('middleware permite el health check público con cabeceras de seguridad', () => {
   const response = middleware(request('/api/health'));
   assert.equal(response.status, 200);
