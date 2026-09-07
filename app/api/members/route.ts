@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const tenantSnapshot = await tenantRef.get();
     const activeMembers = await memberRef.where('status', '==', 'active').get();
     const plan = tenantSnapshot.data()?.plan;
-    if (!hasCapacity(plan, 'members', activeMembers.size)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para agregar más.` }, { status: 402 });
+    if (!hasCapacity(plan, 'members', activeMembers.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para agregar más.` }, { status: 402 });
     const existing = await memberRef.where('email', '==', email).limit(1).get();
     if (!existing.empty && existing.docs[0].data().status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     let user;
@@ -45,7 +45,18 @@ export async function PATCH(request: NextRequest) {
     const current = member.data() || {}; if (uid === context.uid) return NextResponse.json({ error: 'No puedes cambiar tu propio acceso desde aquí.' }, { status: 400 }); if (current.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede modificarse desde este módulo.' }, { status: 403 });
     const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid };
     if (typeof body.role === 'string' && assignableRoles.includes(body.role as TenantRole)) changes.role = body.role;
-    if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) changes.status = body.status;
+    if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) {
+      if (body.status === 'active' && current.status !== 'active') {
+        const db = getAdminDb();
+        const [tenantSnapshot, activeMembers] = await Promise.all([
+          db.collection('tenants').doc(context.tenantId).get(),
+          db.collection('tenants').doc(context.tenantId).collection('members').where('status', '==', 'active').get(),
+        ]);
+        const plan = tenantSnapshot.data()?.plan;
+        if (!hasCapacity(plan, 'members', activeMembers.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para reactivar usuarios.` }, { status: 402 });
+      }
+      changes.status = body.status;
+    }
     if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     await memberRef.update(changes);
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.updated', entity: 'member', entityId: uid, before: current, after: { ...current, ...changes }, result: 'success' });

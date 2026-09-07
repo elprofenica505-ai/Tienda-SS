@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
 
+test('la capacidad considera el incremento solicitado y bloquea el siguiente recurso', () => {
+  assert.equal(hasCapacity('starter', 'products', 99, 1), true);
+  assert.equal(hasCapacity('starter', 'products', 100, 1), false);
+  assert.equal(hasCapacity('starter', 'members', 3, 1), false);
+});
+
 test('starter aplica límites de miembros y productos', () => {
   assert.equal(getEntitlementLimit('starter', 'members'), 3);
   assert.equal(getEntitlementLimit('starter', 'products'), 100);
