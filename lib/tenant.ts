@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import { assertTokenSessionPolicy } from '@/lib/auth-policy';
 import { normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 
@@ -22,6 +23,7 @@ export interface TenantContext {
   tenantId: string;
   role: TenantRole;
   email?: string;
+  branchIds: string[];
 }
 
 const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -59,7 +61,7 @@ export async function requireTenantMember(
     throw new Error('UNAUTHENTICATED');
   }
 
-  const decoded = await getAdminAuth().verifyIdToken(token);
+  const decoded = await getAdminAuth().verifyIdToken(token, true);
   const requestedTenant = request.headers.get('x-tenant-id')?.trim();
 
   if (!requestedTenant) {
@@ -89,16 +91,30 @@ export async function requireTenantMember(
     throw new Error('FORBIDDEN');
   }
   const role = roleValue;
+  try {
+    assertTokenSessionPolicy(decoded, role);
+  } catch (error) {
+    if (error instanceof Error && ['EMAIL_NOT_VERIFIED', 'SESSION_EXPIRED', 'MFA_REQUIRED'].includes(error.message)) {
+      throw error;
+    }
+    throw new Error('FORBIDDEN');
+  }
 
   if (allowedRoles && !allowedRoles.includes(role)) {
     throw new Error('FORBIDDEN');
   }
 
+  const rawBranchIds = member.data()?.branchIds;
+  const branchIds = Array.isArray(rawBranchIds)
+    ? rawBranchIds.filter((value): value is string => typeof value === 'string').slice(0, 100)
+    : [];
+
   return {
     uid: decoded.uid,
     tenantId: requestedTenant,
     role,
-    email: decoded.email
+    email: decoded.email,
+    branchIds,
   };
 }
 
@@ -129,6 +145,18 @@ export function tenantErrorResponse(error: unknown) {
 
   if (code === 'FORBIDDEN') {
     return { status: 403, body: { error: 'No tienes permiso para esta empresa.' } };
+  }
+
+  if (code === 'EMAIL_NOT_VERIFIED') {
+    return { status: 403, body: { error: 'Verifica tu correo electrónico antes de continuar.', code } };
+  }
+
+  if (code === 'SESSION_EXPIRED') {
+    return { status: 401, body: { error: 'Tu sesión expiró. Inicia sesión nuevamente.', code } };
+  }
+
+  if (code === 'MFA_REQUIRED') {
+    return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };
   }
 
   return { status: 500, body: { error: 'Error interno del servidor.' } };

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { assertBranchAccess } from '@/lib/data-scope';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -30,6 +32,9 @@ export async function POST(request: NextRequest) {
     const rawLines = Array.isArray(body.items) ? body.items as SaleLineInput[] : [];
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
     const customerId = text(body.customerId, 120);
+    const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || '';
+    if (branchId) assertBranchAccess(context, branchId);
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
     const discount = money(body.discount);
     if (!rawLines.length || !paymentMethod) return NextResponse.json({ error: 'Agrega productos y selecciona un método de pago.' }, { status: 400 });
     if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente guardado.' }, { status: 400 });
@@ -49,11 +54,16 @@ export async function POST(request: NextRequest) {
     const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
     const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
     const customerRef = customerId ? tenant.collection('customers').doc(customerId) : null;
+    const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
 
     const result = await db.runTransaction(async (transaction) => {
-      const snapshots = await transaction.getAll(...(customerRef ? [...productRefs, customerRef] : productRefs));
+      const readRefs = customerRef ? [...productRefs, customerRef] : productRefs;
+      if (idempotencyRef) readRefs.push(idempotencyRef);
+      const snapshots = await transaction.getAll(...readRefs);
       const productSnapshots = snapshots.slice(0, productRefs.length);
-      const customerSnapshot = customerRef ? snapshots[snapshots.length - 1] : null;
+      const customerSnapshot = customerRef ? snapshots[productRefs.length] : null;
+      const idempotencySnapshot = idempotencyRef ? snapshots[snapshots.length - 1] : null;
+      if (idempotencySnapshot?.exists) return idempotencySnapshot.data()?.response as { saleId: string; total: number; lines: SaleLine[] };
       if (customerRef && (!customerSnapshot || !customerSnapshot.exists || customerSnapshot.data()?.active === false)) throw new Error('CUSTOMER_NOT_FOUND');
       const customerName = customerSnapshot ? text(customerSnapshot.data()?.name, 120) : '';
       const lines: SaleLine[] = [];
@@ -79,9 +89,12 @@ export async function POST(request: NextRequest) {
         transaction.update(productRefs[index], { stock: newStock, updatedAt: now, updatedBy: context.uid });
         transaction.set(movementRefs[index], { productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
       });
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, items: lines, subtotal, discount, total, paymentMethod, customerId: customerId || null, customerName: customerName || null, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
-      return { saleId: saleRef.id, total, lines };
+      const response = { saleId: saleRef.id, total, lines };
+      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, items: lines, subtotal, discount, total, paymentMethod, customerId: customerId || null, customerName: customerName || null, branchId: branchId || null, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
+      return response;
     });
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created', entity: 'sale', entityId: result.saleId, after: result, request: { method: 'POST', path: '/api/sales', requestId: request.headers.get('x-correlation-id') || undefined }, result: 'success' });
     return NextResponse.json({ ok: true, ...result }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';

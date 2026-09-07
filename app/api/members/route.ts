@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
@@ -30,7 +31,9 @@ export async function POST(request: NextRequest) {
     if (!existing.empty && existing.docs[0].data().status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     let user;
     try { user = await getAdminAuth().getUserByEmail(email); } catch (error: unknown) { if ((error as { code?: string }).code !== 'auth/user-not-found') throw error; user = await getAdminAuth().createUser({ email, password, displayName: name, disabled: false }); }
-    await memberRef.doc(user.uid).set({ uid: user.uid, tenantId: context.tenantId, name, email, role, status: 'active', createdBy: context.uid, createdAt: new Date(), updatedAt: new Date() }, { merge: true });
+    const after = { uid: user.uid, tenantId: context.tenantId, name, email, role, status: 'active' };
+    await memberRef.doc(user.uid).set({ ...after, createdBy: context.uid, createdAt: new Date(), updatedAt: new Date() }, { merge: true });
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.created', entity: 'member', entityId: user.uid, after, result: 'success' });
     return NextResponse.json({ ok: true, uid: user.uid, email }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
@@ -45,6 +48,7 @@ export async function PATCH(request: NextRequest) {
     if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) changes.status = body.status;
     if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     await memberRef.update(changes);
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.updated', entity: 'member', entityId: uid, before: current, after: { ...current, ...changes }, result: 'success' });
     return NextResponse.json({ ok: true, uid, changes });
   } catch (error: unknown) { return errorResponse(error); }
 }
@@ -62,8 +66,9 @@ export async function DELETE(request: NextRequest) {
     if (!member.exists) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     if (member.data()?.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede eliminarse desde este módulo.' }, { status: 403 });
 
+    const before = member.data() || {};
     await memberRef.update({ status: 'disabled', updatedAt: new Date(), updatedBy: context.uid });
-    await getAdminAuth().updateUser(uid, { disabled: true });
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.disabled', entity: 'member', entityId: uid, before, after: { ...before, status: 'disabled' }, result: 'success' });
     return NextResponse.json({ ok: true, uid, status: 'disabled' });
   } catch (error: unknown) { return errorResponse(error); }
 }

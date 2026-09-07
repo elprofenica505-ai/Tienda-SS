@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { login as loginWithFirebase } from '@/lib/auth';
-import { sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
+import { sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 type View = 'home' | 'login' | 'register';
@@ -128,10 +128,16 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         const response = await fetch('/api/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: company, ownerName: name, email, password }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudo crear la empresa.');
-        await signInWithEmailAndPassword(auth, email.trim(), password);
-        window.location.href = '/onboarding';
+        const createdUser = await signInWithEmailAndPassword(auth, email.trim(), password);
+        await sendEmailVerification(createdUser.user);
+        setMessage('Cuenta creada. Revisa tu correo y confirma la dirección antes de entrar al espacio de trabajo.');
       } else {
         await loginWithFirebase(email.trim(), password);
+        const signedInUser = auth.currentUser;
+        if (!signedInUser?.emailVerified) {
+          if (signedInUser) await sendEmailVerification(signedInUser);
+          throw new Error('Verifica tu correo electrónico. Te enviamos un nuevo enlace de confirmación.');
+        }
         window.location.href = '/onboarding';
       }
     } catch (error) {
