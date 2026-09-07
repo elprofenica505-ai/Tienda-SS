@@ -30,6 +30,12 @@ export function middleware(request: NextRequest) {
     return withSecurityHeaders(NextResponse.next());
   }
 
+  // This endpoint discovers the user's active tenant, so it cannot require
+  // the tenant header before the route has had a chance to resolve it.
+  if (pathname === '/api/tenants/me' && method === 'GET') {
+    return withSecurityHeaders(NextResponse.next());
+  }
+
   if (!request.headers.get('x-tenant-id')?.trim()) {
     return unauthorized('Falta identificar la empresa.', 400);
   }
