@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { tenantErrorResponse } from '@/lib/tenant';
-import { consumeDistributedRateLimit, getClientAddress, rateLimitResponse } from '@/lib/rate-limit';
+import { consumeDistributedRateLimits, getClientAddress, rateLimitResponse } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -10,8 +10,8 @@ function validEmail(value: unknown): value is string {
 }
 
 export async function POST(request: NextRequest) {
-  const rate = await consumeDistributedRateLimit({ endpoint: 'tenant-signup', ip: getClientAddress(request) }, 5, 15 * 60 * 1000);
-  if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds);
+  const rate = await consumeDistributedRateLimits({ endpoint: 'tenant-signup', ip: getClientAddress(request) }, { ip: 5, endpoint: 100, composite: 5 }, 15 * 60 * 1000);
+  if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
   let uid: string | undefined;
 
   try {

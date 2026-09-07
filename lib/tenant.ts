@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { assertTokenSessionPolicy } from '@/lib/auth-policy';
+import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
 import { normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 
@@ -91,6 +92,20 @@ export async function requireTenantMember(
     throw new Error('FORBIDDEN');
   }
   const role = roleValue;
+  const rate = await consumeDistributedRateLimits({
+    endpoint: request.nextUrl.pathname,
+    ip: getClientAddress(request),
+    uid: decoded.uid,
+    tenantId: requestedTenant,
+  }, {
+    ip: 120,
+    uid: 300,
+    tenant: 1_000,
+    endpoint: 2_000,
+    composite: 100,
+  }, 60_000);
+  if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);
+
   try {
     assertTokenSessionPolicy(decoded, role);
   } catch (error) {
@@ -157,6 +172,11 @@ export function tenantErrorResponse(error: unknown) {
 
   if (code === 'MFA_REQUIRED') {
     return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };
+  }
+
+  if (code.startsWith('RATE_LIMITED:')) {
+    const [, scope, retryAfter] = code.split(':');
+    return { status: 429, body: { error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.', code: 'RATE_LIMITED', scope, retryAfterSeconds: Number(retryAfter) || 1 } };
   }
 
   return { status: 500, body: { error: 'Error interno del servidor.' } };

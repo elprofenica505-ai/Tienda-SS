@@ -12,10 +12,19 @@ export type RateLimitDimensions = {
   endpoint: string;
 };
 
+export type RateLimitLimits = {
+  ip?: number;
+  uid?: number;
+  tenant?: number;
+  endpoint?: number;
+  composite?: number;
+};
+
 export type RateLimitResult = {
   allowed: boolean;
   remaining: number;
   retryAfterSeconds: number;
+  blockedBy?: keyof RateLimitLimits;
 };
 
 const buckets = new Map<string, RateLimitEntry>();
@@ -30,81 +39,116 @@ function cleanupExpired(now: number) {
   }
 }
 
+function normalize(value: string | undefined): string {
+  return value?.trim().slice(0, 160) || 'anonymous';
+}
+
 export function getClientAddress(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || request.headers.get('x-real-ip')?.trim() || 'unknown';
+  const candidate = forwarded || request.headers.get('x-real-ip')?.trim() || 'unknown';
+  return /^[a-fA-F0-9:.]+$/.test(candidate) ? candidate : 'unknown';
 }
 
 export function buildRateLimitKey(dimensions: RateLimitDimensions): string {
-  const normalize = (value: string | undefined) => value?.trim().slice(0, 160) || 'anonymous';
   return [normalize(dimensions.endpoint), normalize(dimensions.ip), normalize(dimensions.uid), normalize(dimensions.tenantId)].join(':');
 }
 
-export function consumeRateLimit(
-  key: string,
-  limit: number,
-  windowMs: number,
-  now = Date.now(),
-): RateLimitResult {
-  cleanupExpired(now);
-  const current = buckets.get(key);
-  if (!current || current.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, remaining: Math.max(0, limit - 1), retryAfterSeconds: Math.ceil(windowMs / 1000) };
-  }
+function bucketKeys(dimensions: RateLimitDimensions, limits: RateLimitLimits): Array<[keyof RateLimitLimits, string, number]> {
+  const endpoint = normalize(dimensions.endpoint);
+  const keys: Array<[keyof RateLimitLimits, string, number]> = [];
+  if (limits.ip != null) keys.push(['ip', `${endpoint}:ip:${normalize(dimensions.ip)}`, limits.ip]);
+  if (limits.uid != null && dimensions.uid) keys.push(['uid', `${endpoint}:uid:${normalize(dimensions.uid)}`, limits.uid]);
+  if (limits.tenant != null && dimensions.tenantId) keys.push(['tenant', `${endpoint}:tenant:${normalize(dimensions.tenantId)}`, limits.tenant]);
+  if (limits.endpoint != null) keys.push(['endpoint', `${endpoint}:endpoint`, limits.endpoint]);
+  if (limits.composite != null) keys.push(['composite', `${endpoint}:composite:${normalize(dimensions.ip)}:${normalize(dimensions.uid)}:${normalize(dimensions.tenantId)}`, limits.composite]);
+  return keys;
+}
 
-  if (current.count >= limit) {
+function consumeLocalBuckets(entries: Array<[keyof RateLimitLimits, string, number]>, windowMs: number, now: number): RateLimitResult {
+  cleanupExpired(now);
+  const states = entries.map(([scope, key, limit]) => ({ scope, key, limit, current: buckets.get(key) }));
+  const blocked = states.find(({ current, limit }) => current && current.resetAt > now && current.count >= limit);
+  if (blocked) {
     return {
       allowed: false,
       remaining: 0,
-      retryAfterSeconds: Math.max(1, Math.ceil((current.resetAt - now) / 1000)),
+      retryAfterSeconds: Math.max(1, Math.ceil(((blocked.current?.resetAt || now + windowMs) - now) / 1000)),
+      blockedBy: blocked.scope,
     };
   }
-
-  current.count += 1;
-  return {
-    allowed: true,
-    remaining: Math.max(0, limit - current.count),
-    retryAfterSeconds: Math.max(1, Math.ceil((current.resetAt - now) / 1000)),
-  };
+  let remaining = Number.POSITIVE_INFINITY;
+  let retryAfterSeconds = Math.ceil(windowMs / 1000);
+  states.forEach(({ key, limit, current }) => {
+    const active = current && current.resetAt > now;
+    const next: RateLimitEntry = active ? { count: current.count + 1, resetAt: current.resetAt } : { count: 1, resetAt: now + windowMs };
+    buckets.set(key, next);
+    remaining = Math.min(remaining, Math.max(0, limit - next.count));
+    retryAfterSeconds = Math.max(retryAfterSeconds, Math.max(1, Math.ceil((next.resetAt - now) / 1000)));
+  });
+  return { allowed: true, remaining: Number.isFinite(remaining) ? remaining : 0, retryAfterSeconds };
 }
 
-/**
- * Firestore-backed limiter. The transaction makes increments atomic across
- * server instances. Set RATE_LIMIT_SHARED=false only for local tests.
- */
-export async function consumeDistributedRateLimit(
+export function consumeRateLimits(dimensions: RateLimitDimensions, limits: RateLimitLimits, windowMs: number, now = Date.now()): RateLimitResult {
+  return consumeLocalBuckets(bucketKeys(dimensions, limits), windowMs, now);
+}
+
+export function consumeRateLimit(key: string, limit: number, windowMs: number, now = Date.now()): RateLimitResult {
+  return consumeLocalBuckets([['composite', key, limit]], windowMs, now);
+}
+
+/** Firestore-backed multi-bucket limiter. All scope counters are checked and incremented atomically. */
+export async function consumeDistributedRateLimits(
   dimensions: RateLimitDimensions,
-  limit: number,
+  limits: RateLimitLimits,
   windowMs: number,
   now = Date.now(),
 ): Promise<RateLimitResult> {
-  const key = buildRateLimitKey(dimensions);
+  const entries = bucketKeys(dimensions, limits);
   if (process.env.RATE_LIMIT_SHARED === 'false' || process.env.NODE_ENV === 'test') {
-    return consumeRateLimit(key, limit, windowMs, now);
+    return consumeLocalBuckets(entries, windowMs, now);
   }
+  if (entries.length === 0) return { allowed: true, remaining: 0, retryAfterSeconds: Math.ceil(windowMs / 1000) };
 
-  const ref = getAdminDb().collection('systemRateLimits').doc(encodeURIComponent(key));
-  const result = await getAdminDb().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    const current = snapshot.exists ? snapshot.data() as Partial<RateLimitEntry> : undefined;
-    const resetAt = typeof current?.resetAt === 'number' ? current.resetAt : 0;
-    const count = resetAt > now && typeof current?.count === 'number' ? current.count : 0;
-    const nextResetAt = resetAt > now ? resetAt : now + windowMs;
-    const allowed = count < limit;
-    const nextCount = allowed ? count + 1 : count;
-    transaction.set(ref, { count: nextCount, resetAt: nextResetAt, updatedAt: now }, { merge: true });
-    return {
-      allowed,
-      remaining: Math.max(0, limit - nextCount),
-      retryAfterSeconds: Math.max(1, Math.ceil((nextResetAt - now) / 1000)),
-    } satisfies RateLimitResult;
+  const db = getAdminDb();
+  const refs = entries.map(([, key]) => db.collection('systemRateLimits').doc(encodeURIComponent(key)));
+  return db.runTransaction(async (transaction) => {
+    const snapshots = [];
+    for (const ref of refs) snapshots.push(await transaction.get(ref));
+    const states = snapshots.map((snapshot, index) => {
+      const data = snapshot.exists ? snapshot.data() as Partial<RateLimitEntry> : undefined;
+      const [scope, , limit] = entries[index];
+      return { scope, limit, current: data };
+    });
+    const blocked = states.find(({ current, limit }) => current && typeof current.resetAt === 'number' && current.resetAt > now && Number(current.count || 0) >= limit);
+    if (blocked) {
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterSeconds: Math.max(1, Math.ceil(((blocked.current?.resetAt || now + windowMs) - now) / 1000)),
+        blockedBy: blocked.scope,
+      } satisfies RateLimitResult;
+    }
+
+    let remaining = Number.POSITIVE_INFINITY;
+    let retryAfterSeconds = Math.ceil(windowMs / 1000);
+    states.forEach(({ current, limit }, index) => {
+      const active = typeof current?.resetAt === 'number' && current.resetAt > now;
+      const resetAt = active ? Number(current?.resetAt) : now + windowMs;
+      const nextCount = active ? Number(current?.count || 0) + 1 : 1;
+      transaction.set(refs[index], { count: nextCount, resetAt, updatedAt: now }, { merge: true });
+      remaining = Math.min(remaining, Math.max(0, limit - nextCount));
+      retryAfterSeconds = Math.max(retryAfterSeconds, Math.max(1, Math.ceil((resetAt - now) / 1000)));
+    });
+    return { allowed: true, remaining: Number.isFinite(remaining) ? remaining : 0, retryAfterSeconds } satisfies RateLimitResult;
   });
-  return result;
 }
 
-export function rateLimitResponse(retryAfterSeconds: number) {
-  return new Response(JSON.stringify({ error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.' }), {
+export async function consumeDistributedRateLimit(dimensions: RateLimitDimensions, limit: number, windowMs: number, now = Date.now()): Promise<RateLimitResult> {
+  return consumeDistributedRateLimits(dimensions, { composite: limit }, windowMs, now);
+}
+
+export function rateLimitResponse(retryAfterSeconds: number, blockedBy?: keyof RateLimitLimits) {
+  return new Response(JSON.stringify({ error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.', code: 'RATE_LIMITED', scope: blockedBy || 'composite' }), {
     status: 429,
     headers: {
       'Content-Type': 'application/json',
