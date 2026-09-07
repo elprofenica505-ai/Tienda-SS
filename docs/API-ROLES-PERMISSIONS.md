@@ -192,3 +192,20 @@ El servidor valida el token, obtiene la membresía dentro del tenant y comprueba
 Los clientes no deben guardar ni enviar el rol como fuente de autoridad. El frontend puede usarlo para mostrar u ocultar controles, pero la autorización real debe permanecer en el servidor y en las reglas de Firestore.
 
 Cuando se agregue un endpoint, deben actualizarse conjuntamente `lib/api-policy.ts`, el handler, la matriz de permisos, las reglas de Firestore cuando correspondan y las pruebas de autorización. Las pruebas existentes cubren aislamiento multi-tenant, roles operativos, Supervisor de Sucursal, Cajero, Solo Lectura y migración de roles legacy.
+
+
+## Invitaciones empresariales
+
+La gestión de invitaciones se realiza en `/api/invitations` y requiere una membresía activa con permiso `members.create`, `members.view` o `members.delete` según el método. La ruta conserva solo un hash SHA-256 del token; el token en claro se entrega una vez al correo y nunca se devuelve en producción.
+
+| Endpoint | Método | Acceso | Función |
+|---|---|---|---|
+| `/api/invitations` | `GET` | Miembro con `members.view` | Lista las últimas invitaciones del tenant sin exponer tokens. |
+| `/api/invitations` | `POST` | Miembro con `members.create` | Crea una invitación o reenvía una pendiente mediante `action: resend`. |
+| `/api/invitations` | `DELETE` | Miembro con `members.delete` | Revoca una invitación pendiente. |
+| `/api/invitations/accept` | `GET` | Público con token | Consulta estado, correo y rol de un enlace. |
+| `/api/invitations/accept` | `POST` | Público con token | Crea o valida la cuenta y acepta el enlace una sola vez. |
+
+Las invitaciones caducan a los siete días, el reenvío tiene un cooldown de un minuto y existe un límite temporal de 20 operaciones por actor y tenant. La aceptación usa una transacción Firestore que comprueba nuevamente el estado pendiente y marca `accepted` junto con la creación de la membresía; por eso un replay concurrente no puede aceptar el mismo enlace dos veces. Revocación, creación, reenvío y aceptación generan eventos en `tenants/{tenantId}/auditLogs`.
+
+El diseño evita el escalamiento de privilegios: `owner` y `admin` pueden asignar todos los roles permitidos; `gerente` y `supervisor_sucursal` no pueden asignar `admin` ni `jefe`; los demás roles no pueden crear invitaciones administrativas. El correo no se considera fuente de autoridad: la membresía final se crea únicamente después de verificar el token y completar la transacción del servidor.

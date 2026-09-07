@@ -2,13 +2,13 @@
 
 **Rama:** `SaaS-MultiTenant-Profesional`  
 **Estado inicial:** 56% de madurez estimada  
-**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 2/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
+**Regla de ejecución:** una tarea por ciclo, con verificación y checkpoint antes de pasar a la siguiente. **Progreso actual: 3/21 tareas cerradas.** **Stripe, planes y pagos empresariales quedan para la tarea 21.**
 
 ## Tareas pendientes
 
 - [x] **1. P0.1 — Consolidar autorización multi-tenant y membresías.** Eliminar caminos administrativos duplicados, centralizar la guardia de tenant/permisos y garantizar que todas las rutas críticas usan el mismo contexto verificado.
 - [x] **2. P0.2 — Crear matriz de pruebas de autorización API.** Cubrir 401, tenant ausente, tenant cruzado, miembro inactivo, rol insuficiente, payload inválido y errores internos en las 19 rutas.
-- [ ] **3. P0.3 — Implementar invitaciones empresariales seguras.** Tokens de un solo uso, expiración, aceptación, revocación, reenvío y auditoría.
+- [x] **3. P0.3 — Implementar invitaciones empresariales seguras.** Tokens de un solo uso, expiración, aceptación, revocación, reenvío y auditoría.
 - [ ] **4. P0.4 — Endurecer identidad y autenticación.** Verificación de correo, recuperación probada, MFA para administradores y política de sesiones.
 - [ ] **5. P0.5 — Convertir rate limiting en distribuido.** Límites por IP, UID, tenant y endpoint con almacenamiento compartido y pruebas anti-abuso.
 - [ ] **6. P0.6 — Aplicar autorización por campo, sucursal y sensibilidad.** Evitar que roles operativos lean o modifiquen información fuera de su ámbito.
@@ -43,3 +43,15 @@ El sistema solo se declarará cerrado cuando typecheck, lint, tests unitarios, i
 - [x] Caso global: errores internos no filtran secretos ni trazas al cliente.
 - [x] Caso por método: GET/POST/PATCH/DELETE respeta la acción de permisos correspondiente.
 - [x] Caso legacy: `/api/usuarios` conserva compatibilidad pero usa exactamente la misma guardia que `/api/members`.
+
+### Desglose de la tarea 3 — invitaciones empresariales seguras
+
+- [x] Diseñar colección `tenantInvitations` y máquina de estados `pending/accepted/revoked/expired`.
+- [x] Generar token aleatorio de alta entropía y guardar únicamente su hash.
+- [x] Crear endpoint autenticado para invitar miembros con límite por plan y permisos.
+- [x] Crear endpoint público para consultar una invitación sin revelar secretos.
+- [x] Crear endpoint de aceptación de un solo uso con transacción y vinculación al tenant.
+- [x] Crear endpoints de revocación y reenvío controlado.
+- [x] Aplicar expiración, normalización de email, prevención de escalamiento de rol y rate limiting.
+- [x] Registrar auditoría de creación, aceptación, revocación, reenvío y expiración.
+- [x] Añadir pruebas de token inválido, replay, expiración, tenant cruzado y abuso.

@@ -9,6 +9,8 @@ const publicRoutes = new Set([
   'GET /api/health',
   'POST /api/tenants',
   'POST /api/billing/webhook',
+  'GET /api/invitations/accept',
+  'POST /api/invitations/accept',
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
@@ -22,6 +24,7 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/reports$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/sales$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/billing$/, policy: { module: 'finance', action: 'view' } },
+  { pattern: /^\/api\/invitations$/, policy: { module: 'members', action: 'view' } },
 ];
 
 export function isPublicApiRoute(pathname: string, method: string): boolean {
