@@ -12,23 +12,42 @@ export async function GET(request: NextRequest) {
 
     const decoded = await getAdminAuth().verifyIdToken(token);
     const db = getAdminDb();
-    const memberships = await db.collectionGroup('members').where('uid', '==', decoded.uid).get();
     const requestedTenantId = request.headers.get('x-tenant-id')?.trim();
+    const available: Array<{ tenant: { id: string; [key: string]: unknown }; member: Record<string, unknown> }> = [];
 
-    const tenants = await Promise.all(memberships.docs
-      .filter((memberDoc) => memberDoc.data().status === 'active')
-      .map(async (memberDoc) => {
-      const tenantRef = memberDoc.ref.parent.parent;
-      if (!tenantRef) return null;
-      const tenantDoc = await tenantRef.get();
-      if (!tenantDoc.exists || tenantDoc.data()?.status !== 'active') return null;
-      return {
-        tenant: { id: tenantDoc.id, ...tenantDoc.data() },
-        member: { id: memberDoc.id, ...memberDoc.data() }
-      };
-    }));
+    // The registration flow creates the first tenant with the owner's UID as
+    // document ID. Resolve this path directly so the first login does not
+    // depend on a collection-group index being ready.
+    const ownerTenantDoc = await db.collection('tenants').doc(decoded.uid).get();
+    if (ownerTenantDoc.exists && ownerTenantDoc.data()?.ownerUid === decoded.uid && ownerTenantDoc.data()?.status === 'active') {
+      const ownerMemberDoc = await ownerTenantDoc.ref.collection('members').doc(decoded.uid).get();
+      if (ownerMemberDoc.exists && ownerMemberDoc.data()?.status === 'active') {
+        available.push({
+          tenant: { id: ownerTenantDoc.id, ...ownerTenantDoc.data() },
+          member: { id: ownerMemberDoc.id, ...ownerMemberDoc.data() },
+        });
+      }
+    }
 
-    const available = tenants.filter(Boolean) as Array<{ tenant: { id: string }; member: Record<string, unknown> }>;
+    // Existing invited members may belong to another tenant, so retain the
+    // collection-group lookup as a fallback for multi-tenant users.
+    if (available.length === 0) {
+      const memberships = await db.collectionGroup('members').where('uid', '==', decoded.uid).get();
+      const tenants = await Promise.all(memberships.docs
+        .filter((memberDoc) => memberDoc.data().status === 'active')
+        .map(async (memberDoc) => {
+          const tenantRef = memberDoc.ref.parent.parent;
+          if (!tenantRef) return null;
+          const tenantDoc = await tenantRef.get();
+          if (!tenantDoc.exists || tenantDoc.data()?.status !== 'active') return null;
+          return {
+            tenant: { id: tenantDoc.id, ...tenantDoc.data() },
+            member: { id: memberDoc.id, ...memberDoc.data() },
+          };
+        }));
+      available.push(...tenants.filter(Boolean) as Array<{ tenant: { id: string; [key: string]: unknown }; member: Record<string, unknown> }>);
+    }
+
     if (available.length === 0) {
       return NextResponse.json({ error: 'Tu usuario no tiene una empresa activa.' }, { status: 403 });
     }
