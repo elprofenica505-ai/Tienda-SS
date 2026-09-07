@@ -18,3 +18,7 @@ ui-debug.log*
 *.log
 .vscode/
 .idea/
+
+# Playwright artifacts
+playwright-report/
+test-results/
