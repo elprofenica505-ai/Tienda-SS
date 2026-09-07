@@ -62,8 +62,21 @@ export async function GET(request: NextRequest) {
       tenants: available
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
-    console.error('tenant_me_failed', { message: error instanceof Error ? error.message : 'unknown' });
-    return NextResponse.json({ error: 'No se pudo cargar el espacio de trabajo.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'unknown';
+    console.error('tenant_me_failed', { message });
+    if (message.includes('FIREBASE_PROJECT_MISMATCH')) {
+      return NextResponse.json({ error: 'Vercel está usando credenciales de otro proyecto Firebase. Revisa la cuenta de servicio de ConexiaX.' }, { status: 503 });
+    }
+    if (message.includes('FIREBASE_SERVICE_ACCOUNT_KEY')) {
+      return NextResponse.json({ error: 'La conexión del servidor con Firebase no está configurada correctamente.' }, { status: 503 });
+    }
+    if (message.includes('permission-denied') || message.includes('Missing or insufficient permissions')) {
+      return NextResponse.json({ error: 'Firebase rechazó la consulta del servidor. Revisa la cuenta de servicio y Firestore de ConexiaX.' }, { status: 503 });
+    }
+    if (message.includes('index')) {
+      return NextResponse.json({ error: 'Firebase necesita un índice para cargar tus empresas. Revisa los registros de Vercel.' }, { status: 503 });
+    }
+    return NextResponse.json({ error: 'No se pudo cargar el espacio de trabajo. Revisa los registros de Vercel.' }, { status: 500 });
   }
 }
 
