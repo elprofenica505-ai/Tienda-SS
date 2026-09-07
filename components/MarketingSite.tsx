@@ -27,7 +27,7 @@ function Logo() {
   return (
     <div className="brand-mark">
       <span className="brand-mark-icon">N</span>
-      <span>Nexo<span className="brand-accent">Flow</span></span>
+      <span>ConexiaX<span className="brand-accent">Flow</span></span>
     </div>
   );
 }
@@ -57,17 +57,17 @@ function Landing({ onNavigate }: { onNavigate: (view: View) => void }) {
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-dot" /> La plataforma para operar mejor</div>
           <h1>Tu negocio, <em>en una sola vista.</em></h1>
-          <p className="hero-lede">NexoFlow reúne ventas, inventario, clientes y operaciones en un espacio claro, rápido y listo para crecer contigo.</p>
+          <p className="hero-lede">ConexiaX reúne ventas, inventario, clientes y operaciones en un espacio claro, rápido y listo para crecer contigo.</p>
           <div className="hero-actions">
             <button className="button button-large" onClick={() => onNavigate('register')}>Comenzar gratis <Arrow /></button>
             <a className="text-link" href="#modulos">Explorar módulos <span>↓</span></a>
           </div>
           <div className="hero-proof"><div className="avatar-stack"><i>JD</i><i>ML</i><i>AR</i><i>+</i></div><span><strong>Sin tarjeta de crédito</strong><br />Prueba la operación completa</span></div>
         </div>
-        <div className="hero-visual" aria-label="Vista previa del panel de NexoFlow">
+        <div className="hero-visual" aria-label="Vista previa del panel de ConexiaX">
           <div className="glow glow-one" /><div className="glow glow-two" />
           <div className="dashboard-window">
-            <div className="window-top"><div className="window-dots"><i /><i /><i /></div><span>nexoflow.app / dashboard</span><b>•••</b></div>
+            <div className="window-top"><div className="window-dots"><i /><i /><i /></div><span>ConexiaX.app / dashboard</span><b>•••</b></div>
             <div className="dashboard-body">
               <aside className="mini-sidebar"><Logo /><div className="mini-menu active"><span>▦</span> Resumen</div><div className="mini-menu"><span>◈</span> Ventas</div><div className="mini-menu"><span>◇</span> Inventario</div><div className="mini-menu"><span>○</span> Clientes</div><div className="mini-menu"><span>≡</span> Reportes</div><div className="mini-sidebar-bottom">Configuración<br /><small>Plan Growth</small></div></aside>
               <div className="mini-content"><div className="mini-header"><div><small>Jueves, 05 de septiembre</small><h3>Buenos días, Carlos <span>✦</span></h3></div><div className="mini-header-actions"><span>⌕</span><span>♧</span><b>CS</b></div></div>
@@ -88,7 +88,7 @@ function Landing({ onNavigate }: { onNavigate: (view: View) => void }) {
       <section className="section page-container" id="precios"><div className="section-heading pricing-heading"><div><div className="eyebrow">Planes simples</div><h2>Elige tu ritmo.<br /><em>Crece a tu manera.</em></h2></div><p>Comienza con lo esencial. Cambia de plan cuando tu operación lo necesite, sin contratos complicados.</p></div><div className="pricing-grid">{plans.map((plan) => <article className={`pricing-card ${plan.featured ? 'featured' : ''}`} key={plan.name}>{plan.featured && <div className="popular-label">Más elegido</div>}<h3>{plan.name}</h3><p>{plan.description}</p><div className="price"><strong>${plan.price}</strong><span>/ mes</span></div><button className={`button ${plan.featured ? 'button-lime' : 'button-outline'}`} onClick={() => onNavigate('register')}>Comenzar ahora <Arrow /></button><ul>{plan.features.map((feature) => <li key={feature}><span>✓</span>{feature}</li>)}</ul></article>)}</div></section>
 
       <section className="cta-section page-container"><div className="cta-inner"><div><div className="eyebrow">Tu próximo capítulo comienza aquí</div><h2>Haz que tu negocio<br /><em>se mueva mejor.</em></h2></div><button className="button button-large button-dark" onClick={() => onNavigate('register')}>Crear mi empresa <Arrow /></button></div></section>
-      <footer className="footer page-container"><Logo /><span>© 2025 NexoFlow. Operaciones claras para negocios ambiciosos.</span><div><a href="#modulos">Módulos</a><a href="#precios">Precios</a><a href="/privacy">Privacidad</a></div></footer>
+      <footer className="footer page-container"><Logo /><span>© 2025 ConexiaX. Operaciones claras para negocios ambiciosos.</span><div><a href="#modulos">Módulos</a><a href="#precios">Precios</a><a href="/privacy">Privacidad</a></div></footer>
     </main>
   );
 }

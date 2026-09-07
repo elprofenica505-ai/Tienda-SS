@@ -6,7 +6,7 @@ export default function PrivacyPage() {
       <div className="auth-layout page-container">
         <article className="auth-card" style={{ maxWidth: 760, gridColumn: '1 / -1' }}>
           <div className="auth-card-top">
-            <span className="eyebrow">NexoFlow</span>
+            <span className="eyebrow">ConexiaX</span>
             <h1>Política de privacidad</h1>
             <p>Esta página resume cómo se deben tratar los datos de las empresas, usuarios y operaciones dentro de la plataforma.</p>
           </div>

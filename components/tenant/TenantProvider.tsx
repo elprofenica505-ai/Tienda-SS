@@ -45,7 +45,7 @@ type TenantContextValue = {
 };
 
 const TenantContext = createContext<TenantContextValue | null>(null);
-const STORAGE_KEY = 'nexoflow.activeTenantId';
+const STORAGE_KEY = 'ConexiaX.activeTenantId';
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<User | null>(null);

@@ -157,7 +157,7 @@ function PermissionsContent() {
   return (
     <main className="workspace-page">
       <aside className="workspace-sidebar">
-        <div className="onboarding-brand"><span className="brand-mark-icon">N</span><b>Nexo<span>Flow</span></b></div>
+        <div className="onboarding-brand"><span className="brand-mark-icon">N</span><b>ConexiaX</b></div>
         <div className="workspace-company"><span>{tenant.name.slice(0, 1).toUpperCase()}</span><div><b>{tenant.name}</b><small>Plan {tenant.plan || 'Starter'}</small></div></div>
         <nav>
           <a onClick={() => router.push('/workspace')}>▦ <span>Resumen</span></a>
