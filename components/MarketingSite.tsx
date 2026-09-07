@@ -27,7 +27,7 @@ function Logo() {
   return (
     <div className="brand-mark">
       <span className="brand-mark-icon">N</span>
-      <span>ConexiaX<span className="brand-accent">Flow</span></span>
+      <span>ConexiaX</span>
     </div>
   );
 }
