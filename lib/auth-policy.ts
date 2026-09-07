@@ -21,7 +21,9 @@ export function getSessionPolicy(): SessionPolicy {
   return {
     maxAgeSeconds: Number.isFinite(configured) && configured >= 300 ? configured : DEFAULT_MAX_SESSION_AGE_SECONDS,
     requireVerifiedEmail: process.env.AUTH_REQUIRE_VERIFIED_EMAIL !== 'false',
-    requireMfaForAdmin: process.env.AUTH_REQUIRE_MFA_ADMIN !== 'false',
+    // MFA remains available as an explicit enterprise/security option, but it
+    // must not block owners and admins by default on Firebase free plans.
+    requireMfaForAdmin: process.env.AUTH_REQUIRE_MFA_ADMIN === 'true',
   };
 }
 

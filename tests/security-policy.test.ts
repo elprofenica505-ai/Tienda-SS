@@ -11,9 +11,20 @@ const baseToken = {
   firebase: { sign_in_provider: 'password' },
 } as unknown as { auth_time: number; email_verified: boolean; firebase: { sign_in_provider: string } };
 
-test('la política rechaza sesiones antiguas y exige MFA a administradores', () => {
+test('la política rechaza sesiones antiguas y no bloquea MFA por defecto', () => {
   assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_000 + 12 * 60 * 60 + 1), /SESSION_EXPIRED/);
-  assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001), /MFA_REQUIRED/);
+  assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001));
+});
+
+test('MFA administrativo permanece disponible como opción explícita', () => {
+  const previous = process.env.AUTH_REQUIRE_MFA_ADMIN;
+  process.env.AUTH_REQUIRE_MFA_ADMIN = 'true';
+  try {
+    assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001), /MFA_REQUIRED/);
+  } finally {
+    if (previous === undefined) delete process.env.AUTH_REQUIRE_MFA_ADMIN;
+    else process.env.AUTH_REQUIRE_MFA_ADMIN = previous;
+  }
 });
 
 test('recuperación normaliza y valida el correo de forma determinista', () => {

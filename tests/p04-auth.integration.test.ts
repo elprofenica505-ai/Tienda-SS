@@ -32,8 +32,19 @@ test('P0.4 integración: correo no verificado se bloquea con respuesta accionabl
   });
 });
 
-test('P0.4 integración: administrador sin MFA no obtiene acceso y recibe instrucción', () => {
-  assert.throws(() => assertTokenSessionPolicy(token(), 'admin', 1_001), /MFA_REQUIRED/);
+test('P0.4 integración: administrador sin MFA puede continuar en el plan gratuito', () => {
+  assert.doesNotThrow(() => assertTokenSessionPolicy(token(), 'admin', 1_001));
+});
+
+test('P0.4 integración: MFA puede activarse explícitamente por configuración', () => {
+  const previous = process.env.AUTH_REQUIRE_MFA_ADMIN;
+  process.env.AUTH_REQUIRE_MFA_ADMIN = 'true';
+  try {
+    assert.throws(() => assertTokenSessionPolicy(token(), 'admin', 1_001), /MFA_REQUIRED/);
+  } finally {
+    if (previous === undefined) delete process.env.AUTH_REQUIRE_MFA_ADMIN;
+    else process.env.AUTH_REQUIRE_MFA_ADMIN = previous;
+  }
   assert.deepEqual(tenantErrorResponse(new Error('MFA_REQUIRED')), {
     status: 403,
     body: { error: 'La autenticación multifactor es obligatoria para este rol.', code: 'MFA_REQUIRED' },
