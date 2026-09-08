@@ -17,6 +17,15 @@ La rama está actualizada con `origin/SaaS-MultiTenant-Profesional` y sin cambio
 | [x] | Confirmar branch limpia y actualizada | La rama inició alineada con `origin`; se comprobará nuevamente después del commit de esta etapa. |
 | [x] | Documentar secretos, variables y Stripe sin exponer valores | `.env.example` declara Firebase Admin, Stripe, Resend y `SUPERADMIN_UIDS`. `.env.local` solo contiene variables públicas Firebase; las claves privadas de Stripe, Firebase Admin y Resend están ausentes localmente. El modo Stripe local no está configurado; Vercel debe revisarse sin revelar valores. |
 
+### ETAPA 0 — Limpieza y verdad del producto
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Producción sin accesos demo | Se eliminaron accesos rápidos, usuarios fake y la clave `1234` de `components/Login.tsx`; la prueba anti-regresión queda en `tests/stage0-product-truth.test.ts`. |
+| [x] | Una sola verdad multi-tenant | Las rutas de negocio usan `tenants/{tenantId}/…`; las colecciones globales legacy son rechazadas por reglas y solo aparecen en scripts de migración explícitos. |
+| [x] | Tenant nuevo vacío | `app/api/tenants/route.ts` crea tenant y membresía owner sin copiar productos, ventas, clientes ni inventario demo. |
+| [x] | Aislamiento documentado | `docs/ETAPA-0-CHECKLIST.md` registra evidencia y `tests/firestore.rules.test.mjs` cubre lecturas/escrituras cruzadas y consultas collection-group. |
+
 ### Estado de secretos y Stripe
 
 No se copiaron ni se mostrarán valores secretos. El archivo `.env.example` declara `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, tres precios Stripe, `FIREBASE_SERVICE_ACCOUNT_KEY`, `RESEND_API_KEY` y `SUPERADMIN_UIDS`. En el entorno local inspeccionado solo están presentes las variables `NEXT_PUBLIC_FIREBASE_*`; no están presentes las claves privadas ni los precios Stripe. El modo local Stripe es, por tanto, **no configurado**, no se puede afirmar test o live desde este checkout. En Vercel se debe verificar el entorno **Preview/Development** contra **Production** y confirmar que el prefijo de `STRIPE_SECRET_KEY` sea `sk_test_` o `sk_live_` sin registrar el secreto.

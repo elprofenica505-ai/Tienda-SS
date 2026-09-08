@@ -46,6 +46,7 @@ export default function Login({ onLogin }: Props) {
             value={emailInput}
             onChange={e => setEmailInput(e.target.value)}
             required
+            autoComplete="email"
             style={{ background: '#030712', border: '1px solid #374151', borderRadius: 12, padding: 14, color: '#fff', fontSize: 14, outline: 'none' }}
           />
           <input
@@ -54,6 +55,7 @@ export default function Login({ onLogin }: Props) {
             value={passInput}
             onChange={e => setPassInput(e.target.value)}
             required
+            autoComplete="current-password"
             style={{ background: '#030712', border: '1px solid #374151', borderRadius: 12, padding: 14, color: '#fff', fontSize: 14, outline: 'none' }}
           />
           {errorLogin && (
@@ -68,27 +70,9 @@ export default function Login({ onLogin }: Props) {
           </button>
         </form>
 
-        <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #1f2937' }}>
-          <p style={{ fontSize: 11, color: '#6b7280', textAlign: 'center', margin: '0 0 10px' }}>Accesos rápidos de prueba</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              { email: 'bodega@test.com', rol: 'Bodega' },
-              { email: 'vendedor@test.com', rol: 'Vendedor' },
-              { email: 'chofer@test.com', rol: 'Chofer' },
-              { email: 'jefe@test.com', rol: 'Jefe' },
-            ].map(u => (
-              <button
-                key={u.email}
-                type="button"
-                onClick={() => { setEmailInput(u.email); setPassInput('1234'); }}
-                style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8, padding: '8px 6px', color: '#d1d5db', fontSize: 11, cursor: 'pointer' }}
-              >
-                {u.rol}
-              </button>
-            ))}
-          </div>
-          <p style={{ fontSize: 10, color: '#6b7280', textAlign: 'center', margin: '10px 0 0' }}>Clave: 1234</p>
-        </div>
+        <p style={{ color: '#9ca3af', fontSize: 12, lineHeight: 1.5, textAlign: 'center', margin: '18px 0 0' }}>
+          Usa tu cuenta real de empresa. Si todavía no tienes un espacio, vuelve al inicio para crear uno.
+        </p>
       </div>
     </div>
   );
