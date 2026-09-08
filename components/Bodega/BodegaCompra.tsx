@@ -41,9 +41,9 @@ export default function ComprasPanel({ user }: { user: UsuarioSistema }) {
     }
     try {
       await addDoc(collection(db, 'compras'), {
-        proveedor,
+        proveedor: proveedor.trim().slice(0, 120),
         monto: parseFloat(monto) || 0,
-        descripcion,
+        descripcion: descripcion.trim().slice(0, 500),
         registradoPor: user.nombre || user.email,
         createdAt: serverTimestamp()
       });
@@ -66,6 +66,7 @@ export default function ComprasPanel({ user }: { user: UsuarioSistema }) {
       <form onSubmit={registrarCompra} style={{ background: '#111827', padding: 14, borderRadius: 12, border: '1px solid #1f2937', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <input 
           placeholder="Nombre del Proveedor..." 
+          maxLength={120}
           value={proveedor} 
           onChange={e => setProveedor(e.target.value)}
           style={{ background: '#1f2937', border: '1px solid #374151', padding: 10, borderRadius: 8, color: '#fff', fontSize: 13 }}
@@ -79,6 +80,7 @@ export default function ComprasPanel({ user }: { user: UsuarioSistema }) {
         />
         <input 
           placeholder="Descripción de la compra / artículos..." 
+          maxLength={500}
           value={descripcion} 
           onChange={e => setDescripcion(e.target.value)}
           style={{ background: '#1f2937', border: '1px solid #374151', padding: 10, borderRadius: 8, color: '#fff', fontSize: 13 }}

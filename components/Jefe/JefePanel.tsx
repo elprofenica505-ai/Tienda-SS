@@ -108,8 +108,9 @@ export default function JefePanel({
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
-          resolve(dataUrl);
+          let dataUrl = canvas.toDataURL('image/jpeg', 0.42);
+          if (dataUrl.length > 120_000) dataUrl = canvas.toDataURL('image/jpeg', 0.28);
+          resolve(dataUrl.length <= 120_000 ? dataUrl : '');
         };
         img.src = e.target?.result as string;
       };
@@ -121,6 +122,10 @@ export default function JefePanel({
     const file = e.target.files?.[0];
     if (!file) return;
     const base64Comprimida = await comprimirImagen(file);
+    if (!base64Comprimida) {
+      alert('La imagen supera el límite de 120 KB y no se guardará dentro del documento. Usa una imagen más pequeña.');
+      return;
+    }
     if (tipo === 'frontal') setFotoCedulaFrontal(base64Comprimida);
     else if (tipo === 'trasera') setFotoCedulaTrasera(base64Comprimida);
     else if (tipo === 'extra') {

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (branchId) assertBranchAccess(context, branchId);
     const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
     const discount = money(body.discount);
-    if (!rawLines.length || !paymentMethod) return NextResponse.json({ error: 'Agrega productos y selecciona un método de pago.' }, { status: 400 });
+    if (!rawLines.length || rawLines.length > 50 || !paymentMethod) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 líneas de productos.' }, { status: 400 });
     if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente guardado.' }, { status: 400 });
 
     const unique = new Map<string, number>();
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
       if (productId && quantity > 0) unique.set(productId, (unique.get(productId) || 0) + quantity);
     }
     if (!unique.size) return NextResponse.json({ error: 'Las cantidades de la venta no son válidas.' }, { status: 400 });
+    if (unique.size > 50) return NextResponse.json({ error: 'Una venta no puede contener más de 50 productos distintos.' }, { status: 400 });
 
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);

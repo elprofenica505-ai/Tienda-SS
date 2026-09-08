@@ -113,7 +113,13 @@ export default function ProductosAdmin() {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        let dataUrl = canvas.toDataURL('image/jpeg', 0.62);
+        if (dataUrl.length > 120_000) dataUrl = canvas.toDataURL('image/jpeg', 0.42);
+        if (dataUrl.length > 120_000) {
+          setImagen('');
+          alert('La imagen supera el límite de 120 KB y no se guardará dentro del documento. Usa una imagen más pequeña.');
+          return;
+        }
         setImagen(dataUrl);
       };
       img.src = event.target?.result as string;
