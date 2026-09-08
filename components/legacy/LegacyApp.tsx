@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Usuario, login as loginFirebase, cerrarSesion, escucharSesion } from '@/lib/auth';
 import type {
@@ -28,6 +28,8 @@ export default function TiendaSS() {
   const [cargandoSesion, setCargandoSesion] = useState(true);
 
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [productosCargados, setProductosCargados] = useState(false);
+  const [loadingProductos, setLoadingProductos] = useState(false);
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [compras, setCompras] = useState<Compra[]>([]);
@@ -41,6 +43,21 @@ export default function TiendaSS() {
 
   const [carrito, setCarrito] = useState<any[]>([]);
   const [ultimaVenta, setUltimaVenta] = useState<Venta | null>(null);
+
+  const cargarProductosBodega = async () => {
+    if (productosCargados || loadingProductos) return;
+    setLoadingProductos(true);
+    try {
+      const snapshot = await getDocs(query(collection(db, 'productos'), limit(25)));
+      setProductos(snapshot.docs.map((item) => {
+        const x = item.data();
+        return { id: item.id, codigo: String(x.codigo || ''), nombre: String(x.nombre || ''), stock: Number(x.stock || 0), stockMinimo: Number(x.stockMinimo ?? 5), precio: Number(x.precio || 0), costo: Number(x.costo || 0), imagen: String(x.imagen || ''), categoria: String(x.categoria || 'Otros') } as Producto;
+      }));
+      setProductosCargados(true);
+    } finally {
+      setLoadingProductos(false);
+    }
+  };
 
   const irA = (v: Vista) => {
     setHistorial(h => [...h, vista]);
@@ -82,76 +99,52 @@ export default function TiendaSS() {
 
   useEffect(() => {
     if (!user) return;
-
-    const unsubProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
-      const lista: Producto[] = [];
-      snapshot.forEach(d => {
-        const x = d.data();
-        lista.push({
-          id: d.id,
-          codigo: x.codigo || '',
-          nombre: x.nombre || '',
-          stock: x.stock || 0,
-          stockMinimo: x.stockMinimo ?? 5,
-          precio: x.precio || 0,
-          costo: x.costo || 0,
-          imagen: x.imagen || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=300',
-          categoria: x.categoria || 'Otros',
-        });
-      });
-      setProductos(lista);
-    });
-
-    const unsubVentas = onSnapshot(collection(db, 'ventas'), (snapshot) => {
-      const lv: Venta[] = [];
-      snapshot.forEach(d => lv.push({ id: d.id, ...d.data() } as Venta));
-      setVentas(lv);
-    });
-
-    const unsubTurnos = onSnapshot(collection(db, 'turnos'), (snapshot) => {
-      const lt: Turno[] = [];
-      snapshot.forEach(d => lt.push({ id: d.id, ...d.data() } as Turno));
-      setTurnos(lt);
-    });
-
-    const unsubCompras = onSnapshot(collection(db, 'compras'), (snapshot) => {
-      const lc: Compra[] = [];
-      snapshot.forEach(d => lc.push({ id: d.id, ...d.data() } as Compra));
-      setCompras(lc);
-    });
-
-    const unsubUsuarios = onSnapshot(collection(db, 'usuarios'), (snapshot) => {
-      const listaUs: UsuarioSistema[] = [];
-      snapshot.forEach(d => listaUs.push({ id: d.id, ...d.data() } as UsuarioSistema));
-      setUsuariosSistema(listaUs);
-    });
-
-    const unsubPermisos = onSnapshot(doc(db, 'config', 'permisos'), (snap) => {
-      if (snap.exists()) {
-        const x = snap.data();
-        setPermisos({
-          bodegaCrearProductos: x.bodegaCrearProductos !== false,
-          bodegaAjustarStock: x.bodegaAjustarStock !== false,
-          bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
-          choferRegistrarCompras: x.choferRegistrarCompras === true,
-          cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
-          cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
-          cajaGestionarCreditos: x.cajaGestionarCreditos === true,
-        });
-      } else {
-        setPermisos(PERMISOS_DEFAULT);
-      }
-    });
-
-    return () => {
-      unsubProductos();
-      unsubVentas();
-      unsubTurnos();
-      unsubCompras();
-      unsubUsuarios();
-      unsubPermisos();
+    let cancelled = false;
+    const readLimited = async <T,>(name: string): Promise<T[]> => {
+      const snapshot = await getDocs(query(collection(db, name), limit(25)));
+      return snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as unknown as T));
     };
-  }, [user]);
+    async function loadVisibleData() {
+      try {
+        const permissionsSnapshot = await getDoc(doc(db, 'config', 'permisos'));
+        if (!cancelled) {
+          if (permissionsSnapshot.exists()) {
+            const x = permissionsSnapshot.data();
+            setPermisos({
+              bodegaCrearProductos: x.bodegaCrearProductos !== false,
+              bodegaAjustarStock: x.bodegaAjustarStock !== false,
+              bodegaRegistrarCompras: x.bodegaRegistrarCompras !== false,
+              choferRegistrarCompras: x.choferRegistrarCompras === true,
+              cajaAbrirCerrar: x.cajaAbrirCerrar !== false,
+              cajaCobrarPreventas: x.cajaCobrarPreventas !== false,
+              cajaGestionarCreditos: x.cajaGestionarCreditos === true,
+            });
+          } else setPermisos(PERMISOS_DEFAULT);
+        }
+        if (vista === 'bodega_home') return;
+        if (['jefe_home', 'bodega_compra', 'bodega_historial', 'vendedor_home', 'cajero_home'].includes(vista)) {
+          const rows = await readLimited<Producto>('productos');
+          if (!cancelled) setProductos(rows.map((x) => ({ id: String(x.id), codigo: String(x.codigo || ''), nombre: String(x.nombre || ''), stock: Number(x.stock || 0), stockMinimo: Number(x.stockMinimo ?? 5), precio: Number(x.precio || 0), costo: Number(x.costo || 0), imagen: String(x.imagen || ''), categoria: String(x.categoria || 'Otros') })));
+        }
+        if (['jefe_home', 'vendedor_home', 'cajero_home'].includes(vista)) {
+          const rows = await readLimited<Venta>('ventas');
+          if (!cancelled) setVentas(rows);
+        }
+        if (vista === 'jefe_home' || vista === 'cajero_home') {
+          const rows = await readLimited<Turno>('turnos');
+          if (!cancelled) setTurnos(rows);
+        }
+        if (vista === 'jefe_home') {
+          const [purchaseRows, userRows] = await Promise.all([readLimited<Compra>('compras'), readLimited<UsuarioSistema>('usuarios')]);
+          if (!cancelled) { setCompras(purchaseRows); setUsuariosSistema(userRows); }
+        }
+      } catch (error) {
+        console.error('No se pudieron cargar los datos de la vista actual', error);
+      }
+    }
+    void loadVisibleData();
+    return () => { cancelled = true; };
+  }, [user, vista]);
 
   const cerrar = async () => {
     await cerrarSesion();
@@ -230,6 +223,9 @@ export default function TiendaSS() {
         irA={irA}
         onCerrar={cerrar}
         permisos={permisos}
+        onRequestProducts={cargarProductosBodega}
+        productosCargados={productosCargados}
+        loadingProductos={loadingProductos}
       />
     );
   }

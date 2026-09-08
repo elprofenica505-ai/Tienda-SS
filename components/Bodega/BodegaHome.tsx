@@ -14,6 +14,9 @@ interface Props {
   permisos?: Permisos;
   irA: (vista: any) => void;
   onCerrar: () => void;
+  onRequestProducts: () => Promise<void>;
+  productosCargados: boolean;
+  loadingProductos: boolean;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -45,6 +48,9 @@ export default function BodegaHome({
   permisos = PERMISOS_DEFAULT,
   irA,
   onCerrar,
+  onRequestProducts,
+  productosCargados,
+  loadingProductos,
 }: Props) {
   const [nombre, setNombre] = useState('');
   const [stock, setStock] = useState('');
@@ -55,6 +61,12 @@ export default function BodegaHome({
   const [ajustandoId, setAjustandoId] = useState<string | null>(null);
   const [nuevoStock, setNuevoStock] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [mostrarProductos, setMostrarProductos] = useState(false);
+
+  async function abrirProductos() {
+    setMostrarProductos(true);
+    if (!productosCargados) await onRequestProducts();
+  }
 
   const filtrados = productos.filter(p =>
     p.nombre.toLowerCase().includes(busqueda.toLowerCase())
@@ -152,6 +164,9 @@ export default function BodegaHome({
           </button>
         </div>
 
+        <button type="button" onClick={() => { if (mostrarProductos) setMostrarProductos(false); else void abrirProductos(); }} style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#a7f3d0', cursor: 'pointer', textAlign: 'left' }}><span><b style={{ display: 'block', fontSize: 15 }}>Productos y stock</b><small style={{ display: 'block', color: '#9ca3af', marginTop: 4 }}>{mostrarProductos ? 'Lectura activa' : 'Abrir solo cuando necesites consultar existencias'}</small></span><strong>{loadingProductos ? 'Cargando…' : mostrarProductos ? '⌃' : '⌄'}</strong></button>
+
+        {mostrarProductos && (<>
         {/* Nuevo producto */}
         {permisos.bodegaCrearProductos ? (
           <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -241,6 +256,7 @@ export default function BodegaHome({
         {filtrados.length === 0 && (
           <p style={{ textAlign: 'center', color: '#6b7280', fontSize: 13 }}>No hay productos</p>
         )}
+        </>)}
       </div>
     </div>
   );

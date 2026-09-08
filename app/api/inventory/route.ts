@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from '@/lib/pagination';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 
@@ -19,22 +20,50 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'view');
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
-    const [products, movements] = await Promise.all([
-      tenant.collection('products').where('active', '==', true).get(),
-      tenant.collection('inventoryMovements').orderBy('createdAt', 'desc').limit(40).get()
-    ]);
+    const params = new URL(request.url).searchParams;
+    const productsRequested = params.get('products') === 'true';
+    const pageSize = parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE);
+    const rawCursor = parseCursor(params.get('cursor'));
+    let cursor: { name: string; id: string } | undefined;
+    if (rawCursor) {
+      try {
+        const parsed = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: unknown; id?: unknown };
+        if (typeof parsed.name === 'string' && typeof parsed.id === 'string') cursor = { name: parsed.name, id: parsed.id };
+      } catch {
+        return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 });
+      }
+    }
 
-    const productRows: Array<Record<string, unknown> & { id: string }> = products.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const movementsQuery = tenant.collection('inventoryMovements')
+      .where('createdAt', '>=', cutoff)
+      .orderBy('createdAt', 'desc')
+      .limit(DEFAULT_PAGE_SIZE);
+    const productsQuery = productsRequested
+      ? (() => {
+          let query = tenant.collection('products').where('active', '==', true).orderBy('name').orderBy('__name__').limit(pageSize + 1);
+          if (cursor) query = query.startAfter(cursor.name, cursor.id);
+          return query;
+        })()
+      : null;
+    const [movements, products] = await Promise.all([movementsQuery.get(), productsQuery?.get()]);
+    const productDocs = products?.docs || [];
+    const pageDocs = productDocs.slice(0, pageSize);
+    const productRows: Array<Record<string, unknown> & { id: string }> = pageDocs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
     const lowStock = productRows.filter((item) => item.itemType !== 'service' && Number(item.stock || 0) <= Number(item.minStock || 0));
     const totalUnits = productRows.reduce((total, item) => total + (item.itemType === 'service' ? 0 : Number(item.stock || 0)), 0);
-
+    const next = productDocs.length > pageSize ? pageDocs[pageDocs.length - 1] : undefined;
+    const nextCursor = next ? Buffer.from(JSON.stringify({ name: String(next.data().name || ''), id: next.id }), 'utf8').toString('base64url') : undefined;
     return NextResponse.json({
       ok: true,
       tenantId: context.tenantId,
-      summary: { products: productRows.length, totalUnits, lowStock: lowStock.length },
+      productsLoaded: productsRequested,
+      summary: { products: productsRequested ? productRows.length : null, totalUnits: productsRequested ? totalUnits : null, lowStock: productsRequested ? lowStock.length : null },
       products: productRows,
       lowStock,
-      movements: movements.docs.map((item) => ({ id: item.id, ...item.data() }))
+      movements: movements.docs.map((item) => ({ id: item.id, ...item.data() })),
+      productsPage: paginatedResponse(productRows, pageSize, nextCursor)
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);

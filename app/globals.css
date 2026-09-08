@@ -252,3 +252,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 820px) { .skeleton-content { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .skeleton-sidebar { flex-basis: 88px; padding: 18px 10px; } .skeleton-logo { width: 42px; } .skeleton-metrics { grid-template-columns: repeat(2, 1fr); } .skeleton-content { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .reveal-wrap, .command-center { opacity: 1; transform: none; transition: none; animation: none; } .skeleton-logo, .skeleton-nav, .skeleton-heading span, .skeleton-heading b, .skeleton-actions i, .skeleton-card span, .skeleton-card b, .skeleton-card i { animation: none; } }
+
+/* Inventory cost control: products are an explicit, paginated disclosure. */
+.inventory-products-disclosure { margin-top: 16px; }
+.inventory-products-toggle { align-items: center; background: linear-gradient(135deg, #193b27, #29543a); border: 1px solid #376346; border-radius: 16px; color: #fff; display: flex; justify-content: space-between; padding: 19px 22px; text-align: left; width: 100%; }
+.inventory-products-toggle:hover { box-shadow: 0 12px 28px rgba(24, 61, 34, .15); transform: translateY(-1px); }
+.inventory-products-toggle span { display: grid; gap: 5px; }
+.inventory-products-toggle b { color: var(--cx-accent); font-size: 16px; }
+.inventory-products-toggle small { color: #bfd1bd; font-size: 10px; }
+.inventory-products-toggle>strong { color: var(--cx-accent); font-size: 22px; }
+.inventory-products-disclosure .inventory-layout { animation: disclosure-in .3s ease both; }
+.load-more-button { background: #f6faf4; border: 1px solid var(--cx-border); border-radius: 9px; color: #6f963f; display: block; font-size: 11px; font-weight: 800; margin: 18px auto 2px; padding: 11px 15px; }
+.load-more-button:hover { background: #e9f6d7; border-color: #b4d687; }
+.load-more-button:disabled { cursor: wait; opacity: .65; }
+@keyframes disclosure-in { from { opacity: 0; transform: translateY(-7px); } to { opacity: 1; transform: translateY(0); } }

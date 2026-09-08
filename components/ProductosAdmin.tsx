@@ -3,7 +3,7 @@
 import NextImage from 'next/image';
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, getDocs, limit, query } from 'firebase/firestore';
 
 interface Producto {
   id: string;
@@ -45,49 +45,34 @@ export default function ProductosAdmin() {
   const [mostrarModalCategorias, setMostrarModalCategorias] = useState(false);
 
   useEffect(() => {
-    const unsubscribeProductos = onSnapshot(collection(db, 'productos'), (snapshot) => {
-      const lista: Producto[] = snapshot.docs.map((docItem) => {
-        const data = docItem.data();
-        return {
-          id: docItem.id,
-          nombre: data.nombre || '',
-          categoria: data.categoria || 'Otros',
-          precio: Number(data.precio) || 0,
-          stock: Number(data.stock) || 0,
-          codigo: data.codigo || '',
-          imagen: data.imagen || '',
-          costo: Number(data.costo) || 0,
-        };
-      });
-      setProductos(lista);
-    });
-
-    const unsubscribeCategorias = onSnapshot(collection(db, 'categorias'), async (snapshot) => {
-      if (snapshot.empty) {
-        for (const catInicial of CATEGORIAS_INICIALES) {
-          await addDoc(collection(db, 'categorias'), { nombre: catInicial });
+    let cancelled = false;
+    async function loadCatalogOnce() {
+      try {
+        const [productsSnapshot, categoriesSnapshot] = await Promise.all([
+          getDocs(query(collection(db, 'productos'), limit(25))),
+          getDocs(collection(db, 'categorias')),
+        ]);
+        if (!cancelled) {
+          const lista: Producto[] = productsSnapshot.docs.map((docItem) => {
+            const data = docItem.data();
+            return { id: docItem.id, nombre: data.nombre || '', categoria: data.categoria || 'Otros', precio: Number(data.precio) || 0, stock: Number(data.stock) || 0, codigo: data.codigo || '', imagen: data.imagen || '', costo: Number(data.costo) || 0 };
+          });
+          setProductos(lista);
+          const listaCats: CategoriaDoc[] = categoriesSnapshot.docs.map((docItem) => ({ id: docItem.id, nombre: docItem.data().nombre as string }));
+          listaCats.sort((a, b) => a.nombre.localeCompare(b.nombre));
+          setCategoriasObjs(listaCats);
+          if (listaCats.length > 0 && !categoriaSeleccionada) setCategoriaSeleccionada(listaCats[0].nombre);
         }
-        return;
+        if (categoriesSnapshot.empty) {
+          await Promise.all(CATEGORIAS_INICIALES.map((nombre) => addDoc(collection(db, 'categorias'), { nombre })));
+        }
+      } catch (error) {
+        console.error('No se pudo cargar el catálogo', error);
       }
-
-      const listaCats: CategoriaDoc[] = snapshot.docs.map((docItem) => ({
-        id: docItem.id,
-        nombre: docItem.data().nombre as string,
-      }));
-
-      listaCats.sort((a, b) => a.nombre.localeCompare(b.nombre));
-      setCategoriasObjs(listaCats);
-
-      if (listaCats.length > 0 && !categoriaSeleccionada) {
-        setCategoriaSeleccionada(listaCats[0].nombre);
-      }
-    });
-
-    return () => {
-      unsubscribeProductos();
-      unsubscribeCategorias();
     }
-  }, [categoriaSeleccionada]);
+    void loadCatalogOnce();
+    return () => { cancelled = true; };
+  }, []);
 
   const categoriasDeProductos = productos.map((p) => p.categoria).filter(Boolean);
   const todasLasCategoriasMap = new Map<string, string>();
@@ -148,16 +133,6 @@ export default function ProductosAdmin() {
 
   const generarCodigoUnico = async () => {
     const codigosExistentes = new Set(productos.map((p) => p.codigo));
-    try {
-      const snapshot = await getDocs(collection(db, 'productos'));
-      snapshot.docs.forEach((d) => {
-        const data = d.data();
-        if (data.codigo) codigosExistentes.add(data.codigo);
-      });
-    } catch (e) {
-      console.error(e);
-    }
-
     let nuevoCodigo = '';
     let intentos = 0;
     do {
@@ -165,7 +140,6 @@ export default function ProductosAdmin() {
       intentos++;
       if (intentos > 50) break;
     } while (codigosExistentes.has(nuevoCodigo));
-
     setCodigo(nuevoCodigo);
   };
 

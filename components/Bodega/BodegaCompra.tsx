@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, orderBy, query, serverTimestamp, where, limit, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { UsuarioSistema } from '@/components/shared/types';
 
@@ -14,7 +14,9 @@ export default function ComprasPanel({ user }: { user: UsuarioSistema }) {
   const cargarCompras = async () => {
     try {
       setCargando(true);
-      const querySnapshot = await getDocs(collection(db, 'compras'));
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 7);
+      const querySnapshot = await getDocs(query(collection(db, 'compras'), where('createdAt', '>=', Timestamp.fromDate(cutoff)), orderBy('createdAt', 'desc'), limit(25)));
       const lista: any[] = [];
       querySnapshot.forEach((doc) => {
         lista.push({ id: doc.id, ...doc.data() });
@@ -88,7 +90,7 @@ export default function ComprasPanel({ user }: { user: UsuarioSistema }) {
 
       {/* Listado Seguro */}
       <div style={{ background: '#111827', padding: 14, borderRadius: 12, border: '1px solid #1f2937' }}>
-        <p style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Historial de Compras ({compras.length})</p>
+        <p style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Historial de Compras · últimos 7 días ({compras.length})</p>
         {cargando ? (
           <p style={{ fontSize: 12, color: '#9ca3af' }}>Cargando compras...</p>
         ) : compras.length === 0 ? (
