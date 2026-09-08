@@ -1,9 +1,10 @@
 'use client';
 
 import NextImage from 'next/image';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, deleteDoc, doc, getDocs, limit, query } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, limit, query } from 'firebase/firestore';
+import { snapshotRows, useCollectionOnce } from '@/hooks/useFirestoreCollection';
 
 interface Producto {
   id: string;
@@ -43,36 +44,31 @@ export default function ProductosAdmin() {
   const [imagen, setImagen] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [mostrarModalCategorias, setMostrarModalCategorias] = useState(false);
+  const productsQuery = useMemo(() => query(collection(db, 'productos'), limit(25)), []);
+  const categoriesQuery = useMemo(() => query(collection(db, 'categorias'), limit(100)), []);
+  const productsLoad = useCollectionOnce(productsQuery);
+  const categoriesLoad = useCollectionOnce(categoriesQuery);
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadCatalogOnce() {
-      try {
-        const [productsSnapshot, categoriesSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'productos'), limit(25))),
-          getDocs(collection(db, 'categorias')),
-        ]);
-        if (!cancelled) {
-          const lista: Producto[] = productsSnapshot.docs.map((docItem) => {
-            const data = docItem.data();
-            return { id: docItem.id, nombre: data.nombre || '', categoria: data.categoria || 'Otros', precio: Number(data.precio) || 0, stock: Number(data.stock) || 0, codigo: data.codigo || '', imagen: data.imagen || '', costo: Number(data.costo) || 0 };
-          });
-          setProductos(lista);
-          const listaCats: CategoriaDoc[] = categoriesSnapshot.docs.map((docItem) => ({ id: docItem.id, nombre: docItem.data().nombre as string }));
-          listaCats.sort((a, b) => a.nombre.localeCompare(b.nombre));
-          setCategoriasObjs(listaCats);
-          if (listaCats.length > 0 && !categoriaSeleccionada) setCategoriaSeleccionada(listaCats[0].nombre);
-        }
-        if (categoriesSnapshot.empty) {
-          await Promise.all(CATEGORIAS_INICIALES.map((nombre) => addDoc(collection(db, 'categorias'), { nombre })));
-        }
-      } catch (error) {
-        console.error('No se pudo cargar el catálogo', error);
-      }
+    const rows = snapshotRows(productsLoad.data);
+    setProductos(rows.map((data) => ({ id: data.id, nombre: String(data.nombre || ''), categoria: String(data.categoria || 'Otros'), precio: Number(data.precio) || 0, stock: Number(data.stock) || 0, codigo: String(data.codigo || ''), imagen: String(data.imagen || ''), costo: Number(data.costo) || 0 })));
+  }, [productsLoad.data]);
+
+  useEffect(() => {
+    const rows = snapshotRows(categoriesLoad.data);
+    const listaCats: CategoriaDoc[] = rows.map((data) => ({ id: data.id, nombre: String(data.nombre || '') }));
+    listaCats.sort((a, b) => a.nombre.localeCompare(b.nombre));
+    setCategoriasObjs(listaCats);
+    if (listaCats.length > 0) setCategoriaSeleccionada((current) => current || listaCats[0].nombre);
+    if (categoriesLoad.data?.empty) {
+      void Promise.all(CATEGORIAS_INICIALES.map((nombre) => addDoc(collection(db, 'categorias'), { nombre })));
     }
-    void loadCatalogOnce();
-    return () => { cancelled = true; };
-  }, []);
+  }, [categoriesLoad.data]);
+
+  useEffect(() => {
+    if (productsLoad.error) console.error('No se pudo cargar el catálogo de productos', productsLoad.error);
+    if (categoriesLoad.error) console.error('No se pudieron cargar las categorías', categoriesLoad.error);
+  }, [productsLoad.error, categoriesLoad.error]);
 
   const categoriasDeProductos = productos.map((p) => p.categoria).filter(Boolean);
   const todasLasCategoriasMap = new Map<string, string>();
