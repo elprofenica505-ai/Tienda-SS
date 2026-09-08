@@ -128,3 +128,25 @@ Nunca registrar en este documento valores de `.env.local`, claves Stripe, claves
 - [x] Existe backup diario, retención y script de restore.
 - [x] Existen eventos para las cuatro alertas mínimas.
 - [ ] El proveedor externo de alertas y el ensayo de restore quedan configurados y archivados.
+
+## ETAPA 5 — Calidad, pruebas y CI/CD (P2)
+
+| Estado | Tarea | Evidencia o pendiente |
+|---|---|---|
+| [x] | Pruebas API e integración | `npm test` y `npm run test:integration` cubren autorización, aislamiento, negocio, Stripe, rate limits, listeners y reglas de política API. |
+| [x] | Suite E2E Playwright | `e2e/critical-journeys.spec.ts` cubre registro, login, producto, venta cobrada, crédito, cuentas por cobrar, billing e invitación/aceptación condicionados a staging. |
+| [x] | Install limpio | CI ejecuta `npm ci` en los jobs de calidad, reglas y E2E. |
+| [x] | Typecheck y lint | CI ejecuta `npm run typecheck` y `npm run lint` con `--max-warnings=0`. |
+| [x] | Tests, reglas y build | CI ejecuta `npm test`, `npm run test:integration`, `npm run test:rules` y `npm run build`. |
+| [x] | Secret scanning | Gitleaks bloquea secretos detectados en cambios. |
+| [x] | Dependency scanning | SBOM, audit de producción, Dependency Review y Dependabot quedan configurados. |
+| [ ] | Resolver toda deuda transitiva existente | El audit completo aún reporta dependencias transitivas de herramientas/Next; se documentó y se evita `npm audit fix --force` fuera de un PR de compatibilidad. |
+| [ ] | Activar E2E staging | Requiere configurar `E2E_ENABLED`, secretos y tenant de staging dedicado en GitHub. |
+| [ ] | Proteger branch en GitHub | Requiere marcar `quality`, `firestore-rules`, `dependency-review` y opcionalmente `e2e-staging` como checks obligatorios. |
+
+### Checkpoint Etapa 5
+
+- [x] Un PR falla si rompe typecheck, lint, tests, reglas Firestore o build.
+- [x] Un PR es revisado contra nuevas vulnerabilidades altas y secretos.
+- [x] Los journeys críticos tienen una suite Playwright reproducible en staging.
+- [ ] GitHub branch protection queda activado en la cuenta del repositorio.
