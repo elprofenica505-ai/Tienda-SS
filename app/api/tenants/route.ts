@@ -10,8 +10,6 @@ function validEmail(value: unknown): value is string {
 }
 
 export async function POST(request: NextRequest) {
-  const rate = await consumeDistributedRateLimits({ endpoint: 'tenant-signup', ip: getClientAddress(request) }, { ip: 5, endpoint: 100, composite: 5 }, 15 * 60 * 1000);
-  if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
   let uid: string | undefined;
 
   try {
@@ -20,6 +18,8 @@ export async function POST(request: NextRequest) {
     const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     const password = typeof body.password === 'string' ? body.password : '';
+    const website = typeof body.website === 'string' ? body.website.trim() : '';
+    if (website) return NextResponse.json({ error: 'No se pudo crear la empresa.' }, { status: 400 });
 
     if (
       companyName.length < 2 || companyName.length > 120 ||
@@ -28,6 +28,9 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json({ error: 'Revisa el nombre, correo y contraseña.' }, { status: 400 });
     }
+
+    const rate = await consumeDistributedRateLimits({ endpoint: 'tenant-signup', ip: getClientAddress(request) }, { ip: 5, endpoint: 100, composite: 5 }, 15 * 60 * 1000);
+    if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
 
     const auth = getAdminAuth();
     const db = getAdminDb();

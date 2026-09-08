@@ -7,6 +7,7 @@ export type ApiPolicy = {
 
 const publicRoutes = new Set([
   'GET /api/health',
+  'POST /api/auth/login-attempt',
   'POST /api/tenants',
   'POST /api/billing/webhook',
   'GET /api/invitations/accept',

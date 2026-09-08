@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
+import { redactSensitiveFields } from '@/lib/data-scope';
 
 export const runtime = 'nodejs';
 
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
       ok: true,
       tenantId: context.tenantId,
       categories: categories.docs.map((item) => ({ id: item.id, ...item.data() })),
-      products: products.map((item) => ({ id: item.id, ...item.data() })),
+      products: products.map((item) => ({ id: item.id, ...redactSensitiveFields(item.data() as Record<string, unknown>, context) })),
       pagination: { pageSize, hasMore, nextCursor: hasMore ? products[products.length - 1]?.id || null : null }
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
@@ -98,14 +99,16 @@ export async function POST(request: NextRequest) {
     const product = {
       name, sku, itemType, categoryId,
       price: Math.max(0, cleanNumber(body.price)),
-      cost: Math.max(0, cleanNumber(body.cost)),
+      cost: context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe'
+        ? Math.max(0, cleanNumber(body.cost))
+        : 0,
       stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.stock)),
       minStock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)),
       unit: cleanText(body.unit, 20) || 'unidad',
       active: true, createdBy: context.uid, createdAt: now, updatedAt: now
     };
     await ref.set(product);
-    return NextResponse.json({ ok: true, item: { id: ref.id, ...product } }, { status: 201 });
+    return NextResponse.json({ ok: true, item: { id: ref.id, ...redactSensitiveFields(product, context) } }, { status: 201 });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });

@@ -62,7 +62,12 @@ export async function requireTenantMember(
     throw new Error('UNAUTHENTICATED');
   }
 
-  const decoded = await getAdminAuth().verifyIdToken(token, true);
+  let decoded;
+  try {
+    decoded = await getAdminAuth().verifyIdToken(token, true);
+  } catch {
+    throw new Error('UNAUTHENTICATED');
+  }
   const requestedTenant = request.headers.get('x-tenant-id')?.trim();
 
   if (!requestedTenant) {

@@ -28,7 +28,7 @@ const superadminRoutes = [
 ];
 
 const discoveredTenantRoutes = ['/api/tenants/me'];
-const publicRoutes = ['/api/health', '/api/tenants', '/api/billing/webhook'];
+const publicRoutes = ['/api/health', '/api/auth/login-attempt', '/api/tenants', '/api/billing/webhook'];
 
 function request(path: string, method = 'GET', headers?: Record<string, string>) {
   return new NextRequest(`http://localhost${path}`, { method, headers });
@@ -80,7 +80,7 @@ test('matriz permite el descubrimiento de tenant sin x-tenant-id', () => {
 
 test('matriz reconoce únicamente las excepciones públicas documentadas', () => {
   for (const path of publicRoutes) {
-    const method = path === '/api/tenants' || path === '/api/billing/webhook' ? 'POST' : 'GET';
+    const method = path === '/api/tenants' || path === '/api/auth/login-attempt' || path === '/api/billing/webhook' ? 'POST' : 'GET';
     assert.equal(isPublicApiRoute(path, method), true, `${method} ${path} debe ser pública`);
   }
   assert.equal(isPublicApiRoute('/api/catalog', 'GET'), false);
