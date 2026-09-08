@@ -10,6 +10,8 @@ El rate limit de `requireTenantMember` permanece activo y no fue deshabilitado.
 
 Los flujos del workspace usan rutas API con Admin SDK y `x-tenant-id`; el navegador no consulta libremente las colecciones multi-tenant. `/api/catalog` devuelve como máximo 25 productos y 100 categorías por solicitud, con cursor y `nextCursor`. `/api/inventory` ya limita sus páginas a 25. `/api/sales` limita el historial a 50 y `/api/receivables` limita ventas y pagos a una ventana fija de 25 registros, informando si hay más ventas.
 
+La pantalla `/workspace/catalog` consume el cursor y ofrece “Cargar más productos”; cada interacción solicita otra página acotada, sin volver a descargar el catálogo completo.
+
 ## Listeners y lecturas eliminados o justificados
 
 No se agregaron listeners `onSnapshot`. La carga de productos del rol bodega es diferida: el home no solicita productos hasta abrir “Productos y stock”; al desmontar o cambiar de pantalla no queda un listener activo. En el workspace activo las consultas se realizan con `fetch` a endpoints paginados y no con queries libres del navegador. El componente legacy conserva compatibilidad histórica, pero no es la entrada del flujo SaaS multi-tenant.
@@ -28,6 +30,7 @@ No se agregaron listeners `onSnapshot`. La carga de productos del rol bodega es 
 - `app/api/invitations/route.ts`
 - `app/api/invitations/accept/route.ts`
 - `app/api/receivables/route.ts`
+- `app/workspace/catalog/page.tsx`
 - `docs/BLOQUE-5-6-CIERRE.md`
 
 El cambio no altera el proveedor de sesión, la selección de tenant, el login multi-tenant ni el flujo de alta de un tenant vacío.
