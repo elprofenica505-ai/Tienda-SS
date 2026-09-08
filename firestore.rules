@@ -144,6 +144,10 @@ service cloud.firestore {
           || hasRole(tenantId, 'cajero');
         allow delete: if false;
       }
+      match /creditMovements/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update, delete: if false;
+      }
       match /stats/{statsDocument} {
         allow read: if isMember(tenantId);
         allow write: if false;

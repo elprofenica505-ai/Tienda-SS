@@ -100,6 +100,10 @@ export async function POST(request: NextRequest) {
       const sequence = Number(fiscalConfig.nextInvoiceSequence || 1);
       const invoiceNumber = formatFiscalNumber(typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', sequence);
       const total = fiscalMoney(fiscal.total);
+      const customerCreditBalance = customerSnapshot ? money(customerSnapshot.data()?.creditBalance) : 0;
+      const customerCreditLimit = customerSnapshot ? money(customerSnapshot.data()?.creditLimit) : 0;
+      const creditOverride = body.creditOverride === true && ['owner', 'admin'].includes(context.role);
+      if (paymentMethod === 'credit' && customerCreditBalance + total > customerCreditLimit && !creditOverride) throw new Error(`CREDIT_LIMIT_EXCEEDED:${customerCreditLimit}:${customerCreditBalance}`);
       const now = new Date();
       productSnapshots.forEach((snapshot, index) => {
         const data = snapshot.data() || {};
@@ -111,7 +115,12 @@ export async function POST(request: NextRequest) {
         transaction.set(movementRefs[index], { productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
       });
       const response = { saleId: saleRef.id, total, lines, invoiceNumber };
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      const paidAmount = paymentMethod === 'credit' ? 0 : total;
+      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      if (paymentMethod === 'credit' && customerRef) {
+        transaction.update(customerRef, { creditBalance: customerCreditBalance + total, updatedAt: now, updatedBy: context.uid });
+        transaction.create(tenant.collection('creditMovements').doc(), { customerId, saleId: saleRef.id, type: 'charge', amount: total, balanceAfter: customerCreditBalance + total, createdBy: context.uid, createdAt: now });
+      }
       transaction.set(fiscalRef, { nextInvoiceSequence: sequence + 1, invoicePrefix: typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', currency: 'NIO', updatedAt: now }, { merge: true });
       transaction.set(statsRef, { salesCount: FieldValue.increment(1), salesTotal: FieldValue.increment(total), updatedAt: now }, { merge: true });
       if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
@@ -125,6 +134,7 @@ export async function POST(request: NextRequest) {
     if (message === 'CUSTOMER_NOT_FOUND') return NextResponse.json({ error: 'El cliente seleccionado no existe o está archivado.' }, { status: 404 });
     if (message.startsWith('INSUFFICIENT_STOCK:')) return NextResponse.json({ error: `Stock insuficiente para ${message.split(':').slice(1).join(':')}.` }, { status: 409 });
     if (message.startsWith('FISCAL_INVALID:')) return NextResponse.json({ error: message.slice('FISCAL_INVALID:'.length) }, { status: 400 });
+    if (message.startsWith('CREDIT_LIMIT_EXCEEDED:')) return NextResponse.json({ error: `El crédito disponible es insuficiente. Límite: $${message.split(':')[1]}, saldo actual: $${message.split(':')[2]}.` }, { status: 409 });
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }

@@ -18,12 +18,15 @@ export async function GET(request: NextRequest) {
       tenant.collection('receivablePayments').orderBy('createdAt', 'desc').limit(PAGE_SIZE).get()
     ]);
     const payments = paymentsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string }> = salesSnapshot.docs.slice(0, PAGE_SIZE).map((item) => {
+    const now = new Date();
+    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string; overdue: boolean }> = salesSnapshot.docs.slice(0, PAGE_SIZE).map((item) => {
       const data = item.data() as Record<string, unknown>;
       const total = amount(data.total);
       const paidAmount = amount(data.paidAmount);
       const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount);
-      return { id: item.id, ...data, total, paidAmount, balanceDue, paymentStatus: balanceDue <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'pending' };
+      const dueAtValue = data.dueAt as { toDate?: () => Date } | Date | undefined;
+      const dueAt = dueAtValue && 'toDate' in dueAtValue && typeof dueAtValue.toDate === 'function' ? dueAtValue.toDate() : dueAtValue;
+      return { id: item.id, ...data, total, paidAmount, balanceDue, overdue: balanceDue > 0 && dueAt instanceof Date && dueAt < now, paymentStatus: balanceDue <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'pending' };
     }).filter((item) => item.balanceDue > 0 || item.paymentStatus === 'paid');
     const byCustomer = new Map<string, { customerId: string; customerName: string; sales: number; total: number; paid: number; balance: number }>();
     for (const sale of sales) {
@@ -31,7 +34,7 @@ export async function GET(request: NextRequest) {
       const current = byCustomer.get(key) || { customerId: key, customerName: String(sale.customerName || 'Cliente sin identificar'), sales: 0, total: 0, paid: 0, balance: 0 };
       current.sales += 1; current.total += amount(sale.total); current.paid += amount(sale.paidAmount); current.balance += amount(sale.balanceDue); byCustomer.set(key, current);
     }
-    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: salesSnapshot.size > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: salesSnapshot.size > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), overdue: sales.filter((sale) => sale.overdue).reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
@@ -49,11 +52,12 @@ export async function POST(request: NextRequest) {
     const result = await db.runTransaction(async (transaction) => {
       const sale = await transaction.get(saleRef);
       if (!sale.exists || sale.data()?.paymentMethod !== 'credit') throw new Error('SALE_NOT_FOUND');
-      const data = sale.data() || {}; const total = amount(data.total); const paidAmount = amount(data.paidAmount); const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount);
+      const data = sale.data() || {}; const total = amount(data.total); const paidAmount = amount(data.paidAmount); const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount); const customerRef = data.customerId ? tenant.collection('customers').doc(String(data.customerId)) : null; const customerSnapshot = customerRef ? await transaction.get(customerRef) : null;
       if (payment > balanceDue) throw new Error('PAYMENT_EXCEEDS_BALANCE');
       const newPaid = amount(paidAmount + payment); const newBalance = amount(balanceDue - payment); const paymentStatus = newBalance <= 0 ? 'paid' : 'partial'; const now = new Date();
       transaction.update(saleRef, { paidAmount: newPaid, balanceDue: newBalance, paymentStatus, updatedAt: now, updatedBy: context.uid });
       transaction.set(paymentRef, { saleId, customerId: data.customerId || null, customerName: data.customerName || 'Cliente sin identificar', amount: payment, paymentMethod: method, notes: text(body.notes, 300), createdBy: context.uid, createdAt: now });
+      if (customerRef && customerSnapshot?.exists) { const currentCredit = amount(customerSnapshot.data()?.creditBalance); transaction.update(customerRef, { creditBalance: Math.max(0, currentCredit - payment), updatedAt: now, updatedBy: context.uid }); transaction.create(tenant.collection('creditMovements').doc(), { customerId: data.customerId, saleId, paymentId: paymentRef.id, type: 'payment', amount: payment, balanceAfter: Math.max(0, currentCredit - payment), createdBy: context.uid, createdAt: now }); }
       return { saleId, paymentId: paymentRef.id, paidAmount: newPaid, balanceDue: newBalance, paymentStatus };
     });
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, before: { balanceDue: result.balanceDue + payment, paidAmount: result.paidAmount - payment }, after: result, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/receivables' }, result: 'success' });

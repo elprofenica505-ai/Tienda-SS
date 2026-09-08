@@ -22,7 +22,8 @@ type DashboardData = {
   report: Report;
   dailyStats: DailyStats;
   products: Product[];
-  customers: { id: string; name: string }[];
+  customers: { id: string; name: string; creditBalance?: number }[];
+  pendingPresales: { id: string; ticketCode: string; total: number; status: string }[];
 };
 
 const money = (value: number) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -41,23 +42,26 @@ function WorkspaceContent() {
     try {
       const token = await authUser.getIdToken();
       const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id };
-      const [reportResponse, statsResponse, catalogResponse, contactsResponse] = await Promise.all([
+      const [reportResponse, statsResponse, catalogResponse, contactsResponse, presalesResponse] = await Promise.all([
         fetch('/api/reports?days=30', { headers, cache: 'no-store' }),
         fetch('/api/stats/daily', { headers, cache: 'no-store' }),
         fetch('/api/catalog', { headers, cache: 'no-store' }),
         fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }),
+        fetch('/api/presales', { headers, cache: 'no-store' }),
       ]);
-      const [report, dailyStatsResponse, catalog, contacts] = await Promise.all([
+      const [report, dailyStatsResponse, catalog, contacts, presales] = await Promise.all([
         reportResponse.json(),
         statsResponse.json(),
         catalogResponse.json(),
         contactsResponse.json(),
+        presalesResponse.json(),
       ]);
       if (!reportResponse.ok) throw new Error(report.error || 'No se pudo cargar el resumen.');
       if (!statsResponse.ok) throw new Error(dailyStatsResponse.error || 'No se pudieron cargar las estadísticas diarias.');
       if (!catalogResponse.ok) throw new Error(catalog.error || 'No se pudo cargar el catálogo.');
       if (!contactsResponse.ok) throw new Error(contacts.error || 'No se pudieron cargar los clientes.');
-      setData({ report, dailyStats: dailyStatsResponse.stats || { salesCount: 0, salesTotal: 0 }, products: catalog.products || [], customers: contacts.contacts || [] });
+      if (!presalesResponse.ok) throw new Error(presales.error || 'No se pudieron cargar los tickets pendientes.');
+      setData({ report, dailyStats: dailyStatsResponse.stats || { salesCount: 0, salesTotal: 0 }, products: catalog.products || [], customers: contacts.contacts || [], pendingPresales: (presales.presales || []).filter((item: { status: string }) => item.status === 'sent_to_cashier') });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo cargar el centro de mando.');
     } finally {
@@ -68,6 +72,7 @@ function WorkspaceContent() {
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
 
   const lowStock = useMemo(() => (data?.products || []).filter((product) => product.active !== false && product.itemType !== 'service' && Number(product.stock || 0) <= Number(product.minStock || 0)), [data]);
+  const openCredit = useMemo(() => (data?.customers || []).reduce((sum, customer) => sum + Number(customer.creditBalance || 0), 0), [data]);
   const maxDaily = Math.max(...(data?.report.daily || []).map((item) => Math.max(item.income, item.expenses)), 1);
 
   if (tenantLoading || loading) return <WorkspaceSkeleton />;

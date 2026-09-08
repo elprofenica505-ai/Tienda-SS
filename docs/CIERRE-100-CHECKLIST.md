@@ -57,6 +57,28 @@ La evidencia detallada está en `docs/ETAPA-1-ONBOARDING-CHECKLIST.md`.
 
 La evidencia detallada está en `docs/ETAPA-2-PREVENTA-CAJA-STOCK.md`.
 
+### ETAPA 3 — Crédito / fiado v1
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Clientes con límite y saldo | Contactos guarda `creditLimit` y `creditBalance` dentro del tenant. |
+| [x] | Venta a crédito | Caja exige cliente, valida límite y permite override únicamente a owner/admin. |
+| [x] | Cartera y abonos | Ventas guardan saldo, vencimiento simple a 30 días; abonos actualizan venta, cliente y `creditMovements`. |
+| [x] | Pantalla de control | Contactos muestra límite/saldo y Receivables expone saldo, clientes y vencidos. |
+| [x] | Interés/cargo | Se mantiene saldo plano v1; intereses quedan para v1.1. |
+
+### ETAPA 4 — Panel dueño y reportes
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Ventas de hoy | Dashboard usa `/api/stats/daily` y no barre ventas para el KPI diario. |
+| [x] | Tickets pendientes y cartera | Dashboard carga preventas limitadas y clientes con saldo agregado. |
+| [x] | Stock bajo | Dashboard filtra productos activos bajo mínimo y enlaza Inventario. |
+| [x] | Reportes mínimos | Reportes existentes soportan rangos, métodos, vendedor/productos y exportación CSV limitada. |
+| [x] | Control de equipo | Navegación y módulos reutilizan miembros y permisos tenant existentes. |
+
+La evidencia detallada está en `docs/ETAPA-3-4-CREDITO-DASHBOARD.md`.
+
 | Estado | Tarea | Evidencia o pendiente |
 |---|---|---|
 | [ ] | Completar autorización por campo, sucursal y sensibilidad | Se reforzó catálogo: usuarios no administrativos no reciben ni escriben `cost`; ventas valida sucursal. Aún falta aplicar la misma revisión explícita a todos los módulos con datos de sucursal antes de marcarla completa. |
