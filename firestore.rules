@@ -129,6 +129,14 @@ service cloud.firestore {
           || hasRole(tenantId, 'despachador');
         allow delete: if false;
       }
+      match /stats/{statsDocument} {
+        allow read: if isMember(tenantId);
+        allow write: if false;
+        match /days/{day} {
+          allow read: if isMember(tenantId);
+          allow write: if false;
+        }
+      }
       match /orders/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isBranchSupervisor(tenantId)

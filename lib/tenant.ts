@@ -87,6 +87,10 @@ export async function requireTenantMember(
     throw new Error('FORBIDDEN');
   }
 
+  const memberTenantId = member.data()?.tenantId;
+  if (typeof memberTenantId === 'string' && memberTenantId !== requestedTenant) {
+    throw new Error('FORBIDDEN');
+  }
   const roleValue = member.data()?.role;
   if (!isTenantRole(roleValue)) {
     throw new Error('FORBIDDEN');
@@ -126,7 +130,7 @@ export async function requireTenantMember(
 
   return {
     uid: decoded.uid,
-    tenantId: requestedTenant,
+    tenantId: typeof memberTenantId === 'string' ? memberTenantId : requestedTenant,
     role,
     email: decoded.email,
     branchIds,

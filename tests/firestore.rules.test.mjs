@@ -82,6 +82,11 @@ before(async () => {
   await seedMember(TENANT_A, CASHIER_A, 'cajero');
   await seedDocument(TENANT_A, 'products', 'product-a', { name: 'Product A', stock: 10 });
   await seedDocument(TENANT_B, 'products', 'product-b', { name: 'Product B', stock: 20 });
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const adminDb = context.firestore();
+    await setDoc(doc(adminDb, `tenants/${TENANT_A}/stats/daily/days/2026-09-07`), { salesCount: 1, salesTotal: 25 });
+    await setDoc(doc(adminDb, `tenants/${TENANT_B}/stats/daily/days/2026-09-07`), { salesCount: 2, salesTotal: 50 });
+  });
 });
 
 after(async () => {
@@ -107,6 +112,12 @@ describe('Firestore tenant isolation', () => {
     await assertFails(setDoc(doc(dbFor(OWNER_A), path(TENANT_B, 'products', 'cross-write')), { name: 'Cross write' }));
     await assertFails(updateDoc(doc(dbFor(OWNER_B), path(TENANT_A, 'products', 'product-a')), { stock: 0 }));
     await assertFails(deleteDoc(doc(dbFor(OWNER_A), path(TENANT_B, 'products', 'product-b'))));
+  });
+
+  it('isolates daily stats and keeps their client writes disabled', async () => {
+    await assertSucceeds(getDoc(doc(dbFor(OWNER_A), `tenants/${TENANT_A}/stats/daily/days/2026-09-07`)));
+    await assertFails(getDoc(doc(dbFor(OWNER_A), `tenants/${TENANT_B}/stats/daily/days/2026-09-07`)));
+    await assertFails(setDoc(doc(dbFor(OWNER_A), `tenants/${TENANT_A}/stats/daily/days/2026-09-08`), { salesCount: 999 }));
   });
 
   it('denies inactive members even when their role is privileged', async () => {

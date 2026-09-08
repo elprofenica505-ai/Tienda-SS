@@ -1,7 +1,9 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import LegacyApp from '@/components/legacy/LegacyApp';
-
+/**
+ * The former root-collection dashboard is retained only for source compatibility.
+ * Production users enter the tenant-scoped workspace exclusively.
+ */
 export default function DashboardPage() {
-  return <LegacyApp />;
+  redirect('/workspace');
 }
