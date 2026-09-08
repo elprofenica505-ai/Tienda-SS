@@ -7,6 +7,7 @@ export type EntitlementKey =
   | 'monthlySales'
   | 'storageBytes'
   | 'monthlyExports'
+  | 'apiAccess'
   | 'apiRequests'
   | 'premiumModules';
 
@@ -22,6 +23,7 @@ const PLAN_LIMITS: Record<PlanKey, PlanLimits> = {
     monthlySales: 500,
     storageBytes: 2 * GB,
     monthlyExports: 10,
+    apiAccess: 0,
     apiRequests: 1_000,
     premiumModules: 0,
   },
@@ -32,6 +34,7 @@ const PLAN_LIMITS: Record<PlanKey, PlanLimits> = {
     monthlySales: 5_000,
     storageBytes: 20 * GB,
     monthlyExports: 100,
+    apiAccess: 1,
     apiRequests: 25_000,
     premiumModules: 3,
   },
@@ -42,6 +45,7 @@ const PLAN_LIMITS: Record<PlanKey, PlanLimits> = {
     monthlySales: Number.POSITIVE_INFINITY,
     storageBytes: Number.POSITIVE_INFINITY,
     monthlyExports: Number.POSITIVE_INFINITY,
+    apiAccess: 1,
     apiRequests: Number.POSITIVE_INFINITY,
     premiumModules: Number.POSITIVE_INFINITY,
   },
@@ -54,6 +58,7 @@ const LABELS: Record<EntitlementKey, string> = {
   monthlySales: 'ventas mensuales',
   storageBytes: 'bytes de almacenamiento',
   monthlyExports: 'exportaciones mensuales',
+  apiAccess: 'acceso a API',
   apiRequests: 'solicitudes API mensuales',
   premiumModules: 'módulos premium',
 };

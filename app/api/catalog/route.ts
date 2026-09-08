@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
-import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
+import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { redactSensitiveFields } from '@/lib/data-scope';
 
 export const runtime = 'nodejs';
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     const tenantSnapshot = await tenantRef.get();
     const activeProducts = await tenantRef.collection('products').where('active', '==', true).count().get();
     const plan = tenantSnapshot.data()?.plan;
-    if (!hasCapacity(plan, 'products', activeProducts.data().count, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para agregar más.` }, { status: 402 });
+    try { assertPlanCapacity(plan, 'products', activeProducts.data().count, 1); } catch (error) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
     const sku = cleanText(body.sku, 50).toUpperCase();
     const categoryId = cleanText(body.categoryId, 80);
     const itemType = body.itemType === 'service' ? 'service' : 'physical';
@@ -135,7 +135,7 @@ export async function PATCH(request: NextRequest) {
         const tenantSnapshot = await getAdminDb().collection('tenants').doc(context.tenantId).get();
         const activeProducts = await getAdminDb().collection('tenants').doc(context.tenantId).collection('products').where('active', '==', true).count().get();
         const plan = tenantSnapshot.data()?.plan;
-        if (!hasCapacity(plan, 'products', activeProducts.data().count, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para reactivar más.` }, { status: 402 });
+        try { assertPlanCapacity(plan, 'products', activeProducts.data().count, 1); } catch (error) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
       }
       if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name);
       if (typeof body.price === 'number') changes.price = Math.max(0, body.price);

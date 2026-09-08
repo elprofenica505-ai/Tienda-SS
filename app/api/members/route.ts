@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
-import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
+import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     const tenantSnapshot = await tenantRef.get();
     const activeMembers = await memberRef.where('status', '==', 'active').get();
     const plan = tenantSnapshot.data()?.plan;
-    if (!hasCapacity(plan, 'members', activeMembers.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para agregar más.` }, { status: 402 });
+    try { assertPlanCapacity(plan, 'members', activeMembers.size, 1); } catch (error) { const response = errorResponse(error); return response; }
     const existing = await memberRef.where('email', '==', email).limit(1).get();
     if (!existing.empty && existing.docs[0].data().status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     let user;
@@ -53,7 +53,7 @@ export async function PATCH(request: NextRequest) {
           db.collection('tenants').doc(context.tenantId).collection('members').where('status', '==', 'active').get(),
         ]);
         const plan = tenantSnapshot.data()?.plan;
-        if (!hasCapacity(plan, 'members', activeMembers.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'members')} ${entitlementLabel('members')}. Actualiza tu plan para reactivar usuarios.` }, { status: 402 });
+        try { assertPlanCapacity(plan, 'members', activeMembers.size, 1); } catch (error) { return errorResponse(error); }
       }
       changes.status = body.status;
     }

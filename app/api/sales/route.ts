@@ -4,12 +4,15 @@ import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 import { FieldValue } from 'firebase-admin/firestore';
+import { assertPlanCapacity } from '@/lib/entitlement-guard';
+import { getEntitlementLimit } from '@/lib/entitlements';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
 
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
+function getMonthlyLimit(plan: unknown) { return getEntitlementLimit(plan, 'monthlySales'); }
 
 type SaleLineInput = { productId?: unknown; quantity?: unknown };
 
@@ -60,6 +63,12 @@ export async function POST(request: NextRequest) {
     const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
 
     const result = await db.runTransaction(async (transaction) => {
+      const tenantSnapshot = await transaction.get(tenant);
+      const plan = tenantSnapshot.data()?.plan;
+      const monthlyLimit = Number.isFinite(getMonthlyLimit(plan)) ? getMonthlyLimit(plan) : null;
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+      const monthlySales = monthlyLimit === null ? null : await transaction.get(tenant.collection('sales').where('createdAt', '>=', monthStart).limit(monthlyLimit + 1));
+      if (monthlySales && monthlyLimit !== null) assertPlanCapacity(plan, 'monthlySales', monthlySales.size, 1);
       const readRefs = customerRef ? [...productRefs, customerRef] : productRefs;
       if (idempotencyRef) readRefs.push(idempotencyRef);
       const snapshots = await transaction.getAll(...readRefs);

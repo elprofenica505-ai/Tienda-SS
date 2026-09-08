@@ -14,3 +14,7 @@ test('Stripe permite recuperar eventos fallidos y processing abandonados', () =>
   assert.equal(failedEventRetryable({ status: 'processing', processingStartedAt: new Date(0) }, 20 * 60 * 1000), true);
   assert.equal(failedEventRetryable({ status: 'processing', processingStartedAt: new Date(19 * 60 * 1000) }, 20 * 60 * 1000), false);
 });
+
+test('un evento recibido queda elegible para claim y procesamiento', () => {
+  assert.equal(failedEventRetryable({ status: 'received', retryCount: 0 }), true);
+});

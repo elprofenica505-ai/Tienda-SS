@@ -4,6 +4,7 @@ import { assertTokenSessionPolicy } from '@/lib/auth-policy';
 import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
 import { normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
+import { entitlementErrorResponse } from '@/lib/entitlement-guard';
 
 export type TenantRole =
   | 'owner'
@@ -25,6 +26,7 @@ export interface TenantContext {
   role: TenantRole;
   email?: string;
   branchIds: string[];
+  subscriptionStatus?: string;
 }
 
 const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
@@ -139,6 +141,7 @@ export async function requireTenantMember(
     role,
     email: decoded.email,
     branchIds,
+    subscriptionStatus: typeof tenantSnapshot.data()?.subscriptionStatus === 'string' ? tenantSnapshot.data()?.subscriptionStatus : undefined,
   };
 }
 
@@ -148,6 +151,9 @@ export async function requireTenantPermission(
   action: PermissionAction
 ): Promise<TenantContext> {
   const context = await requireTenantMember(request);
+  if (['create', 'edit', 'delete', 'export'].includes(action) && ['past_due', 'canceled', 'unpaid', 'incomplete_expired'].includes(context.subscriptionStatus || '')) {
+    throw new Error('SUBSCRIPTION_RESTRICTED');
+  }
   if (context.role === 'owner') return context;
   const settings = await getAdminDb().collection('tenants').doc(context.tenantId).collection('settings').doc('permissions').get();
   const saved = settings.exists ? settings.data()?.roles : undefined;
@@ -158,6 +164,8 @@ export async function requireTenantPermission(
 
 export function tenantErrorResponse(error: unknown) {
   const code = error instanceof Error ? error.message : 'UNKNOWN';
+  const entitlementResponse = entitlementErrorResponse(error);
+  if (entitlementResponse) return entitlementResponse;
 
   if (code === 'UNAUTHENTICATED') {
     return { status: 401, body: { error: 'Autenticación requerida.' } };
@@ -181,6 +189,10 @@ export function tenantErrorResponse(error: unknown) {
 
   if (code === 'MFA_REQUIRED') {
     return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };
+  }
+
+  if (code === 'SUBSCRIPTION_RESTRICTED') {
+    return { status: 402, body: { error: 'Tu suscripción requiere atención para continuar con esta operación.', code, upgradeUrl: '/workspace/billing' } };
   }
 
   if (code.startsWith('RATE_LIMITED:')) {

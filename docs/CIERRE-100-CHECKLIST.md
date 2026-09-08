@@ -80,3 +80,27 @@ Nunca registrar en este documento valores de `.env.local`, claves Stripe, claves
 - [x] Un ajuste autorizado no deja stock negativo y crea auditoría.
 - [x] Una nota de crédito actualiza el saldo de forma atómica.
 - [ ] Los escenarios integrales con datos reales o Emulator Suite se ejecutan y quedan archivados.
+
+## ETAPA 3 — Facturación SaaS y límites por plan (P1)
+
+| Estado | Tarea | Evidencia o pendiente |
+|---|---|---|
+| [x] | Catálogo central Starter/Growth/Scale | `lib/entitlements.ts` define usuarios, sucursales, productos, ventas/mes, exportaciones, acceso API, solicitudes API y módulos premium. |
+| [x] | Guard backend reutilizable | `lib/entitlement-guard.ts` centraliza `assertPlanCapacity`, errores 402, acceso API, módulos premium y consumo mensual atómico. |
+| [x] | Aplicar límites de usuarios y productos | Miembros, invitaciones, productos nuevos y reactivaciones validan el plan en backend. |
+| [x] | Aplicar límite de ventas mensuales | La creación de venta comprueba `monthlySales` dentro de la transacción antes de descontar stock. |
+| [x] | Aplicar límite de exportaciones | `GET /api/reports/export` consume `monthlyExports` atómicamente antes de generar CSV. |
+| [x] | Flujo límite alcanzado → upgrade | Las respuestas 402 incluyen `ENTITLEMENT_EXCEEDED` y `/workspace/billing`; catálogo muestra botón para actualizar. |
+| [x] | Bloqueo por estado de suscripción | `past_due`, `canceled`, `unpaid` e `incomplete_expired` bloquean create/edit/delete/export; lectura y facturación permanecen disponibles. |
+| [x] | Estados del webhook Stripe | Los eventos pasan por `received → processing → processed` o `failed`, con reintento de estados fallidos/estancados. |
+| [x] | Idempotencia y ordenamiento Stripe | `billingEvents/{eventId}` se reclama dentro de transacción y los estados de tenant ignoran eventos más antiguos. |
+| [ ] | Recuperación operativa de eventos fallidos | El código permite reintento hasta 10 veces; falta una pantalla/job operativo para reprocessar manualmente desde Stripe. |
+| [ ] | Acceso API externo real | El catálogo incluye el entitlement `apiAccess` y guard reutilizable; el proyecto todavía no expone una API externa versionada que deba consumirlo. |
+
+### Checkpoint Etapa 3
+
+- [x] Un Starter no puede superar usuarios, productos, ventas mensuales o exportaciones mediante llamadas directas al backend.
+- [x] Un Starter no tiene acceso API según el catálogo central.
+- [x] Los estados de suscripción restringidos bloquean escrituras y exportaciones.
+- [x] Los límites alcanzados devuelven 402 con una ruta clara de upgrade.
+- [ ] Probar con tenant Starter real o Emulator Suite intentando superar cada límite.

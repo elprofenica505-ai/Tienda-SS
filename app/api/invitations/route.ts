@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
-import { getEntitlementLimit, hasCapacity, entitlementLabel } from '@/lib/entitlements';
+import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import {
   canAssignInvitationRole,
@@ -88,8 +88,7 @@ export async function POST(request: NextRequest) {
       tenantRef.collection('tenantInvitations').where('status', '==', 'pending').count().get(),
     ]);
     const plan = tenantData.plan;
-    const memberLimit = getEntitlementLimit(plan, 'members');
-    if (!hasCapacity(plan, 'members', activeMembers.data().count + pendingInvitations.data().count)) return NextResponse.json({ error: `El plan actual admite hasta ${memberLimit} ${entitlementLabel('members')}, incluyendo invitaciones pendientes.` }, { status: 402 });
+    try { assertPlanCapacity(plan, 'members', activeMembers.data().count + pendingInvitations.data().count); } catch (error) { return errorResponse(error); }
     const existingMember = await tenantRef.collection('members').where('email', '==', email).where('status', 'in', ['active', 'disabled']).limit(1).get();
     if (!existingMember.empty) return NextResponse.json({ error: 'Ese correo ya pertenece o perteneció a esta empresa.' }, { status: 409 });
     const existingInvitation = await tenantRef.collection('tenantInvitations').where('email', '==', email).where('status', '==', 'pending').limit(1).get();

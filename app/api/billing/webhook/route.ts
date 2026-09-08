@@ -53,6 +53,16 @@ async function claimEvent(eventRef: DocumentReference, event: Stripe.Event): Pro
   });
 }
 
+async function receiveEvent(eventRef: DocumentReference, event: Stripe.Event): Promise<'received' | 'duplicate'> {
+  const db = getAdminDb();
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (snapshot.exists && snapshot.data()?.status === 'processed') return 'duplicate';
+    if (!snapshot.exists) transaction.create(eventRef, { eventId: event.id, type: event.type, stripeCreated: event.created, status: 'received', receivedAt: new Date(), retryCount: 0, updatedAt: new Date() });
+    return 'received';
+  });
+}
+
 export async function POST(request: NextRequest) {
   const signature = request.headers.get('stripe-signature');
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -64,13 +74,18 @@ export async function POST(request: NextRequest) {
     const event = getStripe().webhooks.constructEvent(payload, signature, secret);
     const db = getAdminDb();
     eventRef = db.collection('billingEvents').doc(event.id);
+    if (await receiveEvent(eventRef, event) === 'duplicate') return NextResponse.json({ received: true, duplicate: true });
     if (await claimEvent(eventRef, event) === 'duplicate') return NextResponse.json({ received: true, duplicate: true });
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
       const tenantId = session.metadata?.tenantId;
       if (tenantId && session.subscription) {
-        await db.collection('tenants').doc(tenantId).set({ stripeCustomerId: String(session.customer), stripeSubscriptionId: String(session.subscription), plan: session.metadata?.plan || 'starter', subscriptionStatus: 'active', updatedAt: new Date() }, { merge: true });
+        const tenantRef = db.collection('tenants').doc(tenantId);
+        await db.runTransaction(async (transaction) => {
+          const tenantSnapshot = await transaction.get(tenantRef);
+          if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) transaction.set(tenantRef, { stripeCustomerId: String(session.customer), stripeSubscriptionId: String(session.subscription), plan: session.metadata?.plan || 'starter', subscriptionStatus: 'active', lastStripeEventCreated: event.created, updatedAt: new Date() }, { merge: true });
+        });
       }
     }
 
@@ -97,7 +112,10 @@ export async function POST(request: NextRequest) {
       if (customerId) {
         const tenantRef = await tenantByCustomer(customerId);
         if (tenantRef) {
-          await tenantRef.set({ subscriptionStatus: 'past_due', lastPaymentFailureAt: new Date(), updatedAt: new Date() }, { merge: true });
+          await db.runTransaction(async (transaction) => {
+            const tenantSnapshot = await transaction.get(tenantRef);
+            if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) transaction.set(tenantRef, { subscriptionStatus: 'past_due', lastPaymentFailureAt: new Date(), lastStripeEventCreated: event.created, updatedAt: new Date() }, { merge: true });
+          });
           await notifyTenant(tenantRef.id, 'payment_failed', 'Pago de suscripción fallido', `No pudimos procesar el cobro de tu suscripción por $${currencyAmount(invoice.amount_due)}. Actualiza tu método de pago para evitar una interrupción.`, { eventId: event.id, invoiceId: invoice.id });
         }
       }

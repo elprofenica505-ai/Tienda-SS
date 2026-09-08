@@ -25,3 +25,10 @@ test('plan desconocido usa límites conservadores y etiquetas claras', () => {
   assert.equal(entitlementLabel('members'), 'usuarios activos');
   assert.equal(entitlementLabel('products'), 'productos activos');
 });
+
+test('starter no tiene acceso API y limita exportaciones mensuales', () => {
+  assert.equal(getEntitlementLimit('starter', 'apiAccess'), 0);
+  assert.equal(getEntitlementLimit('growth', 'apiAccess'), 1);
+  assert.equal(hasCapacity('starter', 'monthlyExports', 10, 1), false);
+  assert.equal(hasCapacity('growth', 'monthlyExports', 99, 1), true);
+});

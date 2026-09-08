@@ -17,6 +17,7 @@ const protectedTenantRoutes = [
   '/api/receivables',
   '/api/receivables/credit-notes',
   '/api/reports',
+  '/api/reports/export',
   '/api/stats/daily',
   '/api/sales',
   '/api/sales/returns',
