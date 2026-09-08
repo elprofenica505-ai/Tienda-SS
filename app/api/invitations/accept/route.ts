@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import { entitlementLabel, getEntitlementLimit, hasCapacity } from '@/lib/entitlements';
 import { hashInvitationToken, invitationUrl, isInvitationExpired, normalizeInvitationEmail, writeInvitationAudit } from '@/lib/invitations';
 
 export const runtime = 'nodejs';
@@ -59,10 +60,19 @@ export async function POST(request: NextRequest) {
     const tenantRef = db.doc(invitationDoc.ref.path.split('/tenantInvitations/')[0]);
     const memberRef = tenantRef.collection('members').doc(uid);
     await db.runTransaction(async (transaction) => {
-      const [freshInvitation, existingMember] = await Promise.all([transaction.get(invitationDoc.ref), transaction.get(memberRef)]);
+      const [freshInvitation, existingMember, tenantSnapshot, activeMembers] = await Promise.all([
+        transaction.get(invitationDoc.ref),
+        transaction.get(memberRef),
+        transaction.get(tenantRef),
+        transaction.get(tenantRef.collection('members').where('status', '==', 'active')),
+      ]);
       const fresh = freshInvitation.data() || {};
       if (!freshInvitation.exists || fresh.status !== 'pending' || isInvitationExpired(fresh.expiresAt)) throw new Error('INVITATION_NOT_AVAILABLE');
       if (existingMember.exists && ['active', 'disabled'].includes(existingMember.data()?.status)) throw new Error('ALREADY_MEMBER');
+      const plan = tenantSnapshot.data()?.plan;
+      if (!hasCapacity(plan, 'members', activeMembers.size, 1)) {
+        throw new Error(`ENTITLEMENT_EXCEEDED:members:${getEntitlementLimit(plan, 'members')}`);
+      }
       const now = new Date();
       transaction.set(memberRef, { uid, tenantId: tenantRef.id, name: name || invitation.email.split('@')[0], email: invitation.email, role: fresh.role, status: 'active', createdBy: fresh.createdBy, invitedAt: fresh.createdAt, acceptedAt: now, updatedAt: now }, { merge: true });
       transaction.update(invitationDoc.ref, { status: 'accepted', acceptedAt: now, acceptedBy: uid, updatedAt: now });
@@ -74,6 +84,7 @@ export async function POST(request: NextRequest) {
     const code = error instanceof Error ? error.message : '';
     if (code === 'INVITATION_NOT_AVAILABLE') return NextResponse.json({ error: 'La invitación ya fue utilizada o dejó de estar disponible.' }, { status: 409 });
     if (code === 'ALREADY_MEMBER') return NextResponse.json({ error: 'La cuenta ya pertenece a esta empresa.' }, { status: 409 });
+    if (code.startsWith('ENTITLEMENT_EXCEEDED:members:')) return NextResponse.json({ error: `El plan actual admite hasta ${code.split(':')[2]} ${entitlementLabel('members')}. Actualiza tu plan para aceptar más usuarios.` }, { status: 402 });
     if (code === 'UNAUTHENTICATED') return NextResponse.json({ error: 'La sesión no es válida.' }, { status: 401 });
     console.error('invitation_accept_error', { code });
     return NextResponse.json({ error: 'No se pudo aceptar la invitación.' }, { status: 500 });

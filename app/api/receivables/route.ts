@@ -4,6 +4,7 @@ import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/
 
 export const runtime = 'nodejs';
 const paymentRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
+const PAGE_SIZE = 25;
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function amount(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
 
@@ -12,11 +13,11 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'receivables', 'view');
     const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
     const [salesSnapshot, paymentsSnapshot] = await Promise.all([
-      tenant.collection('sales').where('paymentMethod', '==', 'credit').get(),
-      tenant.collection('receivablePayments').orderBy('createdAt', 'desc').limit(50).get()
+      tenant.collection('sales').where('paymentMethod', '==', 'credit').orderBy('createdAt', 'desc').limit(PAGE_SIZE + 1).get(),
+      tenant.collection('receivablePayments').orderBy('createdAt', 'desc').limit(PAGE_SIZE).get()
     ]);
     const payments = paymentsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string }> = salesSnapshot.docs.map((item) => {
+    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string }> = salesSnapshot.docs.slice(0, PAGE_SIZE).map((item) => {
       const data = item.data() as Record<string, unknown>;
       const total = amount(data.total);
       const paidAmount = amount(data.paidAmount);
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
       const current = byCustomer.get(key) || { customerId: key, customerName: String(sale.customerName || 'Cliente sin identificar'), sales: 0, total: 0, paid: 0, balance: 0 };
       current.sales += 1; current.total += amount(sale.total); current.paid += amount(sale.paidAmount); current.balance += amount(sale.balanceDue); byCustomer.set(key, current);
     }
-    return NextResponse.json({ ok: true, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: salesSnapshot.size > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }

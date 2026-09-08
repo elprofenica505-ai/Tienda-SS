@@ -7,6 +7,8 @@ export const runtime = 'nodejs';
 
 const productRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
 const categoryRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
+const MAX_PAGE_SIZE = 25;
+const MAX_CATEGORY_PAGE_SIZE = 100;
 
 function cleanText(value: unknown, max = 120) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -21,19 +23,36 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'catalog', 'view');
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
-    const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true';
+    const params = new URL(request.url).searchParams;
+    const includeArchived = params.get('includeArchived') === 'true';
+    const requestedPageSize = Number(params.get('pageSize') || MAX_PAGE_SIZE);
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(requestedPageSize)))
+      : MAX_PAGE_SIZE;
+    const cursor = params.get('cursor')?.trim() || '';
+    let productQuery = (includeArchived
+      ? tenant.collection('products')
+      : tenant.collection('products').where('active', '==', true))
+      .orderBy('name').limit(pageSize + 1);
+    if (cursor) {
+      const cursorDoc = await tenant.collection('products').doc(cursor).get();
+      if (cursorDoc.exists) productQuery = productQuery.startAfter(cursorDoc);
+    }
     const [categorySnapshot, productSnapshot] = await Promise.all([
-      tenant.collection('categories').orderBy('name').get(),
-      tenant.collection('products').orderBy('name').get()
+      tenant.collection('categories').orderBy('name').limit(MAX_CATEGORY_PAGE_SIZE).get(),
+      productQuery.get()
     ]);
     const categories = includeArchived ? categorySnapshot : { docs: categorySnapshot.docs.filter((item) => item.data().active !== false) };
-    const products = includeArchived ? productSnapshot : { docs: productSnapshot.docs.filter((item) => item.data().active !== false) };
+    const visibleProductDocs = productSnapshot.docs;
+    const hasMore = visibleProductDocs.length > pageSize;
+    const products = visibleProductDocs.slice(0, pageSize);
 
     return NextResponse.json({
       ok: true,
       tenantId: context.tenantId,
       categories: categories.docs.map((item) => ({ id: item.id, ...item.data() })),
-      products: products.docs.map((item) => ({ id: item.id, ...item.data() }))
+      products: products.map((item) => ({ id: item.id, ...item.data() })),
+      pagination: { pageSize, hasMore, nextCursor: hasMore ? products[products.length - 1]?.id || null : null }
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);
@@ -62,9 +81,9 @@ export async function POST(request: NextRequest) {
 
     const name = cleanText(body.name);
     const tenantSnapshot = await tenantRef.get();
-    const activeProducts = await tenantRef.collection('products').where('active', '==', true).get();
+    const activeProducts = await tenantRef.collection('products').where('active', '==', true).count().get();
     const plan = tenantSnapshot.data()?.plan;
-    if (!hasCapacity(plan, 'products', activeProducts.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para agregar más.` }, { status: 402 });
+    if (!hasCapacity(plan, 'products', activeProducts.data().count, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para agregar más.` }, { status: 402 });
     const sku = cleanText(body.sku, 50).toUpperCase();
     const categoryId = cleanText(body.categoryId, 80);
     const itemType = body.itemType === 'service' ? 'service' : 'physical';
@@ -111,9 +130,9 @@ export async function PATCH(request: NextRequest) {
     if (type === 'product') {
       if (body.active === true && current.data()?.active === false) {
         const tenantSnapshot = await getAdminDb().collection('tenants').doc(context.tenantId).get();
-        const activeProducts = await getAdminDb().collection('tenants').doc(context.tenantId).collection('products').where('active', '==', true).get();
+        const activeProducts = await getAdminDb().collection('tenants').doc(context.tenantId).collection('products').where('active', '==', true).count().get();
         const plan = tenantSnapshot.data()?.plan;
-        if (!hasCapacity(plan, 'products', activeProducts.size, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para reactivar más.` }, { status: 402 });
+        if (!hasCapacity(plan, 'products', activeProducts.data().count, 1)) return NextResponse.json({ error: `El plan actual admite hasta ${getEntitlementLimit(plan, 'products')} ${entitlementLabel('products')}. Actualiza tu plan para reactivar más.` }, { status: 402 });
       }
       if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name);
       if (typeof body.price === 'number') changes.price = Math.max(0, body.price);

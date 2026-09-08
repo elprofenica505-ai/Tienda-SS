@@ -83,11 +83,13 @@ export async function POST(request: NextRequest) {
     const role = text(body.role, 40) as TenantRole;
     if (!/^\S+@\S+\.\S+$/.test(email) || !isInvitationRole(role)) return NextResponse.json({ error: 'Correo y rol válido son obligatorios.' }, { status: 400 });
     if (!canAssignInvitationRole(context.role, role)) return NextResponse.json({ error: 'No puedes asignar ese nivel de rol.' }, { status: 403 });
-    const activeMembers = await tenantRef.collection('members').where('status', '==', 'active').get();
-    const pendingInvitations = await tenantRef.collection('tenantInvitations').where('status', '==', 'pending').get();
+    const [activeMembers, pendingInvitations] = await Promise.all([
+      tenantRef.collection('members').where('status', '==', 'active').count().get(),
+      tenantRef.collection('tenantInvitations').where('status', '==', 'pending').count().get(),
+    ]);
     const plan = tenantData.plan;
     const memberLimit = getEntitlementLimit(plan, 'members');
-    if (!hasCapacity(plan, 'members', activeMembers.size + pendingInvitations.size)) return NextResponse.json({ error: `El plan actual admite hasta ${memberLimit} ${entitlementLabel('members')}, incluyendo invitaciones pendientes.` }, { status: 402 });
+    if (!hasCapacity(plan, 'members', activeMembers.data().count + pendingInvitations.data().count)) return NextResponse.json({ error: `El plan actual admite hasta ${memberLimit} ${entitlementLabel('members')}, incluyendo invitaciones pendientes.` }, { status: 402 });
     const existingMember = await tenantRef.collection('members').where('email', '==', email).where('status', 'in', ['active', 'disabled']).limit(1).get();
     if (!existingMember.empty) return NextResponse.json({ error: 'Ese correo ya pertenece o perteneció a esta empresa.' }, { status: 409 });
     const existingInvitation = await tenantRef.collection('tenantInvitations').where('email', '==', email).where('status', '==', 'pending').limit(1).get();
