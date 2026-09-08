@@ -6,6 +6,7 @@ import { writeImmutableAudit } from '@/lib/audit';
 import { FieldValue } from 'firebase-admin/firestore';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { getEntitlementLimit } from '@/lib/entitlements';
+import { createFiscalSaleFields, fiscalMoney, formatFiscalNumber, validateFiscalFields } from '@/lib/fiscal-ni';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -55,15 +56,17 @@ export async function POST(request: NextRequest) {
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
     const saleRef = tenant.collection('sales').doc();
-    const statsRef = tenant.collection('stats').doc('daily').collection('days').doc(new Date().toISOString().slice(0, 10));
+      const statsRef = tenant.collection('stats').doc('daily').collection('days').doc(new Date().toISOString().slice(0, 10));
     const productIds = Array.from(unique.keys());
     const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
     const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
     const customerRef = customerId ? tenant.collection('customers').doc(customerId) : null;
     const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
 
+    const fiscalRef = tenant.collection('settings').doc('fiscal');
     const result = await db.runTransaction(async (transaction) => {
       const tenantSnapshot = await transaction.get(tenant);
+      const fiscalSnapshot = await transaction.get(fiscalRef);
       const plan = tenantSnapshot.data()?.plan;
       const monthlyLimit = Number.isFinite(getMonthlyLimit(plan)) ? getMonthlyLimit(plan) : null;
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
@@ -90,7 +93,13 @@ export async function POST(request: NextRequest) {
         subtotal += total;
         lines.push({ productId: productRefs[index].id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total });
       });
-      const total = Math.max(0, subtotal - discount);
+      const fiscal = createFiscalSaleFields({ ...body, customerName: body.customerName || customerName }, subtotal, discount);
+      const fiscalError = validateFiscalFields(fiscal);
+      if (fiscalError) throw new Error(`FISCAL_INVALID:${fiscalError}`);
+      const fiscalConfig = fiscalSnapshot.exists ? fiscalSnapshot.data() || {} : {};
+      const sequence = Number(fiscalConfig.nextInvoiceSequence || 1);
+      const invoiceNumber = formatFiscalNumber(typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', sequence);
+      const total = fiscalMoney(fiscal.total);
       const now = new Date();
       productSnapshots.forEach((snapshot, index) => {
         const data = snapshot.data() || {};
@@ -101,8 +110,9 @@ export async function POST(request: NextRequest) {
         transaction.update(productRefs[index], { stock: newStock, updatedAt: now, updatedBy: context.uid });
         transaction.set(movementRefs[index], { productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
       });
-      const response = { saleId: saleRef.id, total, lines };
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, items: lines, subtotal, discount, total, paymentMethod, customerId: customerId || null, customerName: customerName || null, branchId: branchId || null, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      const response = { saleId: saleRef.id, total, lines, invoiceNumber };
+      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      transaction.set(fiscalRef, { nextInvoiceSequence: sequence + 1, invoicePrefix: typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', currency: 'NIO', updatedAt: now }, { merge: true });
       transaction.set(statsRef, { salesCount: FieldValue.increment(1), salesTotal: FieldValue.increment(total), updatedAt: now }, { merge: true });
       if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
       return response;
@@ -114,6 +124,7 @@ export async function POST(request: NextRequest) {
     if (message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos ya no está disponible.' }, { status: 404 });
     if (message === 'CUSTOMER_NOT_FOUND') return NextResponse.json({ error: 'El cliente seleccionado no existe o está archivado.' }, { status: 404 });
     if (message.startsWith('INSUFFICIENT_STOCK:')) return NextResponse.json({ error: `Stock insuficiente para ${message.split(':').slice(1).join(':')}.` }, { status: 409 });
+    if (message.startsWith('FISCAL_INVALID:')) return NextResponse.json({ error: message.slice('FISCAL_INVALID:'.length) }, { status: 400 });
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }

@@ -24,8 +24,8 @@
 - [ ] **16. P3.2 — Crear health/readiness real.** Comprobar proceso, Firestore y proveedores externos sin exponer secretos.
 - [ ] **17. P3.3 — Completar backup y recuperación.** Programación, retención, cifrado, restore en staging y RPO/RTO medidos.
 - [ ] **18. P3.4 — Preparar escalabilidad.** Paginación, índices, contadores, límites por tenant, pruebas de carga y presupuesto de lecturas.
-- [ ] **19. P4.1 — Completar experiencia empresarial.** Accesibilidad, estados de carga/error/vacío, responsive, onboarding y centro de ayuda.
-- [ ] **20. P4.2 — Implementar integraciones empresariales.** Importación/exportación, API pública versionada, webhooks, contabilidad y almacenamiento seguro.
+- [x] **19. P4.1 — Completar experiencia empresarial.** Accesibilidad, estados de carga/error/vacío, responsive, onboarding guiado empresa → producto → primera venta y centro de ayuda. Checkpoint documentado en `docs/CIERRE-100-CHECKLIST.md`; la Etapa 7 no se inicia.
+- [x] **20. P4.2 — Implementar integraciones empresariales.** Importación/exportación CSV robusta, API pública versionada `/api/v1`, API keys hash por tenant y webhooks HMAC preview. La contabilidad bidireccional y la facturación electrónica productiva permanecen fuera del MVP hasta validación contractual/fiscal.
 - [ ] **21. P5.1 — Configurar Stripe y planes de pago empresariales.** Productos, precios, checkout, portal, webhook, estados de suscripción, límites por plan, pruebas y operación en producción. **Última tarea.**
 
 ## Criterio global de 100%

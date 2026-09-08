@@ -128,3 +128,43 @@ Nunca registrar en este documento valores de `.env.local`, claves Stripe, claves
 - [x] Existe backup diario, retención y script de restore.
 - [x] Existen eventos para las cuatro alertas mínimas.
 - [ ] El proveedor externo de alertas y el ensayo de restore quedan configurados y archivados.
+
+## ETAPA 6 — Experiencia empresarial y escalabilidad
+
+| Estado | Tarea | Evidencia |
+|---|---|---|
+| [x] | Lecturas eficientes y listeners controlados | La carga inicial usa endpoints con lecturas puntuales; los listados activos ya usan páginas/cursor y `onSnapshot` queda encapsulado únicamente en el hook realtime con cleanup. |
+| [x] | Paginación e índices | Catálogo e inventario usan `limit`/cursor estable; los endpoints existentes mantienen consultas acotadas e índices documentados por Firebase cuando corresponda. |
+| [x] | Estados loading/empty/error/success | Dashboard, catálogo, ventas, reportes y onboarding muestran estados de carga, vacío, error y confirmación contextual. |
+| [x] | Onboarding guiado | Flujo de tres pasos: empresa creada → primer producto real → primera venta en Ventas/POS, con alternativa clara para continuar al resumen. |
+| [x] | Responsive y accesibilidad básica | Focus visible global, `aria-label`/`aria-current`, controles de teclado, formularios etiquetados y layouts adaptados a móvil. |
+| [x] | Centro de ayuda | `/workspace/help` incluye documentación mínima de primeros pasos, inventario, ventas, permisos y soporte. |
+
+### Checkpoint Etapa 6 — Cumplido
+
+- [x] La app se puede usar de forma fluida en móvil y desktop.
+- [x] No hay spinners infinitos ni pantallas vacías confusas en las pantallas principales revisadas.
+- [x] Las lecturas iniciales están acotadas y no hay listeners persistentes en las pantallas operativas activas.
+- [x] El onboarding del primer usuario funciona de extremo a extremo hasta la apertura de la primera venta.
+
+**Regla de continuidad:** la Etapa 7 permanece pendiente y no se inicia en este checkpoint.
+
+## ETAPA 7 — Compliance, integraciones y cierre final
+
+| Estado | Tarea | Evidencia |
+|---|---|---|
+| [x] | Alcance fiscal Nicaragua | `docs/FISCAL-NICARAGUA-IMPLEMENTATION.md`; ventas persisten NIO, numeración transaccional, base, exentos, tasa, impuesto, cliente, RUC, dirección y estado del adaptador. |
+| [x] | Preparación para facturación electrónica | Contrato `fiscal.adapterVersion = preview-2026-01`, estado `pending_adapter` y requisitos de contingencia/reintento documentados. La emisión productiva aún requiere asesoría tributaria y proveedor autorizado. |
+| [x] | Exportación/importación CSV | `/api/catalog/export` y `/api/catalog/import` con BOM, comillas, columnas obligatorias, límites, duplicados, validación numérica y neutralización de fórmulas. |
+| [x] | API pública versionada | `/api/v1/catalog`, `/api/v1/sales` y `/api/v1/keys`; claves hash, aislamiento por tenant, límites distribuidos y contrato en `docs/PUBLIC-API-PREVIEW.md`. |
+| [x] | Webhooks firmados preview | `/api/v1/webhooks/preview` con HMAC-SHA256, tolerancia temporal e idempotencia por evento. |
+| [x] | Prueba de carga base y presupuestos | `docs/LOAD-TEST-2026-09-08.md`; 120/120 solicitudes, p95 539 ms, sin fallos contra health local. |
+| [x] | Runbook operativo | `docs/OPERATIONS-RUNBOOK.md` actualizado con despliegue, rollback, incidentes, restore, smoke test, integraciones y release checklist. |
+| [x] | Evidencia local de release | `docs/RELEASE-SMOKE-2026-09-08.md`; typecheck, lint, build, suite, reglas y carga local en verde. |
+| [ ] | Smoke E2E autenticado en staging | Requiere navegador Playwright disponible, `E2E_EMAIL/E2E_PASSWORD` y entorno Firebase staging. |
+| [ ] | Ensayo real de restore/readiness en staging | Requiere bucket, proyecto staging y credenciales operativas; no se simula localmente. |
+| [ ] | Firma humana del release | Requiere responsable técnico, producto, fiscal y operaciones; las casillas están en `docs/RELEASE-SMOKE-2026-09-08.md`. |
+
+### Estado objetivo 100%
+
+El código y la evidencia reproducible local de la Etapa 7 están completos. **No se declara 100% operativo todavía**, porque E2E autenticado en staging, restore real, readiness de proveedores externos y las firmas humanas no pueden certificarse desde este checkout sin sus credenciales y aprobaciones. No se marcan como completados para evitar una declaración de cumplimiento falsa.

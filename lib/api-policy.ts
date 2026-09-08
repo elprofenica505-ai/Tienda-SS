@@ -16,6 +16,7 @@ const publicRoutes = new Set([
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/catalog$/, policy: { module: 'catalog', action: 'view' } },
+  { pattern: /^\/api\/catalog\/(import|export)$/, policy: { module: 'catalog', action: 'export' } },
   { pattern: /^\/api\/inventory(?:\/reservations)?$/, policy: { module: 'inventory', action: 'view' } },
   { pattern: /^\/api\/contacts$/, policy: { module: 'contacts', action: 'view' } },
   { pattern: /^\/api\/finance$/, policy: { module: 'finance', action: 'view' } },
@@ -28,6 +29,7 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/sales(?:\/(returns|void))?$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/billing$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/invitations$/, policy: { module: 'members', action: 'view' } },
+  { pattern: /^\/api\/v1\/keys$/, policy: { module: 'members', action: 'create' } },
 ];
 
 export function isPublicApiRoute(pathname: string, method: string): boolean {

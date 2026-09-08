@@ -126,3 +126,36 @@ Con backup diario, el objetivo RPO inicial es **24 horas**. El RTO objetivo es *
 ## Estados Stripe y recuperación
 
 Los eventos se almacenan en `billingEvents/{eventId}` y siguen `received → processing → processed` o `failed`. Los fallidos y procesos abandonados son reintentables hasta el límite configurado. Antes de reenviar desde Stripe, revisa el `eventId`, correlation ID, secreto del webhook, cuenta Firebase Admin y orden temporal del evento.
+
+## Release 7 — procedimiento de despliegue y rollback
+
+Cada release debe identificar commit, deployment de staging, deployment de producción, responsable técnico y responsable de producto. El orden operativo es: ejecutar CI completo, desplegar a staging, ejecutar smoke test, verificar health/readiness, revisar logs y promover el mismo artefacto a producción. No se deben construir artefactos distintos entre staging y producción.
+
+El rollback de aplicación consiste en promover el deployment anterior identificado en Vercel y conservar el correlation ID del incidente. El rollback de datos no se hace con edición manual: se congela la escritura, se crea un backup nuevo, se restaura primero en staging y se valida con reglas, salud, tenants, miembros, ventas, inventario y crédito.
+
+## Smoke test de staging
+
+El smoke test mínimo cubre `/api/health`, `/api/health?ready=true`, login, onboarding, creación de producto, venta, crédito, invitación, cambio de tenant, cambio de plan, exportación CSV, importación CSV, generación de API key, lectura de `/api/v1/catalog` y webhook firmado duplicado. Cada ejecución debe guardar fecha UTC, commit, URL y resultado por caso.
+
+## Integraciones y fiscalidad
+
+Las rutas `/api/v1/*` usan API keys con hash y aislamiento por tenant. El contrato público está en `docs/PUBLIC-API-PREVIEW.md`. Los webhooks preview requieren HMAC-SHA256, tolerancia de cinco minutos e idempotencia por evento.
+
+Las ventas guardan numeración y campos fiscales NIO en backend. La fiscalidad electrónica está en estado `pending_adapter`; no se debe anunciar emisión fiscal electrónica hasta terminar la validación normativa descrita en `docs/FISCAL-NICARAGUA-IMPLEMENTATION.md`.
+
+## Prueba de carga
+
+La prueba base se ejecuta con `BASE_URL=https://staging.example node scripts/load-test.mjs`. Se acepta p95 menor o igual a 1 segundo y éxito mínimo de 99% para el health check. Los límites por tenant, endpoint, API pública, páginas e importación están registrados en `docs/LOAD-TEST-2026-09-08.md`. La evidencia debe incluir región, commit, concurrency, solicitudes, p50, p95, máximo y fallos.
+
+## Release checklist firmado
+
+El checklist de salida es un control de aprobación y no sustituye evidencia técnica. Las firmas deben ser realizadas por las personas responsables en el sistema de gestión de cambios.
+
+| Control | Evidencia | Responsable | Firma/fecha |
+|---|---|---|---|
+| CI completo | URL del workflow y commit | Técnico | Pendiente de firma humana |
+| Smoke staging | `docs/RELEASE-SMOKE-2026-09-08.md` | Técnico | Pendiente de firma humana |
+| Restore staging | URL/log de ensayo y duración | Operaciones | Pendiente de firma humana |
+| Fiscalidad | Revisión tributaria Nicaragua | Producto/asesor fiscal | Pendiente de firma humana |
+| Promoción producción | URL de deployment | Técnico | Pendiente de firma humana |
+| Aprobación comercial | Registro de cambio | Producto | Pendiente de firma humana |
