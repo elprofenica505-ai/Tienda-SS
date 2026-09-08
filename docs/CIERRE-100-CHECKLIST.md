@@ -32,6 +32,18 @@ No se copiaron ni se mostrarán valores secretos. El archivo `.env.example` decl
 
 ## ETAPA 1 — Seguridad y aislamiento multi-tenant (P0)
 
+### ETAPA 1 — Onboarding del dueño y equipo (día 1)
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Crear empresa de punta a punta | `POST /api/tenants` crea tenant y owner; el acceso posterior pasa por verificación de correo y `/onboarding`. |
+| [x] | Wizard de máximo cuatro pantallas | Negocio, invitación opcional, primer producto y primera venta, con textos en español. |
+| [x] | Invitaciones por email y rol | `/api/invitations` y `/accept-invitation` crean y aceptan membresías activas dentro del tenant. |
+| [x] | Desactivación sin borrar historial | `/api/members` cambia a `disabled` y conserva documento y auditoría. |
+| [x] | Límites Starter/Growth | Backend aplica límites de miembros y productos y devuelve mensajes de actualización claros. |
+
+La evidencia detallada está en `docs/ETAPA-1-ONBOARDING-CHECKLIST.md`.
+
 | Estado | Tarea | Evidencia o pendiente |
 |---|---|---|
 | [ ] | Completar autorización por campo, sucursal y sensibilidad | Se reforzó catálogo: usuarios no administrativos no reciben ni escriben `cost`; ventas valida sucursal. Aún falta aplicar la misma revisión explícita a todos los módulos con datos de sucursal antes de marcarla completa. |

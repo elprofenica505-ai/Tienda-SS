@@ -84,9 +84,16 @@ export async function PATCH(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'dashboard', 'edit');
     const body = await request.json();
-    if (typeof body.onboardingCompleted !== 'boolean') return NextResponse.json({ error: 'Estado de onboarding inválido.' }, { status: 400 });
-    await getAdminDb().collection('tenants').doc(context.tenantId).update({ onboardingCompleted: body.onboardingCompleted, updatedAt: new Date() });
-    return NextResponse.json({ ok: true, onboardingCompleted: body.onboardingCompleted }, { headers: { 'Cache-Control': 'no-store' } });
+    const changes: Record<string, unknown> = { updatedAt: new Date() };
+    if (typeof body.onboardingCompleted === 'boolean') changes.onboardingCompleted = body.onboardingCompleted;
+    if (typeof body.name === 'string') {
+      const name = body.name.trim().slice(0, 120);
+      if (name.length < 2) return NextResponse.json({ error: 'El nombre de la empresa debe tener al menos 2 caracteres.' }, { status: 400 });
+      changes.name = name;
+    }
+    if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
+    await getAdminDb().collection('tenants').doc(context.tenantId).update(changes);
+    return NextResponse.json({ ok: true, ...changes }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
