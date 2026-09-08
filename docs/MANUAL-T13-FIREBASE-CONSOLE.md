@@ -42,6 +42,28 @@ No ejecutes la prueba mientras otros usuarios estén utilizando el mismo proyect
 
 Firebase indica que los paneles de Usage son estimaciones para detectar tendencias. Las métricas pueden tardar hasta aproximadamente cuatro minutos en reflejarse y se muestrean por minuto. Para un análisis de facturación exacto, el reporte de billing tiene prioridad sobre el panel de Usage. Por ello, anota la hora de inicio y la lectura observada, en lugar de interpretar un punto aislado como una cifra contable exacta.
 
+## 3.1 Procedimiento si solo tienes celular
+
+La prueba se puede hacer parcialmente desde un teléfono. Usa el navegador del celular en modo incógnito y deja Firebase Console abierta en una pestaña separada. La ventana de **60 minutos** es suficiente; no necesitas cambiarla a una ventana más corta.
+
+En el teléfono, realiza esta secuencia sin que otros usuarios estén usando el proyecto:
+
+| Momento | Acción | Qué anotar |
+|---|---|---|
+| Inicio | Abre Firestore > Usage con rango de 60 minutos | Hora y lecturas visibles en ese momento |
+| Baseline | Espera 5 minutos sin abrir la aplicación | Si la gráfica permanece estable |
+| Home | Abre la aplicación, inicia sesión como bodega y permanece en el home sin abrir “Productos y stock” durante 2 minutos | Hora de entrada y cambio aproximado de lecturas |
+| Catálogo | Pulsa “Productos y stock” una sola vez y espera 2 minutos | Hora de apertura y nuevo cambio aproximado |
+| Salida | Cierra sesión o cambia de pantalla y espera 2 minutos | Si las lecturas siguen subiendo sin tocar la aplicación |
+
+Después de cada acción, vuelve a Firebase Console y actualiza la página. Si la gráfica tarda en cambiar, espera hasta cuatro minutos antes de sacar una conclusión. Haz capturas de pantalla del inicio, del momento posterior al home y del momento posterior a abrir el catálogo. Las capturas deben ocultar correos, tokens y datos personales.
+
+Desde el celular no podrás confirmar la cabecera `x-tenant-id`, el contenido exacto de `pagination.pageSize` ni la ausencia de una petición repetitiva en Network. Esas comprobaciones requieren DevTools de escritorio. Con Firebase Console sí puedes validar el patrón agregado: el home sin abrir productos no debe producir un salto grande y, después de salir, las lecturas no deberían continuar aumentando rápidamente mientras no interactúas con la aplicación.
+
+En esta aplicación la consulta de productos se ejecuta en el servidor mediante Admin SDK. Por ello, el gráfico de Firebase es la evidencia principal disponible desde el teléfono, pero no separa automáticamente las lecturas del catálogo de las lecturas de autenticación, tenant, permisos u otros usuarios. La prueba móvil sirve para detectar un aumento anormal; no puede demostrar por sí sola el número exacto de 25 documentos.
+
+Si solo tienes el teléfono, marca T13 como **verificación móvil parcial** cuando el patrón sea estable y registra la limitación en la hoja de evidencia. Marca T13 como **pendiente de verificación técnica completa** si necesitas demostrar de forma exacta `pageSize <= 25`, `nextCursor` o las cabeceras HTTP.
+
 ## 4. Preparar Chrome DevTools
 
 1. Abre la aplicación en una ventana de incógnito.
