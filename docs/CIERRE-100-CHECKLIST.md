@@ -100,6 +100,20 @@ La evidencia detallada está en `docs/ETAPA-3-4-CREDITO-DASHBOARD.md`.
 
 La evidencia detallada está en `docs/ETAPA-5-6-INVENTARIO-BILLING.md`.
 
+### ETAPA 7 — Pulido de producto publicable
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | UX y estados | Vendedor y caja muestran vacíos útiles, errores en español y navegación de regreso. |
+| [x] | Mobile-first | Preventa, caja y ticket adaptan layout y controles para pantallas pequeñas. |
+| [x] | Ticket cobrable | Caja muestra código, comprobante, líneas, total, botón de imprimir y copia del código. |
+| [x] | Seguridad práctica | Presales, sales y cartera conservan `requireTenantPermission`; rate limit permanece centralizado en `requireTenantMember`; no hay secretos en cliente. |
+| [x] | Guías del dueño | `docs/GUIA-PRIMER-DIA.md` y `docs/GUIA-FIADO-ABONO.md`. |
+
+La evidencia detallada está en `tests/stage7-product-polish.test.ts`.
+
+**Checkpoint Etapa 7:** producto demostrable para un dueño, con flujo preventa → caja → ticket, bordes UX principales resueltos y seguridad práctica verificada. **Etapa 8 permanece pendiente y no se inicia.**
+
 | Estado | Tarea | Evidencia o pendiente |
 |---|---|---|
 | [ ] | Completar autorización por campo, sucursal y sensibilidad | Se reforzó catálogo: usuarios no administrativos no reciben ni escriben `cost`; ventas valida sucursal. Aún falta aplicar la misma revisión explícita a todos los módulos con datos de sucursal antes de marcarla completa. |
