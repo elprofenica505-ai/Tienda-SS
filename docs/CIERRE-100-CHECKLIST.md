@@ -79,6 +79,27 @@ La evidencia detallada está en `docs/ETAPA-2-PREVENTA-CAJA-STOCK.md`.
 
 La evidencia detallada está en `docs/ETAPA-3-4-CREDITO-DASHBOARD.md`.
 
+### ETAPA 5 — Inventario y compras de verdad
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Productos bajo demanda | Inventario carga catálogo con paginación de 25 y costo protegido por rol. |
+| [x] | Ajustes auditados | `/api/inventory` registra actor, antes/después, delta, motivo y timestamp. |
+| [x] | Compras a proveedor | `/api/purchases` confirma compra en transacción, sube stock y crea movimiento `purchase`. |
+| [x] | Historial de compras | `/workspace/purchases` muestra historial inicial limitado y comprobante liviano. |
+| [x] | Bodega y chofer acotados | Bodega opera inventario; `/workspace/deliveries` usa estados pendiente/entregado sin GPS. |
+
+### ETAPA 6 — Cobro del SaaS
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Planes y entitlements | Billing expone planes, límites y uso actual de miembros/productos. |
+| [x] | Checkout y portal Stripe | `/api/billing` crea checkout idempotente y portal; webhook sincroniza plan/estado. |
+| [x] | Restricción por suscripción | Tenant suspendido queda bloqueado; estados past_due/canceled/unpaid restringen operaciones de escritura con respuesta 402. |
+| [x] | Superadmin de plataforma | Lista tenants, estado, suspensión/activación y cambio de plan sin acceso comercial cruzado. |
+
+La evidencia detallada está en `docs/ETAPA-5-6-INVENTARIO-BILLING.md`.
+
 | Estado | Tarea | Evidencia o pendiente |
 |---|---|---|
 | [ ] | Completar autorización por campo, sucursal y sensibilidad | Se reforzó catálogo: usuarios no administrativos no reciben ni escriben `cost`; ventas valida sucursal. Aún falta aplicar la misma revisión explícita a todos los módulos con datos de sucursal antes de marcarla completa. |
