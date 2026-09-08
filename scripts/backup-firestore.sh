@@ -5,8 +5,8 @@ set -euo pipefail
 : "${FIRESTORE_BACKUP_BUCKET:?Define FIRESTORE_BACKUP_BUCKET con gs://...}"
 : "${BACKUP_RETENTION_DAYS:=35}"
 
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "gcloud CLI es obligatorio para exportar Firestore." >&2
+if ! command -v gcloud >/dev/null 2>&1 || ! command -v gsutil >/dev/null 2>&1; then
+  echo "gcloud y gsutil CLI son obligatorios para exportar Firestore." >&2
   exit 1
 fi
 
@@ -22,8 +22,13 @@ cat > /tmp/tienda-ss-backup-manifest.json <<EOF
 EOF
 gsutil cp /tmp/tienda-ss-backup-manifest.json "${DESTINATION}/manifest.json"
 
-CUTOFF="$(date -u -d "-${BACKUP_RETENTION_DAYS} days" +%Y-%m-%dT%H-%M-%SZ)"
-echo "Eliminando backups anteriores a ${CUTOFF}"
-gsutil ls -d "${FIRESTORE_BACKUP_BUCKET%/}/tienda-ss/*" 2>/dev/null | awk -v cutoff="${CUTOFF}" '$0 < cutoff {print}' | xargs -r -n1 gsutil -m rm -r || true
+CUTOFF_EPOCH="$(date -u -d "-${BACKUP_RETENTION_DAYS} days" +%s)"
+echo "Eliminando backups anteriores a ${BACKUP_RETENTION_DAYS} días"
+gsutil ls -d "${FIRESTORE_BACKUP_BUCKET%/}/tienda-ss/*" 2>/dev/null | while IFS= read -r backup; do
+  stamp="${backup%/}"; stamp="${stamp##*/}"
+  if backup_epoch="$(date -u -d "${stamp}" +%s 2>/dev/null)" && [ "${backup_epoch}" -lt "${CUTOFF_EPOCH}" ]; then
+    gsutil -m rm -r "${backup}" || true
+  fi
+done
 
 echo "Backup completado: ${DESTINATION}"

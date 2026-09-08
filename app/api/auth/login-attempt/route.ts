@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { consumeDistributedRateLimits, getClientAddress, rateLimitResponse } from '@/lib/rate-limit';
+import { logEvent } from '@/lib/observability';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +32,10 @@ export async function POST(request: NextRequest) {
     { ip: 20, endpoint: 8, composite: 8 },
     15 * 60 * 1000,
   );
-  if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
+  if (!rate.allowed) {
+    logEvent('warn', 'auth.login.rate_limited', { ip, emailHash: emailKey(email), scope: rate.blockedBy || 'composite', retryAfterSeconds: rate.retryAfterSeconds });
+    return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
+  }
 
   return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
 }

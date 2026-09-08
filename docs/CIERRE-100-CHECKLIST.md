@@ -104,3 +104,27 @@ Nunca registrar en este documento valores de `.env.local`, claves Stripe, claves
 - [x] Los estados de suscripción restringidos bloquean escrituras y exportaciones.
 - [x] Los límites alcanzados devuelven 402 con una ruta clara de upgrade.
 - [ ] Probar con tenant Starter real o Emulator Suite intentando superar cada límite.
+
+## ETAPA 4 — Observabilidad y operación (P1/P2)
+
+| Estado | Tarea | Evidencia o pendiente |
+|---|---|---|
+| [x] | Logging estructurado sin secretos | `lib/observability.ts` sanitiza campos sensibles y middleware registra `api.request.received`. |
+| [x] | Correlation ID en APIs | Middleware propaga `x-correlation-id`; `instrumentation.ts` lo conserva al capturar errores. |
+| [x] | Captura de errores 5xx | `instrumentation.ts` + `lib/error-reporting.ts` registran `request.failed` con tenant, ruta y contexto seguro. |
+| [x] | Health check | `GET /api/health` comprueba que el proceso responda. |
+| [x] | Readiness check real | `GET /api/health?ready=true` verifica Firestore y Stripe mediante llamadas reales; devuelve 503 si falla una dependencia. |
+| [x] | Backup automatizado | `.github/workflows/firestore-backup.yml` ejecuta export diario y manual mediante Workload Identity Federation. |
+| [x] | Retención y cifrado documentados | `scripts/backup-firestore.sh` conserva 35 días y documenta cifrado del bucket/CMEK. |
+| [x] | Restore reproducible | `scripts/restore-firestore.sh` y `docs/OPERATIONS-RUNBOOK.md` describen restore en staging y producción. |
+| [x] | Alertas mínimas | Eventos estructurados para fallos de facturación, autenticación masiva, 5xx y webhook Stripe fallido. |
+| [ ] | Configurar proveedor externo de alertas | Falta conectar Vercel Log Drains/SIEM/Sentry y crear reglas de notificación en la cuenta de producción. |
+| [ ] | Ensayo medido de restore | Falta ejecutar restore real en staging y registrar RPO/RTO medidos; el objetivo inicial es RPO 24 h y RTO <4 h. |
+
+### Checkpoint Etapa 4
+
+- [x] Una operación crítica puede rastrearse con correlation ID, tenant y ruta sin exponer secretos.
+- [x] El sistema diferencia proceso vivo de readiness de Firestore/Stripe.
+- [x] Existe backup diario, retención y script de restore.
+- [x] Existen eventos para las cuatro alertas mínimas.
+- [ ] El proveedor externo de alertas y el ensayo de restore quedan configurados y archivados.

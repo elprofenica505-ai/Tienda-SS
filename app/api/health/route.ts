@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { logEvent } from '@/lib/observability';
+import { getStripe } from '@/lib/stripe';
 
 export const runtime = 'nodejs';
 
@@ -31,11 +32,13 @@ async function readinessResponse() {
     logEvent('error', 'health.readiness.failed', { dependency: 'firestore', error: error instanceof Error ? error.message : 'unknown' });
   }
 
-  if (process.env.STRIPE_SECRET_KEY) checks.stripe = 'configured';
-  else checks.stripe = 'not_configured';
+  if (process.env.STRIPE_SECRET_KEY) {
+    try { await getStripe().accounts.retrieve(null); checks.stripe = 'ok'; }
+    catch (error) { checks.stripe = 'failed'; logEvent('error', 'health.readiness.failed', { dependency: 'stripe', error: error instanceof Error ? error.message : 'unknown' }); }
+  } else checks.stripe = 'not_configured';
   if (process.env.RESEND_API_KEY) checks.email = 'configured';
   else checks.email = 'not_configured';
 
-  const ok = checks.firestore === 'ok';
+  const ok = checks.firestore === 'ok' && checks.stripe === 'ok';
   return response({ ok, status: ok ? 'ready' : 'not_ready', service: 'tienda-ss', checks, timestamp: new Date().toISOString() }, ok ? 200 : 503);
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCorrelationId } from '@/lib/observability';
+import { getCorrelationId, logEvent } from '@/lib/observability';
 import { getApiPolicy, isPublicApiRoute } from '@/lib/api-policy';
 
 function withSecurityHeaders(response: NextResponse, correlationId?: string) {
@@ -22,6 +22,7 @@ export function middleware(request: NextRequest) {
 
   const method = request.method.toUpperCase();
   const correlationId = getCorrelationId(request);
+  logEvent('info', 'api.request.received', { correlationId, method, path: pathname });
   if (isPublicApiRoute(pathname, method)) return withSecurityHeaders(NextResponse.next(), correlationId);
 
   const authorization = request.headers.get('authorization')?.trim() || '';

@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
             const tenantSnapshot = await transaction.get(tenantRef);
             if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) transaction.set(tenantRef, { subscriptionStatus: 'past_due', lastPaymentFailureAt: new Date(), lastStripeEventCreated: event.created, updatedAt: new Date() }, { merge: true });
           });
+          logEvent('warn', 'alert.billing.payment_failed', { eventId: event.id, invoiceId: invoice.id, tenantId: tenantRef.id });
           await notifyTenant(tenantRef.id, 'payment_failed', 'Pago de suscripción fallido', `No pudimos procesar el cobro de tu suscripción por $${currencyAmount(invoice.amount_due)}. Actualiza tu método de pago para evitar una interrupción.`, { eventId: event.id, invoiceId: invoice.id });
         }
       }
@@ -136,7 +137,7 @@ export async function POST(request: NextRequest) {
     if (eventRef) {
       try { await eventRef.set({ status: 'failed', failedAt: new Date(), error: error instanceof Error ? error.message.slice(0, 500) : 'unknown', updatedAt: new Date() }, { merge: true }); } catch { logEvent('error', 'stripe_webhook_event_update_failed', { eventId: eventRef.id }); }
     }
-    logEvent('error', 'stripe_webhook_error', { message: error instanceof Error ? error.message : 'unknown' });
+    logEvent('error', 'alert.stripe.webhook.failed', { eventId: eventRef?.id, message: error instanceof Error ? error.message : 'unknown' });
     return NextResponse.json({ error: 'No se pudo procesar el webhook.' }, { status: 500 });
   }
 }

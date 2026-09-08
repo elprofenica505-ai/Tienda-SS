@@ -82,3 +82,47 @@ Los incidentes de autenticación, aislamiento entre tenants, ventas duplicadas, 
 | Observabilidad | Health check monitorizado y logs disponibles |
 | Rollback | Artefacto anterior identificado y procedimiento probado |
 | Aprobación | Responsable de producto y responsable técnico registrados |
+
+## Observabilidad implementada
+
+Todas las rutas bajo `/api/` reciben un `x-correlation-id` generado o propagado por middleware. El middleware registra `api.request.received` sin autorización, cookies, tokens ni cuerpos de solicitud. Las respuestas conservan el correlation ID para relacionar el reporte del usuario con los logs.
+
+Next.js usa `instrumentation.ts` para capturar errores no controlados de requests. `lib/error-reporting.ts` elimina patrones de credenciales y registra `request.failed` con ruta, método, tenant, UID disponible, nombre seguro del error y correlation ID. Esta captura basada en logs estructurados es compatible con Vercel Log Drains, un SIEM o Sentry mediante integración del proveedor, sin guardar secretos en la aplicación.
+
+Los eventos de alerta mínimos son `alert.billing.payment_failed`, `auth.login.rate_limited`, `alert.stripe.webhook.failed` y `request.failed`. Configura alertas en el proveedor de logs con estas condiciones:
+
+| Alerta | Condición sugerida | Ventana | Acción |
+|---|---|---:|---|
+| Fallos de facturación | `event = alert.billing.payment_failed` | 5 min | Revisar tenant, invoice y Stripe Dashboard. |
+| Autenticación masiva | `event = auth.login.rate_limited` | 10 min | Revisar IPs y hashes de correo; aumentar protección si es ataque. |
+| Errores 5xx | `event = request.failed` o status 5xx del proveedor | 5 min | Agrupar por `routePath` y `correlationId`; revisar deployment. |
+| Webhook Stripe fallido | `event = alert.stripe.webhook.failed` | Inmediato | Corregir causa y reenviar el evento desde Stripe. |
+
+## Readiness real
+
+`GET /api/health` solo comprueba que el proceso responda. `GET /api/health?ready=true` verifica proceso, lectura real de Firestore en `system/health` y una llamada real a Stripe mediante `accounts.retrieve()`. Devuelve `503` si Firestore o Stripe no están operativos.
+
+## Backup automatizado, retención y cifrado
+
+`.github/workflows/firestore-backup.yml` ejecuta `scripts/backup-firestore.sh` diariamente a las 02:17 UTC y permite ejecución manual. Usa Workload Identity Federation, por lo que no requiere guardar una clave JSON permanente en GitHub.
+
+Configura estos secretos de GitHub Actions: `GCP_WIF_PROVIDER`, `GCP_BACKUP_SERVICE_ACCOUNT`, `GCP_FIRESTORE_PROJECT` y `FIRESTORE_BACKUP_BUCKET`. La cuenta debe poder exportar Firestore y escribir en el bucket.
+
+El script genera un manifest, conserva 35 días por defecto y elimina prefijos fechados fuera de la retención. El bucket debe tener acceso restringido, versionado y cifrado administrado por Google como mínimo; usa CMEK si la política de la empresa exige control de claves. La ejecución diaria implica un objetivo RPO aproximado de 24 horas.
+
+## Procedimiento de restore y objetivos
+
+`scripts/restore-firestore.sh` importa un prefijo fechado. Nunca se debe restaurar sobre producción como primera prueba:
+
+1. Seleccionar el prefijo y verificar su `manifest.json`.
+2. Importar en un proyecto de recuperación o staging.
+3. Verificar `/api/health?ready=true`, login, tenants, miembros, ventas, inventario, crédito y `auditLogs`.
+4. Ejecutar `npm run test:rules` y smoke tests.
+5. Medir duración y registrar conteos antes de aprobar producción.
+6. Para producción, congelar escrituras, guardar un backup inmediatamente anterior y registrar la aprobación del incidente.
+
+Con backup diario, el objetivo RPO inicial es **24 horas**. El RTO objetivo es **menor a 4 horas** para un tenant normal, pero no se considera cumplido hasta realizar un restore de ensayo y registrar su duración real.
+
+## Estados Stripe y recuperación
+
+Los eventos se almacenan en `billingEvents/{eventId}` y siguen `received → processing → processed` o `failed`. Los fallidos y procesos abandonados son reintentables hasta el límite configurado. Antes de reenviar desde Stripe, revisa el `eventId`, correlation ID, secreto del webhook, cuenta Firebase Admin y orden temporal del evento.

@@ -15,11 +15,16 @@ export function getCorrelationId(request?: Request): string {
 }
 
 export function logEvent(level: LogLevel, event: string, fields: Record<string, unknown> = {}) {
+  const safeFields = Object.fromEntries(Object.entries(fields).map(([key, value]) => {
+    if (/(authorization|cookie|token|secret|password|api[_-]?key|private[_-]?key)/i.test(key)) return [key, '[redacted]'];
+    if (typeof value === 'string' && /(sk_live_|sk_test_|whsec_|BEGIN PRIVATE KEY|Bearer\s)/i.test(value)) return [key, '[redacted]'];
+    return [key, value];
+  }));
   const payload = {
     timestamp: new Date().toISOString(),
     level,
     event,
-    ...fields,
+    ...safeFields,
   };
   const serialized = JSON.stringify(payload);
   if (level === 'error') console.error(serialized);
