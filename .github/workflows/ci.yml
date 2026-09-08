@@ -10,6 +10,12 @@ permissions:
   security-events: write
 
 jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
