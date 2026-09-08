@@ -13,8 +13,19 @@ jobs:
   dependency-review:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Dependency review
-        uses: actions/dependency-review-action@v4
+        run: npm audit --omit=dev --audit-level=critical
 
   quality:
     runs-on: ubuntu-latest
