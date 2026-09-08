@@ -24,6 +24,8 @@ No se agregaron listeners `onSnapshot`. La carga de productos del rol bodega es 
 4. Cambia de pantalla o cierra sesión; verifica en Network que no queden requests repetitivos y que no haya listeners Firestore activos.
 5. Repite la prueba en `/workspace/catalog` y confirma que cada request incluya `x-tenant-id`, pase por `/api/catalog` y respete `pagination.pageSize <= 25`.
 
+Para ejecutar esta verificación con instrucciones detalladas, criterios de aprobación, interpretación de métricas y hoja de registro, consulta `docs/MANUAL-T13-FIREBASE-CONSOLE.md`.
+
 ## T14 — Archivos tocados
 
 - `app/api/catalog/route.ts`
