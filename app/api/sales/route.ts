@@ -3,6 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { FieldValue } from 'firebase-admin/firestore';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -50,6 +51,7 @@ export async function POST(request: NextRequest) {
     const db = getAdminDb();
     const tenant = db.collection('tenants').doc(context.tenantId);
     const saleRef = tenant.collection('sales').doc();
+    const statsRef = tenant.collection('stats').doc('daily').collection('days').doc(new Date().toISOString().slice(0, 10));
     const productIds = Array.from(unique.keys());
     const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
     const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
       });
       const response = { saleId: saleRef.id, total, lines };
       transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, items: lines, subtotal, discount, total, paymentMethod, customerId: customerId || null, customerName: customerName || null, branchId: branchId || null, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      transaction.set(statsRef, { salesCount: FieldValue.increment(1), salesTotal: FieldValue.increment(total), updatedAt: now }, { merge: true });
       if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
       return response;
     });

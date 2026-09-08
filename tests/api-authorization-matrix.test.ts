@@ -15,6 +15,7 @@ const protectedTenantRoutes = [
   '/api/permissions',
   '/api/receivables',
   '/api/reports',
+  '/api/stats/daily',
   '/api/sales',
   '/api/tenants',
   '/api/usuarios',
