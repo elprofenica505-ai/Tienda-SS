@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from '@/lib/pagination';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -110,6 +111,7 @@ export async function POST(request: NextRequest) {
       return { current, next, delta };
     });
 
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.adjusted', entity: 'product', entityId: productId, before: { stock: result.current }, after: { stock: result.next, movementType, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory' }, result: 'success' });
     return NextResponse.json({ ok: true, productId, ...result }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 const paymentRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
       transaction.set(paymentRef, { saleId, customerId: data.customerId || null, customerName: data.customerName || 'Cliente sin identificar', amount: payment, paymentMethod: method, notes: text(body.notes, 300), createdBy: context.uid, createdAt: now });
       return { saleId, paymentId: paymentRef.id, paidAmount: newPaid, balanceDue: newBalance, paymentStatus };
     });
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, before: { balanceDue: result.balanceDue + payment, paidAmount: result.paidAmount - payment }, after: result, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/receivables' }, result: 'success' });
     return NextResponse.json({ ok: true, ...result }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';

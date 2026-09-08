@@ -59,3 +59,24 @@ No se copiaron ni se mostrarán valores secretos. El archivo `.env.example` decl
 ## Regla de secretos
 
 Nunca registrar en este documento valores de `.env.local`, claves Stripe, claves de servicio Firebase, tokens de sesión, cookies, códigos MFA o respuestas completas de proveedores externos. Solo se documenta presencia, ausencia, prefijo no sensible y entorno.
+
+## ETAPA 2 — Integridad de negocio y auditoría (P0/P1)
+
+| Estado | Tarea | Evidencia o pendiente |
+|---|---|---|
+| [x] | Devoluciones | `POST /api/sales/returns` revierte stock en una transacción, limita cantidades devueltas y crea `salesReturns`. |
+| [x] | Anulaciones | `POST /api/sales/void` revierte stock en una transacción; una venta con pagos no se anula y debe usar nota de crédito. |
+| [x] | Notas de crédito | `POST /api/receivables/credit-notes` actualiza saldo y total acreditado atómicamente. |
+| [x] | Ajustes de inventario autorizados | `POST /api/inventory` ya usa transacción, valida permisos y no permite stock negativo. |
+| [x] | Reservas de stock | `POST/DELETE /api/inventory/reservations` descuenta o libera stock dentro de transacciones y registra movimientos. |
+| [x] | Auditoría inmutable | `writeImmutableAudit` usa secuencia, hash encadenado, `actorUid`, `actorRole`, tenant, entidad, antes/después, timestamp y requestId dentro de una transacción. |
+| [x] | Auditoría de venta y movimientos existentes | Ventas, pagos, ajustes, devoluciones, anulaciones, notas y reservas registran eventos auditables. |
+| [ ] | Pruebas completas con Firebase Emulator | La matriz y las pruebas unitarias pasan; falta ejecutar escenarios multioperación contra el emulador con datos de venta y stock. |
+
+### Checkpoint Etapa 2
+
+- [x] Una venta existente descuenta stock y crea movimiento/auditoría dentro de una transacción.
+- [x] Una devolución restituye stock y crea movimiento/auditoría.
+- [x] Un ajuste autorizado no deja stock negativo y crea auditoría.
+- [x] Una nota de crédito actualiza el saldo de forma atómica.
+- [ ] Los escenarios integrales con datos reales o Emulator Suite se ejecutan y quedan archivados.

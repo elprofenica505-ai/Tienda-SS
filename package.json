@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:permissions && npm run test:migrations && node --import tsx --test tests/rate-limit.test.ts tests/rate-limit-abuse.test.ts && node --import tsx --test tests/entitlements.test.ts && node --import tsx --test tests/health.test.ts && node --import tsx --test tests/middleware.test.ts && node --import tsx --test tests/api-authorization-matrix.test.ts && node --import tsx --test tests/invitations.test.ts tests/firestore-listeners.test.ts tests/p0-security.test.ts",
+    "test": "npm run test:permissions && npm run test:migrations && node --import tsx --test tests/rate-limit.test.ts tests/rate-limit-abuse.test.ts && node --import tsx --test tests/entitlements.test.ts && node --import tsx --test tests/health.test.ts && node --import tsx --test tests/middleware.test.ts && node --import tsx --test tests/api-authorization-matrix.test.ts && node --import tsx --test tests/invitations.test.ts tests/firestore-listeners.test.ts tests/p0-security.test.ts tests/business-integrity.test.ts",
     "test:all": "npm run test && npm run test:rules",
     "test:p04": "node --import tsx --test tests/p04-auth.integration.test.ts tests/security-policy.test.ts",
     "test:p05": "RATE_LIMIT_SHARED=false node --import tsx --test tests/rate-limit-abuse.test.ts tests/rate-limit.test.ts",

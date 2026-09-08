@@ -15,16 +15,17 @@ const publicRoutes = new Set([
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
-  { pattern: /^\/api\/(catalog|inventory)$/, policy: { module: 'catalog', action: 'view' } },
+  { pattern: /^\/api\/catalog$/, policy: { module: 'catalog', action: 'view' } },
+  { pattern: /^\/api\/inventory(?:\/reservations)?$/, policy: { module: 'inventory', action: 'view' } },
   { pattern: /^\/api\/contacts$/, policy: { module: 'contacts', action: 'view' } },
   { pattern: /^\/api\/finance$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/(members|usuarios)$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/notifications$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/permissions$/, policy: { module: 'members', action: 'view' } },
-  { pattern: /^\/api\/receivables$/, policy: { module: 'receivables', action: 'view' } },
+  { pattern: /^\/api\/receivables(?:\/credit-notes)?$/, policy: { module: 'receivables', action: 'view' } },
   { pattern: /^\/api\/reports$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/stats\/daily$/, policy: { module: 'reports', action: 'view' } },
-  { pattern: /^\/api\/sales$/, policy: { module: 'sales', action: 'view' } },
+  { pattern: /^\/api\/sales(?:\/(returns|void))?$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/billing$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/invitations$/, policy: { module: 'members', action: 'view' } },
 ];
