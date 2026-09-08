@@ -129,6 +129,21 @@ service cloud.firestore {
           || hasRole(tenantId, 'despachador');
         allow delete: if false;
       }
+      match /presales/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create: if hasRole(tenantId, 'owner')
+          || hasRole(tenantId, 'admin')
+          || hasRole(tenantId, 'gerente')
+          || hasRole(tenantId, 'supervisor_sucursal')
+          || hasRole(tenantId, 'vendedor');
+        allow update: if hasRole(tenantId, 'owner')
+          || hasRole(tenantId, 'admin')
+          || hasRole(tenantId, 'gerente')
+          || hasRole(tenantId, 'supervisor_sucursal')
+          || hasRole(tenantId, 'vendedor')
+          || hasRole(tenantId, 'cajero');
+        allow delete: if false;
+      }
       match /stats/{statsDocument} {
         allow read: if isMember(tenantId);
         allow write: if false;

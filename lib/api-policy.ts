@@ -27,6 +27,7 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/reports(?:\/export)?$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/stats\/daily$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/sales(?:\/(returns|void))?$/, policy: { module: 'sales', action: 'view' } },
+  { pattern: /^\/api\/presales(?:\/checkout)?$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/billing$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/invitations$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/v1\/keys$/, policy: { module: 'members', action: 'create' } },

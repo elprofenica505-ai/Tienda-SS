@@ -44,6 +44,19 @@ No se copiaron ni se mostrarán valores secretos. El archivo `.env.example` decl
 
 La evidencia detallada está en `docs/ETAPA-1-ONBOARDING-CHECKLIST.md`.
 
+### ETAPA 2 — Núcleo que vende: preventa → caja → stock
+
+| Estado | Control | Evidencia |
+|---|---|---|
+| [x] | Modelo de preventa multi-tenant | `tenants/{tenantId}/presales/{presaleId}` guarda ticket, líneas, vendedor, estado, evidencia liviana y timestamps. |
+| [x] | Panel vendedor | `/workspace/presales` busca productos, calcula total, adjunta referencias de evidencia y envía a caja. |
+| [x] | Panel cajero | `/workspace/cashier` busca por código, muestra líneas y cobra efectivo, tarjeta o crédito. |
+| [x] | Stock coherente | El stock baja únicamente en `POST /api/presales/checkout`, dentro de la transacción que crea venta y estadística diaria. |
+| [x] | No doble cobro | Un ticket `paid` devuelve la venta existente y no vuelve a descontar stock. |
+| [x] | Aislamiento y paginación | API y reglas preservan el tenant; el listado inicial usa `get()` con límite de 20 más cursor. |
+
+La evidencia detallada está en `docs/ETAPA-2-PREVENTA-CAJA-STOCK.md`.
+
 | Estado | Tarea | Evidencia o pendiente |
 |---|---|---|
 | [ ] | Completar autorización por campo, sucursal y sensibilidad | Se reforzó catálogo: usuarios no administrativos no reciben ni escriben `cost`; ventas valida sucursal. Aún falta aplicar la misma revisión explícita a todos los módulos con datos de sucursal antes de marcarla completa. |
