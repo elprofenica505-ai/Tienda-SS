@@ -25,6 +25,9 @@ export function middleware(request: NextRequest) {
   logEvent('info', 'api.request.received', { correlationId, method, path: pathname });
   if (isPublicApiRoute(pathname, method)) return withSecurityHeaders(NextResponse.next(), correlationId);
 
+  // Las integraciones versionadas validan la API key aislada por tenant dentro del handler.
+  if (pathname.startsWith('/api/v1/') && pathname !== '/api/v1/keys') return withSecurityHeaders(NextResponse.next(), correlationId);
+
   const authorization = request.headers.get('authorization')?.trim() || '';
   if (!/^Bearer\s+\S+$/i.test(authorization)) {
     return unauthorized('Autenticación requerida.', 401, correlationId);
