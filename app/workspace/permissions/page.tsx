@@ -1,5 +1,7 @@
 'use client';
 
+import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
+
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
@@ -156,15 +158,7 @@ function PermissionsContent() {
 
   return (
     <main className="workspace-page">
-      <aside className="workspace-sidebar">
-        <div className="onboarding-brand"><span className="brand-mark-icon">N</span><b>ConexiaX</b></div>
-        <div className="workspace-company"><span>{tenant.name.slice(0, 1).toUpperCase()}</span><div><b>{tenant.name}</b><small>Plan {tenant.plan || 'Starter'}</small></div></div>
-        <nav>
-          <a onClick={() => router.push('/workspace')}>▦ <span>Resumen</span></a>
-          <a onClick={() => router.push('/workspace/members')}>♙ <span>Usuarios y roles</span></a>
-          <a className="active">⚙ <span>Permisos</span></a>
-        </nav>
-      </aside>
+      <WorkspaceSidebar />
       <section className="workspace-main permissions-main">
         <header className="permissions-header">
           <div>
