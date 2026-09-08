@@ -10,13 +10,16 @@ La carga inicial de listados, catálogos, ventas, compras, reportes y dashboards
 
 La auditoría de la rama `SaaS-MultiTenant-Profesional` no encontró usos de `onSnapshot` en componentes de negocio, providers ni rutas activas. El único uso permitido queda encapsulado en `hooks/useFirestoreCollection.ts`, dentro de `useCollectionRealtime`, para evitar que cada pantalla implemente listeners sin cleanup.
 
+La revisión histórica de Git confirmó que versiones anteriores sí usaban `onSnapshot` en `components/ProductosAdmin.tsx` y `components/legacy/LegacyApp.tsx`. Esos listeners fueron reemplazados por cargas puntuales antes de la medición actual. También se encontró un polling de la auditoría de superadmin cada 10 segundos; ahora la auditoría se actualiza al entrar, al cambiar filtros/página o al pulsar la actualización manual, y ya no permanece consultando en segundo plano.
+
 El `onAuthStateChanged` de `components/tenant/TenantProvider.tsx` es un listener de Firebase Authentication, no un listener de lecturas de Firestore. Su callback devuelve el cleanup de Firebase Auth al desmontar el provider. No se debe confundir con `onSnapshot`.
 
 | Zona auditada | Resultado | Decisión |
 |---|---|---|
 | `components/tenant/TenantProvider.tsx` | `onAuthStateChanged` de Auth | Se conserva; es necesario para conocer login/logout y tiene cleanup. |
 | `components/ProductosAdmin.tsx` | Carga puntual de productos y categorías | Usa `useCollectionOnce`; no abre listener. |
-| `components/legacy/LegacyApp.tsx` | Cargas puntuales con `getDocs`/`getDoc` | Se mantienen puntuales; el flujo legacy no usa realtime. |
+| `components/legacy/LegacyApp.tsx` | Cargas puntuales con `getDocs`/`getDoc` | Se mantienen puntuales; el flujo legacy no usa realtime. Las versiones históricas tenían listeners y fueron corregidas. |
+| `app/superadmin/page.tsx` | Auditoría administrativa | Se eliminó el polling de 10 segundos; la actualización es bajo demanda. |
 | Workspace SaaS | Lecturas mediante rutas API con Admin SDK | No mantiene listeners Firestore en el navegador. |
 | `hooks/useFirestoreCollection.ts` | Implementación común de carga puntual y realtime | `useCollectionOnce` es la opción por defecto; `useCollectionRealtime` exige una decisión explícita. |
 
