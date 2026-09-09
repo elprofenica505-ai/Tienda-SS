@@ -8,6 +8,7 @@ import { useTenant } from '@/components/tenant/TenantProvider';
 const primaryItems = [
   { href: '/workspace', icon: '▦', label: 'Resumen', exact: true },
   { href: '/workspace/sales', icon: '◈', label: 'Ventas / POS' },
+  { href: '/workspace/returns', icon: '↩', label: 'Devoluciones y notas' },
   { href: '/workspace/presales', icon: '↗', label: 'Preventa en piso' },
   { href: '/workspace/cashier', icon: '$', label: 'Caja / Tickets' },
   { href: '/workspace/catalog', icon: '▤', label: 'Catálogo' },
