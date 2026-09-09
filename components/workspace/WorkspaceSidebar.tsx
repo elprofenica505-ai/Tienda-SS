@@ -13,6 +13,7 @@ const primaryItems = [
   { href: '/workspace/cashier', icon: '$', label: 'Caja / Tickets' },
   { href: '/workspace/catalog', icon: '▤', label: 'Catálogo' },
   { href: '/workspace/inventory', icon: '◇', label: 'Inventario' },
+  { href: '/workspace/warehouse-inventory', icon: '▥', label: 'Stock por almacén' },
   { href: '/workspace/purchases', icon: '↥', label: 'Compras' },
   { href: '/workspace/deliveries', icon: '➜', label: 'Entregas' },
   { href: '/workspace/contacts', icon: '○', label: 'Clientes' },

@@ -110,6 +110,21 @@ service cloud.firestore {
         allow create: if canOperateInventory(tenantId);
         allow update, delete: if false;
       }
+      match /inventoryStocks/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if canOperateInventory(tenantId);
+        allow delete: if false;
+      }
+      match /inventoryTransfers/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if canOperateInventory(tenantId);
+        allow delete: if false;
+      }
+      match /inventoryCounts/{documentId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'bodega');
+        allow delete: if false;
+      }
       match /purchases/{documentId} {
         allow read: if isMember(tenantId);
         allow create: if canOperateInventory(tenantId);

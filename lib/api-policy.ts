@@ -18,6 +18,8 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/catalog$/, policy: { module: 'catalog', action: 'view' } },
   { pattern: /^\/api\/catalog\/(import|export)$/, policy: { module: 'catalog', action: 'export' } },
   { pattern: /^\/api\/inventory(?:\/reservations)?$/, policy: { module: 'inventory', action: 'view' } },
+  { pattern: /^\/api\/inventory$/, policy: { module: 'inventory', action: 'view' } },
+  { pattern: /^\/api\/inventory\/warehouses$/, policy: { module: 'inventory', action: 'view' } },
   { pattern: /^\/api\/purchases$/, policy: { module: 'inventory', action: 'view' } },
   { pattern: /^\/api\/deliveries$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/contacts$/, policy: { module: 'contacts', action: 'view' } },
