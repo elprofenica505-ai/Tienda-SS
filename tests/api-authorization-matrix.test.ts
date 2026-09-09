@@ -6,6 +6,7 @@ import { getApiPolicy, isPublicApiRoute } from '@/lib/api-policy';
 
 const protectedTenantRoutes = [
   '/api/billing',
+  '/api/cash-sessions',
   '/api/catalog',
   '/api/contacts',
   '/api/finance',

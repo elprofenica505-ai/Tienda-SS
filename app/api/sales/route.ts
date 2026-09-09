@@ -7,6 +7,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { getEntitlementLimit } from '@/lib/entitlements';
 import { createFiscalSaleFields, fiscalMoney, formatFiscalNumber, validateFiscalFields } from '@/lib/fiscal-ni';
+import { findOpenCashSession } from '@/lib/cash';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
     const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || context.branchIds[0] || '';
     if (!branchId) return NextResponse.json({ error: 'Selecciona una sucursal antes de registrar la venta.' }, { status: 400 });
     if (branchId) assertBranchAccess(context, branchId);
+    const openSession = paymentMethod === 'credit' ? null : await findOpenCashSession(context.tenantId, branchId);
+    if (paymentMethod !== 'credit' && !openSession) return NextResponse.json({ error: 'Abre una sesión de caja antes de registrar cobros.' }, { status: 409 });
     const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
     const discount = money(body.discount);
     if (!rawLines.length || rawLines.length > 50 || !paymentMethod) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 líneas de productos.' }, { status: 400 });
@@ -66,12 +69,15 @@ export async function POST(request: NextRequest) {
     const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
     const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
     const customerRef = customerId ? tenant.collection('customers').doc(customerId) : null;
+    const cashSessionRef = openSession ? tenant.collection('cashSessions').doc(openSession.id) : null;
     const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
 
     const fiscalRef = tenant.collection('settings').doc('fiscal');
     const result = await db.runTransaction(async (transaction) => {
       const tenantSnapshot = await transaction.get(tenant);
       const fiscalSnapshot = await transaction.get(fiscalRef);
+      const cashSessionSnapshot = cashSessionRef ? await transaction.get(cashSessionRef) : null;
+      if (cashSessionRef && (!cashSessionSnapshot?.exists || cashSessionSnapshot.data()?.status !== 'open')) throw new Error('CASH_SESSION_NOT_OPEN');
       const plan = tenantSnapshot.data()?.plan;
       const monthlyLimit = Number.isFinite(getMonthlyLimit(plan)) ? getMonthlyLimit(plan) : null;
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
@@ -121,7 +127,7 @@ export async function POST(request: NextRequest) {
       });
       const response = { saleId: saleRef.id, total, lines, invoiceNumber };
       const paidAmount = paymentMethod === 'credit' ? 0 : total;
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, cashSessionId: openSession?.id || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
       if (paymentMethod === 'credit' && customerRef) {
         transaction.update(customerRef, { creditBalance: customerCreditBalance + total, updatedAt: now, updatedBy: context.uid });
         transaction.create(tenant.collection('creditMovements').doc(), { customerId, saleId: saleRef.id, type: 'charge', amount: total, balanceAfter: customerCreditBalance + total, createdBy: context.uid, createdAt: now });
@@ -140,6 +146,7 @@ export async function POST(request: NextRequest) {
     if (message.startsWith('INSUFFICIENT_STOCK:')) return NextResponse.json({ error: `Stock insuficiente para ${message.split(':').slice(1).join(':')}.` }, { status: 409 });
     if (message.startsWith('FISCAL_INVALID:')) return NextResponse.json({ error: message.slice('FISCAL_INVALID:'.length) }, { status: 400 });
     if (message.startsWith('CREDIT_LIMIT_EXCEEDED:')) return NextResponse.json({ error: `El crédito disponible es insuficiente. Límite: $${message.split(':')[1]}, saldo actual: $${message.split(':')[2]}.` }, { status: 409 });
+    if (message === 'CASH_SESSION_NOT_OPEN') return NextResponse.json({ error: 'La sesión de caja se cerró antes de completar la venta.' }, { status: 409 });
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }

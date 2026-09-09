@@ -80,6 +80,12 @@ service cloud.firestore {
         allow create, update: if isManager(tenantId);
         allow delete: if false;
       }
+      match /cashSessions/{sessionId} {
+        allow read: if isMember(tenantId);
+        allow create: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'cajero');
+        allow update: if isBranchSupervisor(tenantId) || hasRole(tenantId, 'cajero');
+        allow delete: if false;
+      }
       match /settings/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId);
