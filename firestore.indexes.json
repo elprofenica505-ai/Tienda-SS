@@ -36,6 +36,15 @@
       ]
     },
     {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "branchId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "deliveries",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

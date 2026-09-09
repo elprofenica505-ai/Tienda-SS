@@ -65,6 +65,21 @@ service cloud.firestore {
           || (hasRole(tenantId, 'supervisor_sucursal') && validBranchMemberWrite());
         allow delete: if isManager(tenantId);
       }
+      match /branches/{branchId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if false;
+      }
+      match /warehouses/{warehouseId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if false;
+      }
+      match /cashRegisters/{registerId} {
+        allow read: if isMember(tenantId);
+        allow create, update: if isManager(tenantId);
+        allow delete: if false;
+      }
       match /settings/{documentId} {
         allow read: if isMember(tenantId);
         allow create, update: if isManager(tenantId);

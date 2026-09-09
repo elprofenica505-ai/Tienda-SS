@@ -11,11 +11,12 @@ const onboarding = readFileSync('app/onboarding/page.tsx', 'utf8');
 const signature = (collectionGroup: string, fields: string) => indexes.indexes.some((index) => index.collectionGroup === collectionGroup && index.queryScope === 'COLLECTION_GROUP' && index.fields.map((field) => `${field.fieldPath}:${field.order}`).join(',') === fields);
 
 test('los índices de producción reflejan las queries multi-tenant requeridas', () => {
-  assert.equal(indexes.indexes.length, 7);
+  assert.equal(indexes.indexes.length, 8);
   assert.equal(signature('products', 'active:ASCENDING,name:ASCENDING,__name__:ASCENDING'), true);
   assert.equal(signature('presales', 'createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('presales', 'vendedorUid:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('sales', 'paymentMethod:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
+  assert.equal(signature('sales', 'branchId:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('deliveries', 'driverUid:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('members', 'email:ASCENDING,status:ASCENDING,__name__:ASCENDING'), true);
   assert.equal(signature('tenantInvitations', 'email:ASCENDING,status:ASCENDING,__name__:ASCENDING'), true);

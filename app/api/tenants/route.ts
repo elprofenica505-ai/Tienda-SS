@@ -41,6 +41,9 @@ export async function POST(request: NextRequest) {
     const now = new Date();
     const tenantRef = db.collection('tenants').doc(uid);
     const memberRef = tenantRef.collection('members').doc(uid);
+    const branchRef = tenantRef.collection('branches').doc('branch-main');
+    const warehouseRef = tenantRef.collection('warehouses').doc('warehouse-main');
+    const registerRef = tenantRef.collection('cashRegisters').doc('register-main');
     const batch = db.batch();
 
     batch.set(tenantRef, {
@@ -64,9 +67,14 @@ export async function POST(request: NextRequest) {
       name: ownerName,
       role: 'owner',
       status: 'active',
+      branchIds: [branchRef.id],
       createdAt: now,
       updatedAt: now
     });
+
+    batch.set(branchRef, { name: 'Sucursal principal', code: 'PRINCIPAL', active: true, timezone: 'America/Managua', createdAt: now, updatedAt: now });
+    batch.set(warehouseRef, { branchId: branchRef.id, name: 'Almacén principal', code: 'ALM-PRINCIPAL', type: 'warehouse', active: true, createdAt: now, updatedAt: now });
+    batch.set(registerRef, { branchId: branchRef.id, name: 'Caja principal', code: 'CAJA-PRINCIPAL', active: true, createdAt: now, updatedAt: now });
 
     await batch.commit();
     return NextResponse.json({ ok: true, tenantId: uid }, { status: 201 });

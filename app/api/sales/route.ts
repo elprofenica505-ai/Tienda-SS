@@ -22,7 +22,11 @@ type SaleLine = { productId: string; name: string; sku: string; quantity: number
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
-    const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection('sales').orderBy('createdAt', 'desc').limit(50).get();
+    const salesCollection = getAdminDb().collection('tenants').doc(context.tenantId).collection('sales');
+    const branchId = request.headers.get('x-branch-id')?.trim();
+    const snapshot = branchId && context.role !== 'owner' && context.role !== 'admin' && context.role !== 'gerente' && context.role !== 'jefe'
+      ? await salesCollection.where('branchId', '==', branchId).orderBy('createdAt', 'desc').limit(50).get()
+      : await salesCollection.orderBy('createdAt', 'desc').limit(50).get();
     return NextResponse.json({ ok: true, sales: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);
@@ -37,7 +41,8 @@ export async function POST(request: NextRequest) {
     const rawLines = Array.isArray(body.items) ? body.items as SaleLineInput[] : [];
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
     const customerId = text(body.customerId, 120);
-    const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || '';
+    const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || context.branchIds[0] || '';
+    if (!branchId) return NextResponse.json({ error: 'Selecciona una sucursal antes de registrar la venta.' }, { status: 400 });
     if (branchId) assertBranchAccess(context, branchId);
     const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
     const discount = money(body.discount);

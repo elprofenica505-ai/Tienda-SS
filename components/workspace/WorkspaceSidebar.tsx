@@ -19,6 +19,7 @@ const primaryItems = [
   { href: '/workspace/receivables', icon: '◌', label: 'Cuentas por cobrar' },
   { href: '/workspace/reports', icon: '≡', label: 'Reportes' },
   { href: '/workspace/members', icon: '♙', label: 'Usuarios y roles' },
+  { href: '/workspace/organization', icon: '⌂', label: 'Sucursales y cajas' },
   { href: '/workspace/permissions', icon: '⚙', label: 'Permisos' },
 ];
 
