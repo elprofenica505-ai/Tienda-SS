@@ -7,11 +7,12 @@ const indexes = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')) as { 
 const tenantRoute = readFileSync('app/api/tenants/route.ts', 'utf8');
 const meRoute = readFileSync('app/api/tenants/me/route.ts', 'utf8');
 const onboarding = readFileSync('app/onboarding/page.tsx', 'utf8');
+const organization = readFileSync('lib/organization.ts', 'utf8');
 
 const signature = (collectionGroup: string, fields: string) => indexes.indexes.some((index) => index.collectionGroup === collectionGroup && index.queryScope === 'COLLECTION_GROUP' && index.fields.map((field) => `${field.fieldPath}:${field.order}`).join(',') === fields);
 
 test('los índices de producción reflejan las queries multi-tenant requeridas', () => {
-  assert.equal(indexes.indexes.length, 12);
+  assert.equal(indexes.indexes.length, 16);
   assert.equal(signature('products', 'active:ASCENDING,name:ASCENDING,__name__:ASCENDING'), true);
   assert.equal(signature('presales', 'createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('presales', 'vendedorUid:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
@@ -24,7 +25,12 @@ test('los índices de producción reflejan las queries multi-tenant requeridas',
   assert.equal(signature('deliveries', 'driverUid:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('members', 'email:ASCENDING,status:ASCENDING,__name__:ASCENDING'), true);
   assert.equal(signature('tenantInvitations', 'email:ASCENDING,status:ASCENDING,__name__:ASCENDING'), true);
-  assert.equal(indexes.indexes.some((index) => index.collectionGroup === 'members' && index.fields.length === 1 && index.fields[0].fieldPath === 'uid'), false);
+  assert.equal(signature('branches', 'active:ASCENDING,name:ASCENDING'), true);
+  assert.equal(signature('warehouses', 'active:ASCENDING,name:ASCENDING'), true);
+  assert.equal(signature('cashRegisters', 'active:ASCENDING,name:ASCENDING'), true);
+  assert.equal(signature('members', 'name:ASCENDING'), true);
+  const memberUidOverride = (JSON.parse(readFileSync('firestore.indexes.json', 'utf8')) as { fieldOverrides: Array<{ collectionGroup: string; fieldPath: string; indexes: Array<{ queryScope: string }> }> }).fieldOverrides.find((override) => override.collectionGroup === 'members' && override.fieldPath === 'uid');
+  assert.deepEqual(memberUidOverride?.indexes.map((index) => index.queryScope).sort(), ['COLLECTION', 'COLLECTION_GROUP']);
 });
 
 test('un tenant nuevo usa moneda local de Nicaragua y onboarding explícito', () => {
@@ -38,4 +44,10 @@ test('un tenant nuevo usa moneda local de Nicaragua y onboarding explícito', ()
   assert.equal(DEFAULT_TENANT_SYMBOL, 'C$');
   assert.equal(DEFAULT_TENANT_LOCALE, 'es-NI');
   assert.match(formatMoney(12.5), /C\$/);
+});
+
+test('getOrganization no tumba el workspace si falta el índice de branches', () => {
+  assert.match(organization, /branchesPromise/);
+  assert.match(organization, /continuing with an empty branch list/);
+  assert.match(organization, /branches \? rows\(branches\) : \[\]/);
 });

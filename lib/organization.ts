@@ -73,14 +73,18 @@ export async function ensureDefaultOrganization(tenantId: string, tenantName?: s
 export async function getOrganization(tenantId: string) {
   await ensureDefaultOrganization(tenantId);
   const tenant = getAdminDb().collection('tenants').doc(tenantId);
+  const branchesPromise = tenant.collection('branches').where('active', '==', true).orderBy('name').get().catch((error: unknown) => {
+    console.warn('[organization] branches query unavailable; continuing with an empty branch list', error);
+    return null;
+  });
   const [branches, warehouses, cashRegisters, members] = await Promise.all([
-    tenant.collection('branches').where('active', '==', true).orderBy('name').get(),
+    branchesPromise,
     tenant.collection('warehouses').where('active', '==', true).orderBy('name').get(),
     tenant.collection('cashRegisters').where('active', '==', true).orderBy('name').get(),
     tenant.collection('members').orderBy('name').get(),
   ]);
   const rows = <T extends Record<string, unknown>>(snapshot: FirebaseFirestore.QuerySnapshot<T>) => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-  return { branches: rows(branches), warehouses: rows(warehouses), cashRegisters: rows(cashRegisters), members: rows(members) };
+  return { branches: branches ? rows(branches) : [], warehouses: rows(warehouses), cashRegisters: rows(cashRegisters), members: rows(members) };
 }
 
 export function branchIdsFrom(value: unknown): string[] {
