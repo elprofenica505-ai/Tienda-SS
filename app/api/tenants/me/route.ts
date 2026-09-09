@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import { DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL, normalizeCurrency } from '@/lib/currency';
 
 export const runtime = 'nodejs';
 
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
       const ownerMemberDoc = await ownerTenantDoc.ref.collection('members').doc(decoded.uid).get();
       if (ownerMemberDoc.exists && ownerMemberDoc.data()?.status === 'active') {
         available.push({
-          tenant: { id: ownerTenantDoc.id, ...ownerTenantDoc.data() },
+          tenant: { id: ownerTenantDoc.id, currency: normalizeCurrency(ownerTenantDoc.data()?.currency), currencySymbol: ownerTenantDoc.data()?.currencySymbol || DEFAULT_TENANT_SYMBOL, locale: ownerTenantDoc.data()?.locale || DEFAULT_TENANT_LOCALE, ...ownerTenantDoc.data() },
           member: { id: ownerMemberDoc.id, ...ownerMemberDoc.data() },
         });
       }
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
           const tenantDoc = await tenantRef.get();
           if (!tenantDoc.exists || tenantDoc.data()?.status !== 'active') return null;
           return {
-            tenant: { id: tenantDoc.id, ...tenantDoc.data() },
+            tenant: { id: tenantDoc.id, currency: normalizeCurrency(tenantDoc.data()?.currency), currencySymbol: tenantDoc.data()?.currencySymbol || DEFAULT_TENANT_SYMBOL, locale: tenantDoc.data()?.locale || DEFAULT_TENANT_LOCALE, ...tenantDoc.data() },
             member: { id: memberDoc.id, ...memberDoc.data() },
           };
         }));
@@ -91,6 +92,9 @@ export async function PATCH(request: NextRequest) {
       if (name.length < 2) return NextResponse.json({ error: 'El nombre de la empresa debe tener al menos 2 caracteres.' }, { status: 400 });
       changes.name = name;
     }
+    if (typeof body.currency === 'string') changes.currency = normalizeCurrency(body.currency);
+    if (typeof body.currencySymbol === 'string' && body.currencySymbol.trim()) changes.currencySymbol = body.currencySymbol.trim().slice(0, 8);
+    if (typeof body.locale === 'string' && body.locale.trim()) changes.locale = body.locale.trim().slice(0, 20);
     if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     await getAdminDb().collection('tenants').doc(context.tenantId).update(changes);
     return NextResponse.json({ ok: true, ...changes }, { headers: { 'Cache-Control': 'no-store' } });

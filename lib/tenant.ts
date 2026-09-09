@@ -200,5 +200,9 @@ export function tenantErrorResponse(error: unknown) {
     return { status: 429, body: { error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.', code: 'RATE_LIMITED', scope, retryAfterSeconds: Number(retryAfter) || 1 } };
   }
 
+  if (code.includes('FAILED_PRECONDITION') || code.includes('The query requires an index') || code.includes('FAILED_PRECONDITION:')) {
+    return { status: 503, body: { error: 'Firestore necesita un índice compuesto para esta operación. Ejecuta el despliegue de firestore.indexes.json y vuelve a intentar.', code: 'FIRESTORE_INDEX_REQUIRED', retryable: true } };
+  }
+
   return { status: 500, body: { error: 'Error interno del servidor.' } };
 }

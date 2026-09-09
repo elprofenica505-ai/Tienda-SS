@@ -1,5 +1,15 @@
 # Runbook operativo de Tienda-SS
 
+## Despliegue de índices Firestore
+
+Después de revisar `firestore.indexes.json` y antes de validar las APIs críticas, ejecutar:
+
+```bash
+firebase deploy --only firestore:indexes
+```
+
+La lista versionada debe mantenerse alineada con los índices creados en el proyecto ConexiaX.
+
 Este documento define los controles mínimos para operar la aplicación en producción sin depender de conocimiento informal del equipo.
 
 ## Variables y secretos

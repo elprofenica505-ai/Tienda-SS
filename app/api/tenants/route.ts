@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { tenantErrorResponse } from '@/lib/tenant';
 import { consumeDistributedRateLimits, getClientAddress, rateLimitResponse } from '@/lib/rate-limit';
+import { DEFAULT_TENANT_CURRENCY, DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL } from '@/lib/currency';
 
 export const runtime = 'nodejs';
 
@@ -48,6 +49,9 @@ export async function POST(request: NextRequest) {
       ownerUid: uid,
       status: 'active',
       plan: 'starter',
+      currency: DEFAULT_TENANT_CURRENCY,
+      currencySymbol: DEFAULT_TENANT_SYMBOL,
+      locale: DEFAULT_TENANT_LOCALE,
       onboardingCompleted: false,
       createdAt: now,
       updatedAt: now

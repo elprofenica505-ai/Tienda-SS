@@ -23,6 +23,9 @@ export type Tenant = {
   name: string;
   plan?: string;
   status?: string;
+  currency?: string;
+  currencySymbol?: string;
+  locale?: string;
   onboardingCompleted?: boolean;
 };
 
