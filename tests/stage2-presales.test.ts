@@ -7,6 +7,7 @@ const presalesApi = readFileSync('app/api/presales/route.ts', 'utf8');
 const checkoutApi = readFileSync('app/api/presales/checkout/route.ts', 'utf8');
 const sellerPage = readFileSync('app/workspace/presales/page.tsx', 'utf8');
 const cashierPage = readFileSync('app/workspace/cashier/page.tsx', 'utf8');
+const workspacePage = readFileSync('app/workspace/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
 
 test('la preventa tiene ticket, líneas, vendedor, estados y evidencia liviana', () => {
@@ -40,4 +41,13 @@ test('la API y las reglas mantienen el aislamiento y política de ventas', () =>
   assert.deepEqual(getApiPolicy('/api/presales/checkout', 'POST'), { module: 'sales', action: 'create' });
   assert.match(rules, /match \/presales\/\{documentId\}/);
   assert.match(rules, /allow delete: if false/);
+});
+
+test('la consulta de preventas coincide con el índice descendente existente', () => {
+  assert.match(presalesApi, /orderBy\('createdAt', 'desc'\)\.orderBy\('__name__', 'desc'\)/);
+});
+
+test('el dashboard no se cae si preventas responde con error', () => {
+  assert.match(workspacePage, /if \(!presalesResponse\.ok\) setMessage/);
+  assert.doesNotMatch(workspacePage, /if \(!presalesResponse\.ok\) throw/);
 });

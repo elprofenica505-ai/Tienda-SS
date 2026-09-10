@@ -59,7 +59,7 @@ function WorkspaceContent() {
       if (!statsResponse.ok) throw new Error(dailyStatsResponse.error || 'No se pudieron cargar las estadísticas diarias.');
       if (!catalogResponse.ok) throw new Error(catalog.error || 'No se pudo cargar el catálogo.');
       if (!contactsResponse.ok) throw new Error(contacts.error || 'No se pudieron cargar los clientes.');
-      if (!presalesResponse.ok) throw new Error(presales.error || 'No se pudieron cargar los tickets pendientes.');
+      if (!presalesResponse.ok) setMessage('No se pudieron cargar las preventas pendientes. El resto del dashboard está disponible.');
       setData({ report, dailyStats: dailyStatsResponse.stats || { salesCount: 0, salesTotal: 0 }, products: catalog.products || [], customers: contacts.contacts || [], pendingPresales: (presales.presales || []).filter((item: { status: string }) => item.status === 'sent_to_cashier') });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo cargar el centro de mando.');

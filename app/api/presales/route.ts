@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
       const item = snapshot.docs[0];
       return NextResponse.json({ ok: true, presale: { id: item.id, ...item.data() } }, { headers: { 'Cache-Control': 'no-store' } });
     }
-    let query = tenant.collection('presales').orderBy('createdAt', 'desc').orderBy('__name__').limit(21);
-    if (context.role === 'vendedor') query = tenant.collection('presales').where('vendedorUid', '==', context.uid).orderBy('createdAt', 'desc').orderBy('__name__').limit(21);
+    let query = tenant.collection('presales').orderBy('createdAt', 'desc').orderBy('__name__', 'desc').limit(21);
+    if (context.role === 'vendedor') query = tenant.collection('presales').where('vendedorUid', '==', context.uid).orderBy('createdAt', 'desc').orderBy('__name__', 'desc').limit(21);
     if (cursor) query = query.startAfter(new Date(cursor.createdAt), cursor.id);
     const snapshot = await query.get();
     const docs = snapshot.docs.slice(0, 20);
