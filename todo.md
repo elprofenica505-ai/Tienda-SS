@@ -6,6 +6,7 @@
 
 ## Tareas pendientes
 
+- [ ] **TEMP — Reactivar y corregir el límite de intentos de login.** El límite propio de `/api/auth/login-attempt` queda desactivado temporalmente por un bloqueo persistente observado en producción. Antes de reactivarlo, medir desde móvil y redes reales, limpiar/aislar las claves persistidas y validar una política que no bloquee un intento legítimo durante horas. Firebase Auth conserva su protección propia.
 - [x] **1. P0.1 — Consolidar autorización multi-tenant y membresías.** Eliminar caminos administrativos duplicados, centralizar la guardia de tenant/permisos y garantizar que todas las rutas críticas usan el mismo contexto verificado.
 - [x] **2. P0.2 — Crear matriz de pruebas de autorización API.** Cubrir 401, tenant ausente, tenant cruzado, miembro inactivo, rol insuficiente, payload inválido y errores internos en las 19 rutas.
 - [x] **3. P0.3 — Implementar invitaciones empresariales seguras.** Tokens de un solo uso, expiración, aceptación, revocación, reenvío y auditoría.
