@@ -47,7 +47,11 @@ test('un tenant nuevo usa moneda local de Nicaragua y onboarding explícito', ()
 });
 
 test('getOrganization no tumba el workspace si falta el índice de branches', () => {
-  assert.match(organization, /branchesPromise/);
-  assert.match(organization, /continuing with an empty branch list/);
-  assert.match(organization, /branches \? rows\(branches\) : \[\]/);
+  assert.match(organization, /safeOrganizationQuery/);
+  assert.match(organization, /retrying without composite index/);
+  assert.match(organization, /continuing with an empty list/);
+  assert.match(organization, /safeOrganizationQuery\('branches'\)/);
+  assert.match(organization, /safeOrganizationQuery\('warehouses'\)/);
+  assert.match(organization, /safeOrganizationQuery\('cashRegisters'\)/);
+  assert.match(organization, /safeOrganizationQuery\('members'\)/);
 });

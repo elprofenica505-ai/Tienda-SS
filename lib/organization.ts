@@ -73,18 +73,34 @@ export async function ensureDefaultOrganization(tenantId: string, tenantName?: s
 export async function getOrganization(tenantId: string) {
   await ensureDefaultOrganization(tenantId);
   const tenant = getAdminDb().collection('tenants').doc(tenantId);
-  const branchesPromise = tenant.collection('branches').where('active', '==', true).orderBy('name').get().catch((error: unknown) => {
-    console.warn('[organization] branches query unavailable; continuing with an empty branch list', error);
-    return null;
-  });
-  const [branches, warehouses, cashRegisters, members] = await Promise.all([
-    branchesPromise,
-    tenant.collection('warehouses').where('active', '==', true).orderBy('name').get(),
-    tenant.collection('cashRegisters').where('active', '==', true).orderBy('name').get(),
-    tenant.collection('members').orderBy('name').get(),
-  ]);
   const rows = <T extends Record<string, unknown>>(snapshot: FirebaseFirestore.QuerySnapshot<T>) => snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-  return { branches: branches ? rows(branches) : [], warehouses: rows(warehouses), cashRegisters: rows(cashRegisters), members: rows(members) };
+  const sortByName = <T extends Record<string, unknown>>(items: T[]) => items.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+  const safeOrganizationQuery = async (resource: 'branches' | 'warehouses' | 'cashRegisters' | 'members') => {
+    try {
+      const query = resource === 'members'
+        ? tenant.collection(resource).orderBy('name')
+        : tenant.collection(resource).where('active', '==', true).orderBy('name');
+      return sortByName(rows(await query.get()));
+    } catch (error: unknown) {
+      console.warn(`[organization] ${resource} ordered query unavailable; retrying without composite index`, error);
+      try {
+        const snapshot = resource === 'members'
+          ? await tenant.collection(resource).get()
+          : await tenant.collection(resource).where('active', '==', true).get();
+        return sortByName(rows(snapshot));
+      } catch (fallbackError: unknown) {
+        console.warn(`[organization] ${resource} query unavailable; continuing with an empty list`, fallbackError);
+        return [];
+      }
+    }
+  };
+  const [branches, warehouses, cashRegisters, members] = await Promise.all([
+    safeOrganizationQuery('branches'),
+    safeOrganizationQuery('warehouses'),
+    safeOrganizationQuery('cashRegisters'),
+    safeOrganizationQuery('members'),
+  ]);
+  return { branches, warehouses, cashRegisters, members };
 }
 
 export function branchIdsFrom(value: unknown): string[] {
