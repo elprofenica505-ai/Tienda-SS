@@ -28,8 +28,8 @@ export async function POST(request: NextRequest) {
 
   const ip = getClientAddress(request);
   const rate = await consumeDistributedRateLimits(
-    { endpoint: `/api/auth/login-attempt:${emailKey(email)}`, ip },
-    { ip: 20, endpoint: 8, composite: 8 },
+    { endpoint: `/api/auth/login-attempt:v2:${emailKey(email)}`, ip },
+    { ip: 40, endpoint: 15, composite: 15 },
     15 * 60 * 1000,
   );
   if (!rate.allowed) {

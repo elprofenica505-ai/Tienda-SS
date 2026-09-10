@@ -18,6 +18,12 @@ function unauthorized(message: string, status = 401, correlationId?: string) {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const canonicalHost = 'tienda-ss-ozkq.vercel.app';
+  if (process.env.VERCEL_ENV === 'production' && request.nextUrl.hostname.endsWith('.vercel.app') && request.nextUrl.hostname !== canonicalHost) {
+    const canonicalUrl = request.nextUrl.clone();
+    canonicalUrl.hostname = canonicalHost;
+    return NextResponse.redirect(canonicalUrl, 308);
+  }
   if (!pathname.startsWith('/api/')) return NextResponse.next();
 
   const method = request.method.toUpperCase();

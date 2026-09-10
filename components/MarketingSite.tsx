@@ -158,7 +158,9 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         });
         if (!attemptResponse.ok) {
           const attemptData = await attemptResponse.json().catch(() => ({}));
-          throw new Error(attemptData.error || 'Demasiados intentos. Intenta de nuevo más tarde.');
+          const retryAfter = Number(attemptResponse.headers.get('Retry-After') || 0);
+          const waitMessage = retryAfter > 0 ? ` Espera aproximadamente ${Math.ceil(retryAfter / 60)} minuto(s) antes de volver a intentarlo.` : '';
+          throw new Error(`${attemptData.error || 'Demasiados intentos. Intenta de nuevo más tarde.'}${waitMessage}`);
         }
         try {
           await loginWithFirebase(email.trim(), password);

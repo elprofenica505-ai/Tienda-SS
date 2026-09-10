@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const loginSource = readFileSync('components/Login.tsx', 'utf8');
 const tenantRouteSource = readFileSync('app/api/tenants/route.ts', 'utf8');
+const authAttemptSource = readFileSync('app/api/auth/login-attempt/route.ts', 'utf8');
+const middlewareSource = readFileSync('middleware.ts', 'utf8');
 
 test('el login de producción no expone accesos demo ni la clave 1234', () => {
   assert.equal(loginSource.includes('Accesos rápidos'), false);
@@ -16,4 +18,14 @@ test('el login de producción no expone accesos demo ni la clave 1234', () => {
 test('la creación de empresa no contiene semillas de productos, ventas o clientes', () => {
   assert.equal(/collection\(['"](products|sales|customers|inventoryMovements)['"]\)/i.test(tenantRouteSource), false);
   assert.equal(/seed|demo|fake|fixture/i.test(tenantRouteSource), false);
+});
+
+test('el pre-login usa un límite versionado y razonable', () => {
+  assert.match(authAttemptSource, /login-attempt:v2/);
+  assert.match(authAttemptSource, /ip: 40, endpoint: 15, composite: 15/);
+});
+
+test('producción redirige aliases vercel al dominio canónico', () => {
+  assert.match(middlewareSource, /tienda-ss-ozkq\.vercel\.app/);
+  assert.match(middlewareSource, /NextResponse\.redirect\(canonicalUrl, 308\)/);
 });
