@@ -41,26 +41,37 @@ function WorkspaceContent() {
     try {
       const token = await authUser.getIdToken();
       const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id };
-      const [reportResponse, statsResponse, catalogResponse, contactsResponse, presalesResponse] = await Promise.all([
+      // Paint the command center from the three critical datasets first. Contacts
+      // and pending presales are secondary panels and must not block the shell.
+      const [reportResponse, statsResponse, catalogResponse] = await Promise.all([
         fetch('/api/reports?days=30', { headers, cache: 'no-store' }),
         fetch('/api/stats/daily', { headers, cache: 'no-store' }),
         fetch('/api/catalog', { headers, cache: 'no-store' }),
-        fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }),
-        fetch('/api/presales', { headers, cache: 'no-store' }),
       ]);
-      const [report, dailyStatsResponse, catalog, contacts, presales] = await Promise.all([
+      const [report, dailyStatsResponse, catalog] = await Promise.all([
         reportResponse.json(),
         statsResponse.json(),
         catalogResponse.json(),
-        contactsResponse.json(),
-        presalesResponse.json(),
       ]);
       if (!reportResponse.ok) throw new Error(report.error || 'No se pudo cargar el resumen.');
       if (!statsResponse.ok) throw new Error(dailyStatsResponse.error || 'No se pudieron cargar las estadísticas diarias.');
       if (!catalogResponse.ok) throw new Error(catalog.error || 'No se pudo cargar el catálogo.');
-      if (!contactsResponse.ok) throw new Error(contacts.error || 'No se pudieron cargar los clientes.');
-      if (!presalesResponse.ok) setMessage('No se pudieron cargar las preventas pendientes. El resto del dashboard está disponible.');
-      setData({ report, dailyStats: dailyStatsResponse.stats || { salesCount: 0, salesTotal: 0 }, products: catalog.products || [], customers: contacts.contacts || [], pendingPresales: (presales.presales || []).filter((item: { status: string }) => item.status === 'sent_to_cashier') });
+      setData({ report, dailyStats: dailyStatsResponse.stats || { salesCount: 0, salesTotal: 0 }, products: catalog.products || [], customers: [], pendingPresales: [] });
+      setLoading(false);
+
+      // Secondary data is intentionally non-blocking. It updates the two panels
+      // when ready, without delaying the first useful render of the dashboard.
+      const [contactsResponse, presalesResponse] = await Promise.all([
+        fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }),
+        fetch('/api/presales', { headers, cache: 'no-store' }),
+      ]);
+      const [contacts, presales] = await Promise.all([contactsResponse.json(), presalesResponse.json()]);
+      setData((current) => current ? {
+        ...current,
+        customers: contactsResponse.ok ? contacts.contacts || [] : current.customers,
+        pendingPresales: presalesResponse.ok ? (presales.presales || []).filter((item: { status: string }) => item.status === 'sent_to_cashier') : current.pendingPresales,
+      } : current);
+      if (!contactsResponse.ok || !presalesResponse.ok) setMessage('Algunos paneles secundarios no pudieron actualizarse.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo cargar el centro de mando.');
     } finally {
