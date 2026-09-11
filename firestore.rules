@@ -4,6 +4,11 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
+    // Firestore rules cannot read Vercel environment variables. The trusted
+    // server must set this Firebase Auth custom claim explicitly.
+    function isSuperadmin() {
+      return signedIn() && request.auth.token.superadmin == true;
+    }
     function memberPath(tenantId) {
       return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
     }
@@ -55,9 +60,12 @@ service cloud.firestore {
         && request.resource.data.role in ['vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura'];
     }
     match /tenants/{tenantId} {
-      allow read: if isMember(tenantId);
+      // A normal user can only read the tenant where they are an active
+      // member. Listing tenants is therefore denied unless the caller has the
+      // trusted superadmin claim; Admin SDK routes remain authoritative.
+      allow read: if isSuperadmin() || isMember(tenantId);
       allow create: if signedIn() && request.auth.uid == tenantId;
-      allow update: if isManager(tenantId);
+      allow update: if isSuperadmin() || isManager(tenantId);
       allow delete: if false;
       match /members/{uid} {
         allow read: if isMember(tenantId);
