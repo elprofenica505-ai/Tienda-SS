@@ -27,7 +27,13 @@ const plans = [
 function Logo() {
   return (
     <div className="brand-mark">
-      <span className="brand-mark-icon">N</span>
+      <svg className="brand-mark-icon" viewBox="0 0 64 64" role="img" aria-label="Ícono ConexiaX">
+        <path d="M18 18 46 46M46 18 18 46" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="8" />
+        <circle cx="18" cy="18" r="5" fill="currentColor" />
+        <circle cx="46" cy="18" r="5" fill="currentColor" />
+        <circle cx="18" cy="46" r="5" fill="currentColor" />
+        <circle cx="46" cy="46" r="5" fill="currentColor" />
+      </svg>
       <span>ConexiaX</span>
     </div>
   );
