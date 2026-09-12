@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { tenantErrorResponse } from '@/lib/tenant';
-import { consumeDistributedRateLimits, getClientAddress, rateLimitResponse } from '@/lib/rate-limit';
+import { consumeDistributedRateLimits, getClientAddress, hashRateLimitIdentity, rateLimitResponse } from '@/lib/rate-limit';
 import { DEFAULT_TENANT_CURRENCY, DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL } from '@/lib/currency';
 
 export const runtime = 'nodejs';
@@ -30,7 +30,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Revisa el nombre, correo y contraseña.' }, { status: 400 });
     }
 
-    const rate = await consumeDistributedRateLimits({ endpoint: 'tenant-signup', ip: getClientAddress(request) }, { ip: 5, endpoint: 100, composite: 5 }, 15 * 60 * 1000);
+    const rate = await consumeDistributedRateLimits(
+      { endpoint: 'tenant-signup', ip: getClientAddress(request), email: hashRateLimitIdentity(email) },
+      { ip: 5, email: 3, endpoint: 100, composite: 5 },
+      15 * 60 * 1000,
+    );
     if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
 
     const auth = getAdminAuth();

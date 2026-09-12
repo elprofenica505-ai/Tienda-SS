@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { consumeDistributedRateLimits, consumeRateLimits, getClientAddress } from '@/lib/rate-limit';
+import { consumeDistributedRateLimits, consumeRateLimits, getClientAddress, hashRateLimitIdentity } from '@/lib/rate-limit';
 
 process.env.RATE_LIMIT_SHARED = 'false';
 
@@ -65,4 +65,15 @@ test('anti-abuso: una ventana vencida reinicia el bucket sin heredar conteos', (
 test('anti-abuso: cabeceras de IP no confiables se normalizan a unknown', () => {
   const request = new Request('https://example.test', { headers: { 'x-forwarded-for': 'attacker.example, 198.51.100.20' } });
   assert.equal(getClientAddress(request), 'unknown');
+});
+
+test('anti-abuso: el correo limita intentos aunque cambie la IP y no se expone en el hash', () => {
+  const endpoint = 'abuse-email-isolation';
+  const email = hashRateLimitIdentity('Owner@Example.COM');
+  assert.notEqual(email, 'owner@example.com');
+  assert.equal(consumeRateLimits({ endpoint, ip: '198.51.100.30', email }, { email: 2 }, 60_000).allowed, true);
+  assert.equal(consumeRateLimits({ endpoint, ip: '198.51.100.31', email }, { email: 2 }, 60_000).allowed, true);
+  const blocked = consumeRateLimits({ endpoint, ip: '198.51.100.32', email }, { email: 2 }, 60_000);
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.blockedBy, 'email');
 });

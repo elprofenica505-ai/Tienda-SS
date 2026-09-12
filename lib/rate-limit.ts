@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 
 export type RateLimitEntry = {
@@ -8,6 +9,7 @@ export type RateLimitEntry = {
 export type RateLimitDimensions = {
   ip?: string;
   uid?: string;
+  email?: string;
   tenantId?: string;
   endpoint: string;
 };
@@ -15,6 +17,7 @@ export type RateLimitDimensions = {
 export type RateLimitLimits = {
   ip?: number;
   uid?: number;
+  email?: number;
   tenant?: number;
   endpoint?: number;
   composite?: number;
@@ -49,6 +52,10 @@ export function getClientAddress(request: Request): string {
   return /^[a-fA-F0-9:.]+$/.test(candidate) ? candidate : 'unknown';
 }
 
+export function hashRateLimitIdentity(value: string): string {
+  return createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+}
+
 export function buildRateLimitKey(dimensions: RateLimitDimensions): string {
   return [normalize(dimensions.endpoint), normalize(dimensions.ip), normalize(dimensions.uid), normalize(dimensions.tenantId)].join(':');
 }
@@ -58,6 +65,7 @@ function bucketKeys(dimensions: RateLimitDimensions, limits: RateLimitLimits): A
   const keys: Array<[keyof RateLimitLimits, string, number]> = [];
   if (limits.ip != null) keys.push(['ip', `${endpoint}:ip:${normalize(dimensions.ip)}`, limits.ip]);
   if (limits.uid != null && dimensions.uid) keys.push(['uid', `${endpoint}:uid:${normalize(dimensions.uid)}`, limits.uid]);
+  if (limits.email != null && dimensions.email) keys.push(['email', `${endpoint}:email:${normalize(dimensions.email)}`, limits.email]);
   if (limits.tenant != null && dimensions.tenantId) keys.push(['tenant', `${endpoint}:tenant:${normalize(dimensions.tenantId)}`, limits.tenant]);
   if (limits.endpoint != null) keys.push(['endpoint', `${endpoint}:endpoint`, limits.endpoint]);
   if (limits.composite != null) keys.push(['composite', `${endpoint}:composite:${normalize(dimensions.ip)}:${normalize(dimensions.uid)}:${normalize(dimensions.tenantId)}`, limits.composite]);
