@@ -5,6 +5,8 @@ import test from 'node:test';
 const returnsApi = readFileSync('app/api/sales/returns/route.ts', 'utf8');
 const voidApi = readFileSync('app/api/sales/void/route.ts', 'utf8');
 const salesApi = readFileSync('app/api/sales/route.ts', 'utf8');
+const presaleCheckoutApi = readFileSync('app/api/presales/checkout/route.ts', 'utf8');
+const reservationsApi = readFileSync('app/api/inventory/reservations/route.ts', 'utf8');
 const notesApi = readFileSync('app/api/receivables/credit-notes/route.ts', 'utf8');
 const returnsPage = readFileSync('app/workspace/returns/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
@@ -16,6 +18,8 @@ test('las devoluciones controlan sucursal, inventario, reembolso y caja', () => 
   assert.match(returnsApi, /cashMovements/);
   assert.match(returnsApi, /returnedQuantities/);
   assert.match(returnsApi, /inventoryMovements/);
+  assert.match(returnsApi, /inventoryStocks/);
+  assert.match(returnsApi, /warehouseId/);
 });
 
 test('las anulaciones bloquean ventas pagadas y revierten crédito pendiente', () => {
@@ -48,4 +52,15 @@ test('el listado de ventas impone el alcance de sucursal server-side', () => {
   assert.match(salesApi, /authorizedBranches/);
   assert.match(salesApi, /La sucursal no está autorizada para este usuario/);
   assert.match(salesApi, /where\('branchId', 'in'/);
+});
+
+test('ventas, preventas y reservas usan stock por almacén', () => {
+  for (const code of [salesApi, presaleCheckoutApi, reservationsApi]) {
+    assert.match(code, /inventoryStocks/);
+    assert.match(code, /stockKey/);
+    assert.match(code, /warehouseId/);
+  }
+  assert.match(salesApi, /warehouseId === 'warehouse-main'/);
+  assert.match(presaleCheckoutApi, /stockAfterDelta/);
+  assert.match(reservationsApi, /stockAfterDelta/);
 });

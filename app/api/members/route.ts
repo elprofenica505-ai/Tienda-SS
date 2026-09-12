@@ -3,18 +3,32 @@ import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { writeImmutableAudit } from '@/lib/audit';
-import { canManageRole } from '@/lib/role-policy';
+import { canAssignRole, canManageRole } from '@/lib/role-policy';
 
 export const runtime = 'nodejs';
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
+const globalMemberRoles = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function errorResponse(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+function branchIds(value: unknown): string[] { return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()).slice(0, 100) : []; }
+function canManageMemberBranches(context: { role: TenantRole; branchIds: string[] }, member: Record<string, unknown>): boolean {
+  if (globalMemberRoles.has(context.role)) return true;
+  const targetBranches = branchIds(member.branchIds);
+  return targetBranches.length > 0 && targetBranches.some((branchId) => context.branchIds.includes(branchId));
+}
+function requestedBranchIds(context: { role: TenantRole; branchIds: string[] }, value: unknown): string[] {
+  const requested = branchIds(value);
+  if (globalMemberRoles.has(context.role)) return requested;
+  if (!requested.length || requested.some((branchId) => !context.branchIds.includes(branchId))) throw new Error('BRANCH_OUT_OF_SCOPE');
+  return requested;
+}
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'members', 'view');
     const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection('members').orderBy('name').get();
-    return NextResponse.json({ ok: true, members: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }, { headers: { 'Cache-Control': 'no-store' } });
+    const members = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((member) => canManageMemberBranches(context, member));
+    return NextResponse.json({ ok: true, members }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { return errorResponse(error); }
 }
 
@@ -23,6 +37,9 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'members', 'create');
     const body = await request.json(); const name = text(body.name); const email = text(body.email, 160).toLowerCase(); const password = typeof body.password === 'string' ? body.password : ''; const role = text(body.role, 30) as TenantRole;
     if (name.length < 2 || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !assignableRoles.includes(role)) return NextResponse.json({ error: 'Nombre, correo, contraseña y rol son obligatorios.' }, { status: 400 });
+    if (!canAssignRole(context.role, role)) return NextResponse.json({ error: 'No puedes asignar ese nivel de rol.' }, { status: 403 });
+    let memberBranchIds: string[];
+    try { memberBranchIds = requestedBranchIds(context, body.branchIds); } catch (error) { return errorResponse(error); }
     const db = getAdminDb(); const tenantRef = db.collection('tenants').doc(context.tenantId); const memberRef = tenantRef.collection('members');
     const tenantSnapshot = await tenantRef.get();
     const activeMembers = await memberRef.where('status', '==', 'active').get();
@@ -32,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!existing.empty && existing.docs[0].data().status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     let user;
     try { user = await getAdminAuth().getUserByEmail(email); } catch (error: unknown) { if ((error as { code?: string }).code !== 'auth/user-not-found') throw error; user = await getAdminAuth().createUser({ email, password, displayName: name, disabled: false }); }
-    const after = { uid: user.uid, tenantId: context.tenantId, name, email, role, status: 'active' };
+    const after = { uid: user.uid, tenantId: context.tenantId, name, email, role, status: 'active', ...(memberBranchIds.length ? { branchIds: memberBranchIds } : {}) };
     await memberRef.doc(user.uid).set({ ...after, createdBy: context.uid, createdAt: new Date(), updatedAt: new Date() }, { merge: true });
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.created', entity: 'member', entityId: user.uid, after, result: 'success' });
     return NextResponse.json({ ok: true, uid: user.uid, email }, { status: 201 });
@@ -44,11 +61,15 @@ export async function PATCH(request: NextRequest) {
     const context = await requireTenantPermission(request, 'members', 'edit'); const body = await request.json(); const uid = text(body.uid, 160); const memberRef = getAdminDb().collection('tenants').doc(context.tenantId).collection('members').doc(uid); const member = await memberRef.get();
     if (!uid || !member.exists) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     const current = member.data() || {}; if (uid === context.uid) return NextResponse.json({ error: 'No puedes cambiar tu propio acceso desde aquí.' }, { status: 400 }); if (current.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede modificarse desde este módulo.' }, { status: 403 });
+    if (!canManageMemberBranches(context, current)) return NextResponse.json({ error: 'El miembro está fuera de tus sucursales autorizadas.' }, { status: 403 });
     const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid };
     if (body.role !== undefined) {
       if (typeof body.role !== 'string' || !assignableRoles.includes(body.role as TenantRole)) return NextResponse.json({ error: 'Rol inválido.' }, { status: 400 });
       if (typeof current.role !== 'string' || !canManageRole(context.role, current.role as TenantRole, body.role as TenantRole)) return NextResponse.json({ error: 'No puedes asignar ese rol a este miembro.' }, { status: 403 });
       changes.role = body.role;
+    }
+    if (body.branchIds !== undefined) {
+      try { changes.branchIds = requestedBranchIds(context, body.branchIds); } catch (error) { return errorResponse(error); }
     }
     if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) {
       if (body.status === 'active' && current.status !== 'active') {
@@ -86,6 +107,7 @@ export async function DELETE(request: NextRequest) {
     if (member.data()?.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede eliminarse desde este módulo.' }, { status: 403 });
 
     const before = member.data() || {};
+    if (!canManageMemberBranches(context, before)) return NextResponse.json({ error: 'El miembro está fuera de tus sucursales autorizadas.' }, { status: 403 });
     const changes = { status: 'disabled', sessionRevokedAt: new Date(), updatedAt: new Date(), updatedBy: context.uid };
     await memberRef.update(changes);
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.disabled', entity: 'member', entityId: uid, before, after: { ...before, ...changes }, result: 'success' });

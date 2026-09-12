@@ -7,7 +7,9 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { getEntitlementLimit } from '@/lib/entitlements';
 import { createFiscalSaleFields, fiscalMoney, formatFiscalNumber, validateFiscalFields } from '@/lib/fiscal-ni';
+import { normalizeFiscalConfig } from '@/lib/fiscal-adapters';
 import { findOpenCashSession } from '@/lib/cash';
+import { inventoryNumber, stockAfterDelta, stockKey } from '@/lib/inventory-cost';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
@@ -16,6 +18,14 @@ const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jef
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
 function getMonthlyLimit(plan: unknown) { return getEntitlementLimit(plan, 'monthlySales'); }
+async function warehouseFor(tenant: FirebaseFirestore.DocumentReference, context: Parameters<typeof assertBranchAccess>[0], warehouseId: string) {
+  const snapshot = await tenant.collection('warehouses').doc(warehouseId).get();
+  if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('WAREHOUSE_NOT_FOUND');
+  const warehouseBranchId = text(snapshot.data()?.branchId, 128);
+  if (!warehouseBranchId) throw new Error('WAREHOUSE_BRANCH_REQUIRED');
+  assertBranchAccess(context, warehouseBranchId);
+  return { id: warehouseId, branchId: warehouseBranchId, ...snapshot.data() };
+}
 
 type SaleLineInput = { productId?: unknown; quantity?: unknown };
 
@@ -56,8 +66,11 @@ export async function POST(request: NextRequest) {
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
     const customerId = text(body.customerId, 120);
     const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || context.branchIds[0] || '';
+    const warehouseId = text(body.warehouseId, 128) || 'warehouse-main';
     if (!branchId) return NextResponse.json({ error: 'Selecciona una sucursal antes de registrar la venta.' }, { status: 400 });
     if (branchId) assertBranchAccess(context, branchId);
+    const warehouse = await warehouseFor(getAdminDb().collection('tenants').doc(context.tenantId), context, warehouseId);
+    if (warehouse.branchId !== branchId) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal seleccionada.' }, { status: 400 });
     const openSession = paymentMethod === 'credit' ? null : await findOpenCashSession(context.tenantId, branchId);
     if (paymentMethod !== 'credit' && !openSession) return NextResponse.json({ error: 'Abre una sesión de caja antes de registrar cobros.' }, { status: 409 });
     const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
@@ -81,6 +94,7 @@ export async function POST(request: NextRequest) {
     const productIds = Array.from(unique.keys());
     const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
     const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
+    const stockRefs = productIds.map((id) => tenant.collection('inventoryStocks').doc(stockKey(warehouseId, id)));
     const customerRef = customerId ? tenant.collection('customers').doc(customerId) : null;
     const cashSessionRef = openSession ? tenant.collection('cashSessions').doc(openSession.id) : null;
     const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
@@ -96,11 +110,12 @@ export async function POST(request: NextRequest) {
       const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
       const monthlySales = monthlyLimit === null ? null : await transaction.get(tenant.collection('sales').where('createdAt', '>=', monthStart).limit(monthlyLimit + 1));
       if (monthlySales && monthlyLimit !== null) assertPlanCapacity(plan, 'monthlySales', monthlySales.size, 1);
-      const readRefs = customerRef ? [...productRefs, customerRef] : productRefs;
+      const readRefs = customerRef ? [...productRefs, ...stockRefs, customerRef] : [...productRefs, ...stockRefs];
       if (idempotencyRef) readRefs.push(idempotencyRef);
       const snapshots = await transaction.getAll(...readRefs);
       const productSnapshots = snapshots.slice(0, productRefs.length);
-      const customerSnapshot = customerRef ? snapshots[productRefs.length] : null;
+      const stockSnapshots = snapshots.slice(productRefs.length, productRefs.length + stockRefs.length);
+      const customerSnapshot = customerRef ? snapshots[productRefs.length + stockRefs.length] : null;
       const idempotencySnapshot = idempotencyRef ? snapshots[snapshots.length - 1] : null;
       if (idempotencySnapshot?.exists) return idempotencySnapshot.data()?.response as { saleId: string; total: number; lines: SaleLine[] };
       if (customerRef && (!customerSnapshot || !customerSnapshot.exists || customerSnapshot.data()?.active === false)) throw new Error('CUSTOMER_NOT_FOUND');
@@ -111,7 +126,9 @@ export async function POST(request: NextRequest) {
         if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('PRODUCT_NOT_FOUND');
         const data = snapshot.data() || {};
         const quantity = unique.get(productRefs[index].id) || 0;
-        if (data.itemType !== 'service' && Number(data.stock || 0) < quantity) throw new Error(`INSUFFICIENT_STOCK:${data.name || productRefs[index].id}`);
+        const stockSnapshot = stockSnapshots[index];
+        const currentStock = stockSnapshot?.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0;
+        if (data.itemType !== 'service' && currentStock < quantity) throw new Error(`INSUFFICIENT_STOCK:${data.name || productRefs[index].id}`);
         const unitPrice = money(data.price);
         const total = unitPrice * quantity;
         subtotal += total;
@@ -120,9 +137,9 @@ export async function POST(request: NextRequest) {
       const fiscal = createFiscalSaleFields({ ...body, customerName: body.customerName || customerName }, subtotal, discount);
       const fiscalError = validateFiscalFields(fiscal);
       if (fiscalError) throw new Error(`FISCAL_INVALID:${fiscalError}`);
-      const fiscalConfig = fiscalSnapshot.exists ? fiscalSnapshot.data() || {} : {};
-      const sequence = Number(fiscalConfig.nextInvoiceSequence || 1);
-      const invoiceNumber = formatFiscalNumber(typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', sequence);
+      const fiscalConfig = normalizeFiscalConfig(fiscalSnapshot.exists ? fiscalSnapshot.data() || {} : {});
+      const sequence = fiscalConfig.nextInvoiceSequence;
+      const invoiceNumber = formatFiscalNumber(fiscalConfig.invoicePrefix, sequence);
       const total = fiscalMoney(fiscal.total);
       const customerCreditBalance = customerSnapshot ? money(customerSnapshot.data()?.creditBalance) : 0;
       const customerCreditLimit = customerSnapshot ? money(customerSnapshot.data()?.creditLimit) : 0;
@@ -133,19 +150,21 @@ export async function POST(request: NextRequest) {
         const data = snapshot.data() || {};
         if (data.itemType === 'service') return;
         const quantity = unique.get(productRefs[index].id) || 0;
-        const previousStock = Number(data.stock || 0);
-        const newStock = previousStock - quantity;
-        transaction.update(productRefs[index], { stock: newStock, updatedAt: now, updatedBy: context.uid });
-        transaction.set(movementRefs[index], { productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
+        const stockSnapshot = stockSnapshots[index];
+        const previousStock = stockSnapshot?.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0;
+        const newStock = stockAfterDelta(previousStock, -quantity);
+        transaction.set(stockRefs[index], { warehouseId, branchId, productId: productRefs[index].id, quantity: newStock, averageCost: inventoryNumber(stockSnapshot?.data()?.averageCost || data.averageCost), updatedAt: now, updatedBy: context.uid }, { merge: true });
+        if (warehouseId === 'warehouse-main') transaction.update(productRefs[index], { stock: newStock, updatedAt: now, updatedBy: context.uid });
+        transaction.set(movementRefs[index], { warehouseId, branchId, productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
       });
       const response = { saleId: saleRef.id, total, lines, invoiceNumber };
       const paidAmount = paymentMethod === 'credit' ? 0 : total;
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, cashSessionId: openSession?.id || null, fiscal: { provider: 'manual', status: 'pending_adapter', adapterVersion: 'preview-2026-01' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
+      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, warehouseId, cashSessionId: openSession?.id || null, fiscal: { provider: fiscalConfig.provider, mode: fiscalConfig.mode, status: fiscalConfig.mode === 'manual' ? 'not_requested' : 'pending', adapterVersion: 'adapter-core-2026-09' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
       if (paymentMethod === 'credit' && customerRef) {
         transaction.update(customerRef, { creditBalance: customerCreditBalance + total, updatedAt: now, updatedBy: context.uid });
         transaction.create(tenant.collection('creditMovements').doc(), { customerId, saleId: saleRef.id, type: 'charge', amount: total, balanceAfter: customerCreditBalance + total, createdBy: context.uid, createdAt: now });
       }
-      transaction.set(fiscalRef, { nextInvoiceSequence: sequence + 1, invoicePrefix: typeof fiscalConfig.invoicePrefix === 'string' ? fiscalConfig.invoicePrefix : 'FAC', currency: 'NIO', updatedAt: now }, { merge: true });
+      transaction.set(fiscalRef, { nextInvoiceSequence: sequence + 1, invoicePrefix: fiscalConfig.invoicePrefix, currency: fiscalConfig.currency, provider: fiscalConfig.provider, mode: fiscalConfig.mode, updatedAt: now }, { merge: true });
       transaction.set(statsRef, { salesCount: FieldValue.increment(1), salesTotal: FieldValue.increment(total), updatedAt: now }, { merge: true });
       if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
       return response;
@@ -160,6 +179,8 @@ export async function POST(request: NextRequest) {
     if (message.startsWith('FISCAL_INVALID:')) return NextResponse.json({ error: message.slice('FISCAL_INVALID:'.length) }, { status: 400 });
     if (message.startsWith('CREDIT_LIMIT_EXCEEDED:')) return NextResponse.json({ error: `El crédito disponible es insuficiente. Límite: $${message.split(':')[1]}, saldo actual: $${message.split(':')[2]}.` }, { status: 409 });
     if (message === 'CASH_SESSION_NOT_OPEN') return NextResponse.json({ error: 'La sesión de caja se cerró antes de completar la venta.' }, { status: 409 });
+    if (message === 'WAREHOUSE_NOT_FOUND') return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
+    if (message === 'WAREHOUSE_BRANCH_REQUIRED') return NextResponse.json({ error: 'El almacén no tiene una sucursal válida.' }, { status: 409 });
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }

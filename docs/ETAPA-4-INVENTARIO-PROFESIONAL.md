@@ -1,7 +1,7 @@
 # Etapa 4 — Inventario profesional por almacén
 
-**Rama:** `SaaS-MultiTenant-Profesional`  
-**Estado:** implementada y validada en código.
+**Rama:** `SaaS-MultiTenant-Profesional`
+**Estado:** implementada y validada en código; migración y reconciliación preparadas.
 
 ## Capacidades implementadas
 
@@ -17,15 +17,17 @@ La pantalla `/workspace/warehouse-inventory` permite seleccionar almacén, consu
 
 Una transferencia descuenta primero el almacén origen y solo se confirma si existe cantidad suficiente. El almacén destino recibe la cantidad en la misma transacción. El costo se conserva desde el origen cuando el destino todavía no tiene costo.
 
+Las transferencias controladas siguen los estados `draft`, `approved`, `in_transit`, `received` y `cancelled`. Una transferencia se crea como borrador, requiere aprobación de un responsable, descuenta el origen al despacharse y permite una o varias recepciones parciales en el destino. La última recepción cambia el estado a `received`; una transferencia no despachada puede cancelarse.
+
 Una recepción recalcula costo promedio ponderado. Un retiro conserva el costo vigente. Ninguna transacción permite inventario negativo.
 
 Un conteo físico captura la cantidad observada y la diferencia respecto al sistema. El ajuste se aplica únicamente cuando un responsable lo aprueba.
 
 ## Compatibilidad y migración
 
-Los productos existentes continúan teniendo `stock`. El almacén principal usa ese valor como semilla cuando todavía no existe `inventoryStocks`. Las nuevas recepciones y retiros del almacén principal actualizan ambos modelos para mantener compatibilidad.
+Los productos existentes continúan teniendo `stock`. El script `scripts/migrate-inventory-stocks.ts` genera un dry-run, reporta diferencias contra la suma de todos los almacenes y, con confirmación explícita, crea únicamente registros faltantes para `warehouse-main`. Las nuevas recepciones, compras, ventas, devoluciones y reservas actualizan el modelo canónico; el almacén principal mantiene sincronización legacy para compatibilidad.
 
-La separación completa de ventas por almacén todavía requiere migrar el checkout para reservar y descontar `inventoryStocks` en vez del campo legacy. Esa migración debe ejecutarse después de validar datos históricos y reglas de costo.
+La migración de código del checkout, preventas, devoluciones y reservas ya está implementada. La migración de datos históricos debe ejecutarse después de revisar el dry-run real de cada tenant y confirmar el backup correspondiente.
 
 ## Producción
 
@@ -37,7 +39,7 @@ firebase deploy --only firestore:indexes
 
 ## Límites conocidos
 
-- El API de compras aún actualiza principalmente el stock legacy; debe migrarse para recibir directamente en un almacén y actualizar costos.
-- El checkout de ventas todavía consume `products.stock`; el almacén principal queda sincronizado, pero las ventas de otros almacenes requieren la siguiente integración.
-- El conteo implementado es por producto; un documento de conteo masivo y hojas de conteo pertenecen a una mejora posterior.
+- La aplicación de la migración histórica requiere credenciales administrativas, tenant confirmado, backup y revisión de diferencias.
+- La acción legacy `transfer` permanece disponible para compatibilidad; las nuevas integraciones deben usar `create-transfer`, `approve-transfer`, `dispatch-transfer`, `receive-transfer` y `cancel-transfer`.
 - No existe todavía costeo FIFO o por lote, números de serie, caducidad ni valoración contable completa.
+- El conteo implementado es por producto; un documento de conteo masivo y hojas de conteo pertenecen a una mejora posterior.

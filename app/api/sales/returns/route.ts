@@ -4,11 +4,20 @@ import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 import { findOpenCashSession, validCashMethod } from '@/lib/cash';
+import { inventoryNumber, stockAfterDelta, stockKey } from '@/lib/inventory-cost';
 
 export const runtime = 'nodejs';
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
 type ReturnLine = { productId: string; quantity: number; unitPrice: number; amount: number };
+async function warehouseFor(tenant: FirebaseFirestore.DocumentReference, context: Parameters<typeof assertBranchAccess>[0], warehouseId: string) {
+  const snapshot = await tenant.collection('warehouses').doc(warehouseId).get();
+  if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('WAREHOUSE_NOT_FOUND');
+  const warehouseBranchId = text(snapshot.data()?.branchId, 128);
+  if (!warehouseBranchId) throw new Error('WAREHOUSE_BRANCH_REQUIRED');
+  assertBranchAccess(context, warehouseBranchId);
+  return { id: warehouseId, branchId: warehouseBranchId, ...snapshot.data() };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +36,9 @@ export async function POST(request: NextRequest) {
     if (!saleSnapshot.exists) return NextResponse.json({ error: 'La venta no existe.' }, { status: 404 });
     const salePreview = saleSnapshot.data() || {};
     if (salePreview.branchId && salePreview.branchId !== branchId) return NextResponse.json({ error: 'La venta no pertenece a la sucursal activa.' }, { status: 403 });
+    const warehouseId = text(salePreview.warehouseId, 128) || 'warehouse-main';
+    const warehouse = await warehouseFor(tenant, context, warehouseId);
+    if (warehouse.branchId !== branchId) return NextResponse.json({ error: 'El almacén de la venta no pertenece a la sucursal activa.' }, { status: 403 });
     const paidAmount = money(salePreview.paidAmount);
     const refundMethod = text(body.refundMethod, 30) || (salePreview.paymentMethod === 'credit' ? 'credit' : salePreview.paymentMethod);
     if (!validCashMethod(refundMethod) && refundMethod !== 'credit') return NextResponse.json({ error: 'El método de devolución no es válido.' }, { status: 400 });
@@ -46,22 +58,23 @@ export async function POST(request: NextRequest) {
       if (!requested.size) throw new Error('RETURN_LINES_INVALID');
       const originalByProduct = new Map(originalItems.map((line) => [text(line.productId, 120), { quantity: Number(line.quantity) || 0, unitPrice: money(line.unitPrice) }]));
       const productRefs = Array.from(requested.keys()).map((id) => tenant.collection('products').doc(id));
+      const stockRefs = Array.from(requested.keys()).map((id) => tenant.collection('inventoryStocks').doc(stockKey(warehouseId, id)));
       const customerRef = sale.customerId ? tenant.collection('customers').doc(text(sale.customerId, 120)) : null;
       const customerSnapshot = customerRef ? await transaction.get(customerRef) : null;
-      const productSnapshots = await transaction.getAll(...productRefs);
+      const [productSnapshots, stockSnapshots] = await Promise.all([transaction.getAll(...productRefs), transaction.getAll(...stockRefs)]);
       const lines: ReturnLine[] = []; let refundTotal = 0; const nextReturned = { ...alreadyReturned };
       productSnapshots.forEach((productSnapshot, index) => {
         const productId = productRefs[index].id; const quantity = requested.get(productId) || 0; const original = originalByProduct.get(productId); const returned = Math.max(0, Number(alreadyReturned[productId] || 0));
         if (!original || returned + quantity > original.quantity) throw new Error('RETURN_EXCEEDS_SOLD');
         const lineAmount = Math.round(original.unitPrice * quantity * 100) / 100; nextReturned[productId] = returned + quantity; refundTotal += lineAmount; lines.push({ productId, quantity, unitPrice: original.unitPrice, amount: lineAmount });
         const data = productSnapshot.data() || {};
-        if (data.itemType !== 'service') { const previousStock = Math.max(0, Number(data.stock || 0)); const newStock = previousStock + quantity; transaction.update(productRefs[index], { stock: newStock, updatedAt: new Date(), updatedBy: context.uid }); transaction.set(tenant.collection('inventoryMovements').doc(), { productId, type: 'return', quantity, delta: quantity, previousStock, newStock, reason: `Devolución ${returnRef.id}`, saleId, returnId: returnRef.id, branchId, createdBy: context.uid, createdAt: new Date() }); }
+        if (data.itemType !== 'service') { const stockSnapshot = stockSnapshots[index]; const previousStock = stockSnapshot?.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0; const newStock = stockAfterDelta(previousStock, quantity); transaction.set(stockRefs[index], { warehouseId, branchId, productId, quantity: newStock, averageCost: inventoryNumber(stockSnapshot?.data()?.averageCost || data.averageCost), updatedAt: new Date(), updatedBy: context.uid }, { merge: true }); if (warehouseId === 'warehouse-main') transaction.update(productRefs[index], { stock: newStock, updatedAt: new Date(), updatedBy: context.uid }); transaction.set(tenant.collection('inventoryMovements').doc(), { warehouseId, branchId, productId, type: 'return', quantity, delta: quantity, previousStock, newStock, reason: `Devolución ${returnRef.id}`, saleId, returnId: returnRef.id, createdBy: context.uid, createdAt: new Date() }); }
       });
       const alreadyRefunded = money(sale.refundedAmount); if (alreadyRefunded + refundTotal > paidAmount && refundMethod !== 'credit') throw new Error('REFUND_EXCEEDS_PAID');
       const totalUnits = originalItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0); const returnedUnits = Object.values(nextReturned).reduce<number>((sum, value) => sum + Number(value || 0), 0); const status = returnedUnits >= totalUnits ? 'returned' : 'partially_returned'; const now = new Date();
       const nextRefunded = alreadyRefunded + refundTotal; const nextBalance = Math.max(0, money(sale.balanceDue) - (refundMethod === 'credit' ? refundTotal : 0));
       transaction.update(saleRef, { returnedQuantities: nextReturned, returnedTotal: money(sale.returnedTotal) + refundTotal, refundedAmount: nextRefunded, balanceDue: nextBalance, status, paymentStatus: nextBalance === 0 && sale.paymentMethod === 'credit' ? 'paid' : sale.paymentStatus, updatedAt: now, updatedBy: context.uid });
-      transaction.create(returnRef, { saleId, branchId, cashSessionId: openSession?.id || null, items: lines, amount: refundTotal, refundMethod, reason: text(body.reason, 300) || 'Devolución', status: 'completed', createdBy: context.uid, createdAt: now });
+      transaction.create(returnRef, { saleId, branchId, warehouseId, cashSessionId: openSession?.id || null, items: lines, amount: refundTotal, refundMethod, reason: text(body.reason, 300) || 'Devolución', status: 'completed', createdBy: context.uid, createdAt: now });
       if (refundMethod !== 'credit' && openSession) transaction.create(tenant.collection('cashMovements').doc(), { cashSessionId: openSession.id, branchId, direction: 'out', amount: refundTotal, paymentMethod: refundMethod, description: `Reembolso de devolución ${returnRef.id}`, saleId, returnId: returnRef.id, createdBy: context.uid, createdAt: now });
       if (refundMethod === 'credit' && customerRef && customerSnapshot?.exists) { const currentBalance = money(customerSnapshot.data()?.creditBalance); transaction.update(customerRef, { creditBalance: Math.max(0, currentBalance - refundTotal), updatedAt: now, updatedBy: context.uid }); transaction.create(tenant.collection('creditMovements').doc(), { customerId: text(sale.customerId, 120), saleId, returnId: returnRef.id, type: 'return', amount: refundTotal, balanceAfter: Math.max(0, currentBalance - refundTotal), createdBy: context.uid, createdAt: now }); }
       return { returnId: returnRef.id, saleId, amount: refundTotal, refundMethod, status, items: lines, before: { status: sale.status || 'completed', returnedQuantities: alreadyReturned, returnedTotal: money(sale.returnedTotal), refundedAmount: alreadyRefunded }, after: { status, returnedQuantities: nextReturned, returnedTotal: money(sale.returnedTotal) + refundTotal, refundedAmount: nextRefunded } };
@@ -75,6 +88,8 @@ export async function POST(request: NextRequest) {
     if (message === 'RETURN_LINES_INVALID') return NextResponse.json({ error: 'La devolución debe contener productos válidos.' }, { status: 400 });
     if (message === 'RETURN_EXCEEDS_SOLD') return NextResponse.json({ error: 'La devolución supera la cantidad vendida o ya devuelta.' }, { status: 409 });
     if (message === 'REFUND_EXCEEDS_PAID') return NextResponse.json({ error: 'El reembolso supera el monto efectivamente pagado.' }, { status: 409 });
+    if (message === 'WAREHOUSE_NOT_FOUND') return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
+    if (message === 'WAREHOUSE_BRANCH_REQUIRED') return NextResponse.json({ error: 'El almacén no tiene una sucursal válida.' }, { status: 409 });
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
 }

@@ -5,6 +5,7 @@ import { stockAfterDelta, stockKey, weightedAverageCost } from '@/lib/inventory-
 
 const inventoryApi = readFileSync('app/api/inventory/warehouses/route.ts', 'utf8');
 const inventorySummaryApi = readFileSync('app/api/inventory/route.ts', 'utf8');
+const purchasesApi = readFileSync('app/api/purchases/route.ts', 'utf8');
 const inventoryPage = readFileSync('app/workspace/warehouse-inventory/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
 
@@ -28,6 +29,26 @@ test('la API cubre recepción, transferencias, costos y conteos aprobables', () 
   assert.match(inventoryApi, /inventoryCounts/);
 });
 
+test('las transferencias soportan ciclo controlado y recepción parcial', () => {
+  assert.match(inventoryApi, /\['create-transfer', 'approve-transfer', 'dispatch-transfer', 'receive-transfer', 'cancel-transfer'\]/);
+  for (const status of ['draft', 'approved', 'in_transit', 'cancelled']) assert.match(inventoryApi, new RegExp(`status: '${status}'|status === '${status}'`));
+  assert.match(inventoryApi, /'received'/);
+  assert.match(inventoryApi, /receivedQuantity/);
+  assert.match(inventoryApi, /remaining/);
+  assert.match(inventoryApi, /transfer_dispatch/);
+  assert.match(inventoryApi, /transfer_receive/);
+});
+
+test('las compras reciben en el stock canónico del almacén autorizado', () => {
+  assert.match(purchasesApi, /branchId/);
+  assert.match(purchasesApi, /warehouseId/);
+  assert.match(purchasesApi, /assertBranchAccess/);
+  assert.match(purchasesApi, /inventoryStocks/);
+  assert.match(purchasesApi, /weightedAverageCost/);
+  assert.match(purchasesApi, /warehouse-main/);
+  assert.match(purchasesApi, /warehouseId === 'warehouse-main'/);
+});
+
 test('el inventario aplica ownership server-side por sucursal', () => {
   assert.match(inventoryApi, /visibleWarehouses\.some/);
   assert.match(inventoryApi, /El almacén no está autorizado para este usuario/);
@@ -40,6 +61,9 @@ test('la UI expone almacén activo, transferencia y conteo físico', () => {
   assert.match(inventoryPage, /Transferir/);
   assert.match(inventoryPage, /Conteo físico/);
   assert.match(inventoryPage, /Costo promedio/);
+  assert.match(inventoryPage, /Transferencias/);
+  assert.match(inventoryPage, /approve-transfer/);
+  assert.match(inventoryPage, /receive-transfer/);
 });
 
 test('las colecciones de inventario tienen reglas sin borrado directo', () => {

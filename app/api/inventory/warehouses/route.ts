@@ -32,7 +32,11 @@ export async function GET(request: NextRequest) {
     const stocksSnapshot = warehouseId
       ? await tenant.collection('inventoryStocks').where('warehouseId', '==', warehouseId).orderBy('updatedAt', 'desc').limit(500).get()
       : null;
-    return NextResponse.json({ ok: true, warehouses: visibleWarehouses, stocks: stocksSnapshot?.docs.map((doc) => ({ id: doc.id, ...doc.data() })) || [] }, { headers: { 'Cache-Control': 'no-store' } });
+    const transferSnapshot = await tenant.collection('inventoryTransfers').orderBy('createdAt', 'desc').limit(100).get();
+    const transfers = transferSnapshot.docs
+      .map<Record<string, unknown> & { id: string }>((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }))
+      .filter((item) => visibleWarehouses.some((warehouse) => warehouse.id === String(item['fromWarehouseId'] || '') || warehouse.id === String(item['toWarehouseId'] || '')));
+    return NextResponse.json({ ok: true, warehouses: visibleWarehouses, stocks: stocksSnapshot?.docs.map((doc) => ({ id: doc.id, ...doc.data() })) || [], transfers }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
@@ -45,6 +49,51 @@ export async function POST(request: NextRequest) {
     const permission = action === 'approve-count' ? 'edit' : 'create';
     const context = await requireTenantPermission(request, 'inventory', permission);
     const db = getAdminDb(); const tenant = db.collection('tenants').doc(context.tenantId); const now = new Date();
+    if (['create-transfer', 'approve-transfer', 'dispatch-transfer', 'receive-transfer', 'cancel-transfer'].includes(action)) {
+      const transferId = text(body.transferId, 128);
+      if (action === 'create-transfer') {
+        const fromWarehouseId = text(body.fromWarehouseId, 128); const toWarehouseId = text(body.toWarehouseId, 128); const productId = text(body.productId, 128); const moveQuantity = quantity(body.quantity); const reason = text(body.reason, 300) || 'Transferencia entre almacenes';
+        if (!fromWarehouseId || !toWarehouseId || fromWarehouseId === toWarehouseId || !productId || moveQuantity <= 0) return NextResponse.json({ error: 'Almacenes origen/destino, producto y cantidad son obligatorios.' }, { status: 400 });
+        const [fromWarehouse, toWarehouse] = await Promise.all([warehouseFor(tenant, context, fromWarehouseId), warehouseFor(tenant, context, toWarehouseId)]);
+        const productSnapshot = await tenant.collection('products').doc(productId).get();
+        if (!productSnapshot.exists || productSnapshot.data()?.active === false) return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 });
+        const transferRef = tenant.collection('inventoryTransfers').doc();
+        const data = { fromWarehouseId, toWarehouseId, fromBranchId: fromWarehouse.branchId, toBranchId: toWarehouse.branchId, productId, quantity: moveQuantity, receivedQuantity: 0, reason, status: 'draft', createdBy: context.uid, createdAt: now, updatedAt: now };
+        await transferRef.create(data); await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.transfer_created', entity: 'inventoryTransfer', entityId: transferRef.id, after: data, result: 'success' });
+        return NextResponse.json({ ok: true, transferId: transferRef.id, ...data }, { status: 201 });
+      }
+      if (!transferId) return NextResponse.json({ error: 'La transferencia es obligatoria.' }, { status: 400 });
+      const transferRef = tenant.collection('inventoryTransfers').doc(transferId);
+      const transferSnapshot = await transferRef.get();
+      if (!transferSnapshot.exists) return NextResponse.json({ error: 'La transferencia no existe.' }, { status: 404 });
+      const transfer = transferSnapshot.data() || {};
+      const status = text(transfer.status, 40);
+      if (action === 'approve-transfer') {
+        if (!MANAGERS.has(context.role)) return NextResponse.json({ error: 'Solo un responsable puede aprobar transferencias.' }, { status: 403 });
+        if (status !== 'draft' && status !== 'requested') return NextResponse.json({ error: 'La transferencia no está pendiente de aprobación.' }, { status: 409 });
+        await transferRef.update({ status: 'approved', approvedBy: context.uid, approvedAt: now, updatedAt: now });
+        return NextResponse.json({ ok: true, transferId, status: 'approved' });
+      }
+      if (action === 'cancel-transfer') {
+        if (!['draft', 'requested', 'approved'].includes(status)) return NextResponse.json({ error: 'Solo se puede cancelar una transferencia antes del despacho.' }, { status: 409 });
+        await transferRef.update({ status: 'cancelled', cancelledBy: context.uid, cancelledAt: now, updatedAt: now });
+        return NextResponse.json({ ok: true, transferId, status: 'cancelled' });
+      }
+      const fromWarehouseId = text(transfer.fromWarehouseId, 128); const toWarehouseId = text(transfer.toWarehouseId, 128); const productId = text(transfer.productId, 128); const totalQuantity = quantity(transfer.quantity);
+      const [fromWarehouse, toWarehouse] = await Promise.all([warehouseFor(tenant, context, fromWarehouseId), warehouseFor(tenant, context, toWarehouseId)]);
+      if (action === 'dispatch-transfer') {
+        if (status !== 'approved') return NextResponse.json({ error: 'La transferencia debe estar aprobada antes del despacho.' }, { status: 409 });
+        const fromRef = tenant.collection('inventoryStocks').doc(stockKey(fromWarehouseId, productId)); const productRef = tenant.collection('products').doc(productId); const movementRef = tenant.collection('inventoryMovements').doc();
+        const result = await db.runTransaction(async (transaction) => { const [fromSnapshot, productSnapshot] = await Promise.all([transaction.get(fromRef), transaction.get(productRef)]); if (!productSnapshot.exists) throw new Error('PRODUCT_NOT_FOUND'); const current = fromSnapshot.exists ? inventoryNumber(fromSnapshot.data()?.quantity) : 0; const next = stockAfterDelta(current, -totalQuantity); const unitCost = inventoryNumber(fromSnapshot.data()?.averageCost || productSnapshot.data()?.averageCost); transaction.set(fromRef, { warehouseId: fromWarehouseId, branchId: fromWarehouse.branchId, productId, quantity: next, averageCost: unitCost, updatedAt: now, updatedBy: context.uid }, { merge: true }); if (fromWarehouseId === 'warehouse-main') transaction.update(productRef, { stock: next, updatedAt: now, updatedBy: context.uid }); transaction.set(movementRef, { warehouseId: fromWarehouseId, branchId: fromWarehouse.branchId, productId, type: 'transfer_dispatch', quantity: totalQuantity, delta: -totalQuantity, previousStock: current, newStock: next, transferId, createdBy: context.uid, createdAt: now }); transaction.update(transferRef, { status: 'in_transit', dispatchedBy: context.uid, dispatchedAt: now, unitCost, updatedAt: now }); return { current, next, unitCost }; });
+        return NextResponse.json({ ok: true, transferId, status: 'in_transit', ...result });
+      }
+      if (status !== 'in_transit') return NextResponse.json({ error: 'La transferencia no está en tránsito.' }, { status: 409 });
+      const receiveQuantity = quantity(body.receivedQuantity ?? body.quantity); const alreadyReceived = quantity(transfer.receivedQuantity); const remaining = Math.max(0, totalQuantity - alreadyReceived);
+      if (receiveQuantity <= 0 || receiveQuantity > remaining) return NextResponse.json({ error: 'La recepción supera la cantidad pendiente.' }, { status: 409 });
+      const toRef = tenant.collection('inventoryStocks').doc(stockKey(toWarehouseId, productId)); const productRef = tenant.collection('products').doc(productId); const movementRef = tenant.collection('inventoryMovements').doc();
+      const result = await db.runTransaction(async (transaction) => { const [toSnapshot, productSnapshot] = await Promise.all([transaction.get(toRef), transaction.get(productRef)]); if (!productSnapshot.exists) throw new Error('PRODUCT_NOT_FOUND'); const current = toSnapshot.exists ? inventoryNumber(toSnapshot.data()?.quantity) : 0; const next = stockAfterDelta(current, receiveQuantity); const nextReceived = alreadyReceived + receiveQuantity; const nextStatus = nextReceived >= totalQuantity ? 'received' : 'in_transit'; const unitCost = inventoryNumber(transfer.unitCost || toSnapshot.data()?.averageCost || productSnapshot.data()?.averageCost); transaction.set(toRef, { warehouseId: toWarehouseId, branchId: toWarehouse.branchId, productId, quantity: next, averageCost: inventoryNumber(toSnapshot.data()?.averageCost || unitCost), updatedAt: now, updatedBy: context.uid }, { merge: true }); transaction.set(movementRef, { warehouseId: toWarehouseId, branchId: toWarehouse.branchId, productId, type: 'transfer_receive', quantity: receiveQuantity, delta: receiveQuantity, previousStock: current, newStock: next, transferId, createdBy: context.uid, createdAt: now }); transaction.update(transferRef, { status: nextStatus, receivedQuantity: nextReceived, receivedBy: context.uid, receivedAt: now, updatedAt: now }); return { current, next, receivedQuantity: nextReceived, remaining: totalQuantity - nextReceived, status: nextStatus }; });
+      return NextResponse.json({ ok: true, transferId, ...result });
+    }
     if (action === 'transfer') {
       const fromWarehouseId = text(body.fromWarehouseId, 128); const toWarehouseId = text(body.toWarehouseId, 128); const productId = text(body.productId, 128); const moveQuantity = quantity(body.quantity); const reason = text(body.reason, 300) || 'Transferencia entre almacenes';
       if (!fromWarehouseId || !toWarehouseId || fromWarehouseId === toWarehouseId || !productId || moveQuantity <= 0) return NextResponse.json({ error: 'Almacenes origen/destino, producto y cantidad son obligatorios.' }, { status: 400 });

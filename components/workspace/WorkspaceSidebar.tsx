@@ -23,6 +23,7 @@ const primaryItems = [
   { href: '/workspace/members', icon: '♙', label: 'Usuarios y roles' },
   { href: '/workspace/organization', icon: '⌂', label: 'Sucursales y cajas' },
   { href: '/workspace/permissions', icon: '⚙', label: 'Permisos' },
+  { href: '/workspace/fiscal', icon: '▣', label: 'Facturación fiscal' },
 ];
 
 const secondaryItems = [

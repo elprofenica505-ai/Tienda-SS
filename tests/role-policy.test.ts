@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canManageRole } from '../lib/role-policy';
+import { canAssignRole, canManageRole } from '../lib/role-policy';
 
 test('owner puede asignar cualquier rol de tenant distinto de owner', () => {
   assert.equal(canManageRole('owner', 'admin', 'gerente'), true);
@@ -26,4 +26,13 @@ test('un rol no puede conceder owner ni superadmin', () => {
 test('un actor no puede cambiar un objetivo de igual o mayor privilegio', () => {
   assert.equal(canManageRole('gerente', 'gerente', 'vendedor'), false);
   assert.equal(canManageRole('gerente', 'admin', 'vendedor'), false);
+});
+
+test('la creación directa de miembros respeta la jerarquía de asignación', () => {
+  assert.equal(canAssignRole('owner', 'admin'), true);
+  assert.equal(canAssignRole('admin', 'gerente'), true);
+  assert.equal(canAssignRole('supervisor_sucursal', 'vendedor'), true);
+  assert.equal(canAssignRole('supervisor_sucursal', 'gerente'), false);
+  assert.equal(canAssignRole('supervisor_sucursal', 'admin'), false);
+  assert.equal(canAssignRole('admin', 'owner'), false);
 });

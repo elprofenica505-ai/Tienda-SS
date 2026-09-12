@@ -47,6 +47,13 @@ test('las rutas críticas no dependen de un tenant enviado por el cliente como �
   }
 });
 
+test('finanzas exige sucursal y aplica el alcance server-side', async () => {
+  const code = await source('app/api/finance/route.ts');
+  assert.match(code, /assertBranchAccess/);
+  assert.match(code, /branchId/);
+  assert.match(code, /TENANT_WIDE_ROLES/);
+});
+
 test('las rutas públicas permanecen explícitamente separadas', async () => {
   const signup = await source('app/api/tenants/route.ts');
   const webhook = await source('app/api/billing/webhook/route.ts');
