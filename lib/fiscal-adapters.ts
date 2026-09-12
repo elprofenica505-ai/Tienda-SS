@@ -38,6 +38,7 @@ export type FiscalTenantConfig = {
   address?: string;
   email?: string;
   phone?: string;
+  logoDataUrl?: string;
   updatedAt?: unknown;
   updatedBy?: string;
 };
@@ -90,6 +91,7 @@ export function normalizeFiscalConfig(input: Record<string, unknown>, current?: 
     address: typeof input.address === 'string' ? input.address.trim().slice(0, 240) : current?.address,
     email: typeof input.email === 'string' ? input.email.trim().slice(0, 160).toLowerCase() : current?.email,
     phone: typeof input.phone === 'string' ? input.phone.trim().slice(0, 40) : current?.phone,
+    logoDataUrl: typeof input.logoDataUrl === 'string' && /^(data:image\/(png|jpeg|jpg|webp);base64,)/i.test(input.logoDataUrl) && input.logoDataUrl.length <= 350_000 ? input.logoDataUrl : current?.logoDataUrl,
   };
 }
 

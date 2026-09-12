@@ -23,6 +23,7 @@ export async function PATCH(request: NextRequest) {
     const context = await requireTenantMember(request);
     if (!MANAGERS.includes(context.role)) return NextResponse.json({ error: 'Solo un responsable puede configurar facturación electrónica.' }, { status: 403 });
     const body = await request.json();
+    if (typeof body.logoDataUrl === 'string' && body.logoDataUrl.length > 350_000) return NextResponse.json({ error: 'El logotipo es demasiado grande. Usa una imagen de máximo 350 KB.' }, { status: 400 });
     const ref = getAdminDb().collection('tenants').doc(context.tenantId).collection('settings').doc('fiscal');
     const currentSnapshot = await ref.get();
     const current = currentSnapshot.exists ? currentSnapshot.data() || {} : {};
