@@ -20,6 +20,11 @@ export type MfaChallenge = {
   verifier: RecaptchaVerifier;
 };
 
+export function getMfaErrorCode(error: unknown): string {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return '';
+  return typeof error.code === 'string' ? error.code : '';
+}
+
 export function hasEnrolledMfa(user: User): boolean {
   return multiFactor(user).enrolledFactors.length > 0;
 }

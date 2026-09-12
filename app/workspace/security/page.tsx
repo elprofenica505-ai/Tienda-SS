@@ -2,9 +2,23 @@
 
 import { useState } from 'react';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
-import { beginPhoneMfaEnrollment, completePhoneMfaEnrollment, hasEnrolledMfa, type MfaEnrollment } from '@/lib/mfa';
+import { beginPhoneMfaEnrollment, completePhoneMfaEnrollment, getMfaErrorCode, hasEnrolledMfa, type MfaEnrollment } from '@/lib/mfa';
 
 const ADMIN_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
+
+function mfaErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message === 'PHONE_FORMAT') return 'Usa el teléfono en formato internacional, por ejemplo +50588888888.';
+  switch (getMfaErrorCode(error)) {
+    case 'auth/invalid-phone-number': return 'El número de teléfono no es válido. Usa el formato +códigoPaís+número.';
+    case 'auth/captcha-check-failed': return 'No se pudo validar reCAPTCHA. Permite cookies y vuelve a intentarlo.';
+    case 'auth/quota-exceeded': return 'Firebase agotó temporalmente la cuota de SMS. Espera y vuelve a intentarlo más tarde.';
+    case 'auth/too-many-requests': return 'Firebase limitó temporalmente los SMS por demasiados intentos. Espera antes de solicitar otro código.';
+    case 'auth/operation-not-allowed': return 'El proveedor Teléfono no está habilitado en Firebase Authentication.';
+    case 'auth/requires-recent-login': return 'Cierra sesión e inicia sesión nuevamente antes de activar MFA.';
+    case 'auth/second-factor-already-in-use': return 'Ese número ya está registrado como segundo factor en otra cuenta.';
+    default: return `No se pudo iniciar la inscripción MFA. Revisa Firebase Authentication, el proveedor Teléfono y los dominios autorizados. Código: ${getMfaErrorCode(error) || 'desconocido'}`;
+  }
+}
 
 function SecurityContent() {
   const { authUser, member, loading } = useTenant();
@@ -25,7 +39,7 @@ function SecurityContent() {
       setEnrollment(await beginPhoneMfaEnrollment(phone, 'mfa-recaptcha'));
       setMessage('Enviamos un código de verificación al teléfono indicado.');
     } catch (error) {
-      setMessage(error instanceof Error && error.message === 'PHONE_FORMAT' ? 'Usa formato internacional, por ejemplo +50588888888.' : 'No se pudo iniciar la inscripción MFA.');
+      setMessage(mfaErrorMessage(error));
     } finally { setBusy(false); }
   }
 
@@ -36,7 +50,7 @@ function SecurityContent() {
       await completePhoneMfaEnrollment(enrollment, code);
       setEnrollment(null); setCode(''); setMessage('MFA activado correctamente. En el próximo acceso se solicitará el segundo factor.');
     } catch (error) {
-      setMessage(error instanceof Error && error.message === 'CODE_FORMAT' ? 'El código debe tener seis dígitos.' : 'No se pudo verificar el código MFA.');
+      setMessage(error instanceof Error && error.message === 'CODE_FORMAT' ? 'El código debe tener seis dígitos.' : mfaErrorMessage(error));
     } finally { setBusy(false); }
   }
 
