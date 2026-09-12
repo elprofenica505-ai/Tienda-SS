@@ -10,6 +10,7 @@ const protectedTenantRoutes = [
   '/api/catalog',
   '/api/contacts',
   '/api/finance',
+  '/api/fiscal/config',
   '/api/inventory',
   '/api/inventory/warehouses',
   '/api/inventory/reservations',
