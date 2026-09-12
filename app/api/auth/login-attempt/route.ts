@@ -33,8 +33,8 @@ export async function POST(request: NextRequest) {
   if (ENABLE_LOGIN_ATTEMPT_RATE_LIMIT) {
     const ip = getClientAddress(request);
     const rate = await consumeDistributedRateLimits(
-      { endpoint: `/api/auth/login-attempt:v2:${emailKey(email)}`, ip },
-      { ip: 40, endpoint: 15, composite: 15 },
+      { endpoint: `/api/auth/login-attempt:v3:${emailKey(email)}`, ip },
+      { ip: 120, endpoint: 30, composite: 30 },
       15 * 60 * 1000,
     );
     if (!rate.allowed) {
