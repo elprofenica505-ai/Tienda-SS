@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       return result;
     });
     const total = lines.reduce((sum, line) => sum + line.total, 0);
-    await presaleRef.create({ ticketCode: ticketCode(), items: lines, total, vendedorUid: context.uid, vendedorRole: context.role, status: action, evidenceRefs, createdAt: now, updatedAt: now });
+    await presaleRef.create({ ticketCode: ticketCode(), items: lines, total, vendedorUid: context.uid, vendedorEmail: context.email || null, vendedorRole: context.role, status: action, evidenceRefs, createdAt: now, updatedAt: now });
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: presaleRef.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
     return NextResponse.json({ ok: true, presaleId: presaleRef.id, ticketCode: (await presaleRef.get()).data()?.ticketCode, status: action, total }, { status: 201 });
   } catch (error: unknown) {
