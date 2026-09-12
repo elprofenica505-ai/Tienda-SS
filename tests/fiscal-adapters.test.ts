@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FISCAL_PROVIDERS, getFiscalAdapter, normalizeFiscalConfig, validateFiscalConfig } from '@/lib/fiscal-adapters';
+import { FISCAL_PROVIDERS, fiscalConfigForStorage, getFiscalAdapter, normalizeFiscalConfig, validateFiscalConfig } from '@/lib/fiscal-adapters';
 import { readFileSync } from 'node:fs';
 
 const configApi = readFileSync('app/api/fiscal/config/route.ts', 'utf8');
@@ -15,7 +15,7 @@ test('ofrece proveedores intercambiables sin acoplar el núcleo de ventas', () =
 });
 
 test('normaliza configuración por empresa y no guarda secretos en la respuesta', () => {
-  const config = normalizeFiscalConfig({ provider: 'generic_api', mode: 'sandbox', endpoint: 'https://provider.example/api', credentialRef: 'secret/ref/company-a', documentTypes: ['invoice', 'credit_note'] });
+  const config = normalizeFiscalConfig({ provider: 'generic_api', mode: 'sandbox', endpoint: 'https://provider.example/api', credentialRef: 'secret/ref/company-a', legalName: 'Empresa de Prueba', taxId: 'J0310000000000', documentTypes: ['invoice', 'credit_note'] });
   assert.equal(config.provider, 'generic_api');
   assert.equal(config.mode, 'sandbox');
   assert.equal(config.country, 'NI');
@@ -24,8 +24,20 @@ test('normaliza configuración por empresa y no guarda secretos en la respuesta'
 });
 
 test('rechaza emisión externa sin endpoint o referencia segura', () => {
-  const config = normalizeFiscalConfig({ provider: 'generic_api', mode: 'production' });
+  const config = normalizeFiscalConfig({ provider: 'generic_api', mode: 'production', legalName: 'Empresa de Prueba', taxId: 'J0310000000000' });
   assert.equal(validateFiscalConfig(config), 'El endpoint del proveedor es obligatorio fuera del modo manual.');
+});
+
+test('permite modo manual con RUC sin endpoint ni credenciales', () => {
+  const config = normalizeFiscalConfig({ provider: 'manual', mode: 'manual', legalName: 'Empresa de Prueba', taxId: 'J0310000000000' });
+  assert.equal(validateFiscalConfig(config), null);
+  assert.equal(fiscalConfigForStorage(config).endpoint, undefined);
+  assert.equal(fiscalConfigForStorage(config).credentialRef, undefined);
+});
+
+test('exige identidad legal del emisor también en modo manual', () => {
+  const config = normalizeFiscalConfig({ provider: 'manual', mode: 'manual' });
+  assert.equal(validateFiscalConfig(config), 'La razón social de la empresa es obligatoria.');
 });
 
 test('las ventas registran proveedor y modo fiscal del tenant', () => {

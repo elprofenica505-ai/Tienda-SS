@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantMember, tenantErrorResponse } from '@/lib/tenant';
-import { FISCAL_PROVIDERS, normalizeFiscalConfig, validateFiscalConfig } from '@/lib/fiscal-adapters';
+import { FISCAL_PROVIDERS, fiscalConfigForStorage, normalizeFiscalConfig, validateFiscalConfig } from '@/lib/fiscal-adapters';
 
 export const runtime = 'nodejs';
 const MANAGERS = ['owner', 'admin', 'gerente'];
@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest) {
     const config = normalizeFiscalConfig(body, current);
     const validationError = validateFiscalConfig(config);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
-    const stored = { ...config, updatedAt: new Date(), updatedBy: context.uid };
+    const stored = { ...fiscalConfigForStorage(config), updatedAt: new Date(), updatedBy: context.uid };
     await ref.set(stored, { merge: true });
     return NextResponse.json({ ok: true, config: { ...config, credentialRef: config.credentialRef ? 'configured' : undefined } });
   } catch (error: unknown) {

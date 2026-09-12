@@ -95,11 +95,17 @@ export function normalizeFiscalConfig(input: Record<string, unknown>, current?: 
 
 export function validateFiscalConfig(config: FiscalTenantConfig): string | null {
   const provider = fiscalProvider(config.provider);
+  if (!config.legalName) return 'La razón social de la empresa es obligatoria.';
+  if (!config.taxId) return 'El RUC o identificador fiscal de la empresa es obligatorio.';
   if (config.mode !== 'manual' && !provider.supportsElectronicEmission) return 'El proveedor seleccionado no admite emisión electrónica.';
   if (config.mode !== 'manual' && !config.endpoint) return 'El endpoint del proveedor es obligatorio fuera del modo manual.';
   if (config.mode !== 'manual' && !config.credentialRef) return 'La referencia segura de credenciales es obligatoria fuera del modo manual.';
   if (config.mode === 'production' && config.status !== 'production') return 'La configuración de producción debe marcarse explícitamente como producción.';
   return null;
+}
+
+export function fiscalConfigForStorage(config: FiscalTenantConfig): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined));
 }
 
 export function createManualAdapter(): FiscalAdapter {
