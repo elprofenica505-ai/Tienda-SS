@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Resend } from 'resend';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { TenantContext, TenantRole } from '@/lib/tenant';
+import { canAssignRole } from '@/lib/role-policy';
 
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const INVITATION_RESEND_COOLDOWN_MS = 60 * 1000;
@@ -21,9 +22,7 @@ export function isInvitationRole(value: unknown): value is TenantRole {
 }
 
 export function canAssignInvitationRole(actorRole: TenantRole, targetRole: TenantRole): boolean {
-  if (actorRole === 'owner' || actorRole === 'admin') return true;
-  if (targetRole === 'admin' || targetRole === 'jefe') return false;
-  return ['gerente', 'supervisor_sucursal'].includes(actorRole);
+  return canAssignRole(actorRole, targetRole);
 }
 
 export function createInvitationToken(): string {

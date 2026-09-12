@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import type { TenantRole } from '@/lib/tenant';
 import { consumeMonthlyEntitlement } from '@/lib/entitlement-guard';
 import { toCsv } from '@/lib/integrations';
 
 export const runtime = 'nodejs';
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,7 +14,7 @@ export async function GET(request: NextRequest) {
     const db = getAdminDb();
     await consumeMonthlyEntitlement(db, context.tenantId, 'monthlyExports');
     const snapshot = await db.collection('tenants').doc(context.tenantId).collection('sales').orderBy('createdAt', 'desc').limit(500).get();
-    const rows = snapshot.docs.map((item) => {
+    const rows = snapshot.docs.filter((item) => TENANT_WIDE_ROLES.has(context.role) || (typeof item.data()?.branchId === 'string' && context.branchIds.includes(String(item.data()?.branchId)))).map((item) => {
       const data = item.data();
       return { id: item.id, saleNumber: data.saleNumber || '', total: data.total || 0, paymentMethod: data.paymentMethod || '', status: data.status || '', createdAt: data.createdAt || '' };
     });

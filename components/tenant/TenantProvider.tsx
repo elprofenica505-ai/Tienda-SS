@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { onIdTokenChanged, signOut, User } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 export type TenantRole =
@@ -70,12 +70,20 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       if (tenantId) headers['x-tenant-id'] = tenantId;
       const response = await fetch('/api/tenants/me', { headers, cache: 'no-store' });
       const data = await response.json();
+      if (data.code === 'SESSION_EXPIRED' || data.code === 'SESSION_REVOKED') {
+        await signOut(auth);
+        throw new Error('Tu sesión terminó por seguridad. Inicia sesión nuevamente.');
+      }
       if (!response.ok) throw new Error(data.error || 'No se pudo cargar la empresa.');
       const selected = data.tenants?.find((item: { tenant: Tenant }) => item.tenant.id === data.activeTenantId) || data.tenants?.[0];
       if (!selected) throw new Error('No tienes una empresa activa.');
       window.localStorage.setItem(STORAGE_KEY, selected.tenant.id);
       const organizationResponse = await fetch('/api/organization', { headers: { ...headers, 'x-tenant-id': selected.tenant.id }, cache: 'no-store' });
       const organizationData = await organizationResponse.json();
+      if (organizationData.code === 'SESSION_EXPIRED' || organizationData.code === 'SESSION_REVOKED') {
+        await signOut(auth);
+        throw new Error('Tu sesión terminó por seguridad. Inicia sesión nuevamente.');
+      }
       if (!organizationResponse.ok) throw new Error(organizationData.error || 'No se pudo cargar la organización.');
       const nextOrganization = organizationData.organization as TenantOrganization;
       const assigned = Array.isArray(selected.member.branchIds) ? selected.member.branchIds : [];
@@ -91,7 +99,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     } finally { setLoading(false); }
   }
 
-  useEffect(() => onAuthStateChanged(auth, (user) => {
+  useEffect(() => onIdTokenChanged(auth, (user) => {
     setAuthUser(user);
     if (user) void refresh();
     else { setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); }

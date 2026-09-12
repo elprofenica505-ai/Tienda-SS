@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import type { TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
 function dayKey(value: unknown) { const date = value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function' ? value.toDate() : value instanceof Date ? value : new Date(String(value)); return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10); }
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
+function inAuthorizedBranch(item: Record<string, unknown>, branchIds: readonly string[]) { return typeof item.branchId === 'string' && branchIds.includes(item.branchId); }
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,9 +24,14 @@ export async function GET(request: NextRequest) {
     const expenses: Array<Record<string, unknown> & { id: string }> = expensesSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
     const cash: Array<Record<string, unknown> & { id: string }> = cashSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
     const payments: Array<Record<string, unknown> & { id: string }> = receivablesSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
+    const visible = (rows: Array<Record<string, unknown> & { id: string }>) => TENANT_WIDE_ROLES.has(context.role) ? rows : rows.filter((item) => inAuthorizedBranch(item, context.branchIds));
+    const scopedSales = visible(sales);
+    const scopedExpenses = visible(expenses);
+    const scopedCash = visible(cash);
+    const scopedPayments = visible(payments);
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
     const inRange = (item: Record<string, unknown>) => { const key = dayKey(item.createdAt); return key && new Date(`${key}T00:00:00`) >= cutoff; };
-    const rangeSales = sales.filter(inRange); const rangeExpenses = expenses.filter(inRange); const rangeCash = cash.filter(inRange);
+    const rangeSales = scopedSales.filter(inRange); const rangeExpenses = scopedExpenses.filter(inRange); const rangeCash = scopedCash.filter(inRange);
     const income = rangeSales.reduce((sum, item) => sum + (item.paymentMethod === 'credit' ? money(item.paidAmount) : money(item.total)), 0);
     const expensesTotal = rangeExpenses.reduce((sum, item) => sum + money(item.amount), 0);
     const cashAdjustments = rangeCash.reduce((sum, item) => sum + (item.direction === 'in' ? money(item.amount) : -money(item.amount)), 0);
@@ -36,7 +44,7 @@ export async function GET(request: NextRequest) {
     for (const item of rangeSales) { const method = String(item.paymentMethod || 'unknown'); paymentMethods.set(method, (paymentMethods.get(method) || 0) + money(item.total)); }
     const productMap = new Map<string, { name: string; quantity: number; revenue: number }>();
     for (const sale of rangeSales) { const items = Array.isArray(sale.items) ? sale.items as Array<Record<string, unknown>> : []; for (const line of items) { const id = String(line.productId || line.name || 'unknown'); const row = productMap.get(id) || { name: String(line.name || 'Producto'), quantity: 0, revenue: 0 }; row.quantity += money(line.quantity); row.revenue += money(line.total); productMap.set(id, row); } }
-    const openCredit = sales.reduce((sum, item) => sum + Math.max(0, money(item.balanceDue || 0)), 0);
-    return NextResponse.json({ ok: true, period: { days, from: cutoff.toISOString(), to: new Date().toISOString() }, summary: { income, expenses: expensesTotal, cashAdjustments, net: income - expensesTotal + cashAdjustments, sales: rangeSales.length, averageSale: rangeSales.length ? income / rangeSales.length : 0, openCredit, collectedCredit: payments.filter(inRange).reduce((sum, item) => sum + money(item.amount), 0) }, daily: Array.from(chart.values()), paymentMethods: Array.from(paymentMethods, ([method, total]) => ({ method, total })).sort((a, b) => b.total - a.total), topProducts: Array.from(productMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10), recentExpenses: rangeExpenses.slice(0, 10) }, { headers: { 'Cache-Control': 'no-store' } });
+    const openCredit = scopedSales.reduce((sum, item) => sum + Math.max(0, money(item.balanceDue || 0)), 0);
+    return NextResponse.json({ ok: true, period: { days, from: cutoff.toISOString(), to: new Date().toISOString() }, summary: { income, expenses: expensesTotal, cashAdjustments, net: income - expensesTotal + cashAdjustments, sales: rangeSales.length, averageSale: rangeSales.length ? income / rangeSales.length : 0, openCredit, collectedCredit: scopedPayments.filter(inRange).reduce((sum, item) => sum + money(item.amount), 0) }, daily: Array.from(chart.values()), paymentMethods: Array.from(paymentMethods, ([method, total]) => ({ method, total })).sort((a, b) => b.total - a.total), topProducts: Array.from(productMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10), recentExpenses: rangeExpenses.slice(0, 10) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 }

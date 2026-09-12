@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { cashDifference, expectedByMethod, validCashMethod } from '@/lib/cash';
+
+const cashApi = readFileSync('app/api/cash-sessions/route.ts', 'utf8');
 
 test('los métodos de caja aceptan únicamente medios conciliables', () => {
   assert.equal(validCashMethod('cash'), true);
@@ -22,4 +25,9 @@ test('el esperado combina fondo inicial, cobros y retiros', () => {
 test('el arqueo conserva sobrantes y faltantes con signo', () => {
   assert.equal(cashDifference({ cash: 100, card: 50, transfer: 0 }, { cash: 95, card: 50, transfer: 0 }), -5);
   assert.equal(cashDifference({ cash: 100, card: 50, transfer: 0 }, { cash: 105, card: 50, transfer: 0 }), 5);
+});
+
+test('la API de caja rechaza direcciones de movimiento inválidas', () => {
+  assert.match(cashApi, /const direction = body\.direction === 'in' \|\| body\.direction === 'out'/);
+  assert.match(cashApi, /!direction/);
 });

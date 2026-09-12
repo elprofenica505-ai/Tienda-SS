@@ -11,6 +11,7 @@ import { findOpenCashSession } from '@/lib/cash';
 
 export const runtime = 'nodejs';
 const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
@@ -25,10 +26,22 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'sales', 'view');
     const salesCollection = getAdminDb().collection('tenants').doc(context.tenantId).collection('sales');
     const branchId = request.headers.get('x-branch-id')?.trim();
-    const snapshot = branchId && context.role !== 'owner' && context.role !== 'admin' && context.role !== 'gerente' && context.role !== 'jefe'
-      ? await salesCollection.where('branchId', '==', branchId).orderBy('createdAt', 'desc').limit(50).get()
-      : await salesCollection.orderBy('createdAt', 'desc').limit(50).get();
-    return NextResponse.json({ ok: true, sales: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })) }, { headers: { 'Cache-Control': 'no-store' } });
+    let rows: Array<{ id: string; data: Record<string, unknown> }> = [];
+    if (TENANT_WIDE_ROLES.has(context.role)) {
+      const snapshot = await salesCollection.orderBy('createdAt', 'desc').limit(50).get();
+      rows = snapshot.docs.map((item) => ({ id: item.id, data: item.data() as Record<string, unknown> }));
+    } else {
+      const authorizedBranches = context.branchIds.slice(0, 100);
+      if (branchId && !authorizedBranches.includes(branchId)) return NextResponse.json({ error: 'La sucursal no está autorizada para este usuario.' }, { status: 403 });
+      const requestedBranches = branchId ? [branchId] : authorizedBranches;
+      const snapshots = await Promise.all(Array.from({ length: Math.ceil(requestedBranches.length / 10) }, (_, index) =>
+        salesCollection.where('branchId', 'in', requestedBranches.slice(index * 10, index * 10 + 10)).orderBy('createdAt', 'desc').limit(50).get(),
+      ));
+      rows = snapshots.flatMap((snapshot) => snapshot.docs.map((item) => ({ id: item.id, data: item.data() as Record<string, unknown> })))
+        .sort((left, right) => String(right.data.createdAt || '').localeCompare(String(left.data.createdAt || '')))
+        .slice(0, 50);
+    }
+    return NextResponse.json({ ok: true, sales: rows.map((item) => ({ id: item.id, ...item.data })) }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });

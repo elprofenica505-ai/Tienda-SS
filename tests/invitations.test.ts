@@ -43,6 +43,7 @@ test('normaliza email y limita roles a los roles asignables', () => {
   assert.equal(isInvitationRole('owner'), false);
   assert.equal(isInvitationRole('superadmin'), false);
   assert.equal(canAssignInvitationRole('admin', 'jefe'), true);
+  assert.equal(canAssignInvitationRole('admin', 'admin'), false);
   assert.equal(canAssignInvitationRole('gerente', 'vendedor'), true);
   assert.equal(canAssignInvitationRole('gerente', 'admin'), false);
   assert.equal(canAssignInvitationRole('vendedor', 'cajero'), false);

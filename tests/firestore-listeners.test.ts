@@ -30,8 +30,8 @@ test('onSnapshot queda encapsulado en el hook realtime', () => {
 
 test('TenantProvider conserva cleanup para el listener de autenticación', () => {
   const provider = read('components/tenant/TenantProvider.tsx');
-  assert.match(provider, /onAuthStateChanged/);
-  assert.match(provider, /useEffect\(\(\) => onAuthStateChanged/);
+  assert.match(provider, /onIdTokenChanged/);
+  assert.match(provider, /useEffect\(\(\) => onIdTokenChanged/);
 });
 
 test('la regla de costo queda documentada', () => {

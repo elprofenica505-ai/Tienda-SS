@@ -12,7 +12,7 @@ const organization = readFileSync('lib/organization.ts', 'utf8');
 const signature = (collectionGroup: string, fields: string) => indexes.indexes.some((index) => index.collectionGroup === collectionGroup && index.queryScope === 'COLLECTION_GROUP' && index.fields.map((field) => `${field.fieldPath}:${field.order}`).join(',') === fields);
 
 test('los índices de producción reflejan las queries multi-tenant requeridas', () => {
-  assert.equal(indexes.indexes.length, 16);
+  assert.equal(indexes.indexes.length, 21);
   assert.equal(signature('products', 'active:ASCENDING,name:ASCENDING,__name__:ASCENDING'), true);
   assert.equal(signature('presales', 'createdAt:DESCENDING,__name__:DESCENDING'), true);
   assert.equal(signature('presales', 'vendedorUid:ASCENDING,createdAt:DESCENDING,__name__:DESCENDING'), true);

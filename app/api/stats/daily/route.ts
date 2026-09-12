@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import type { TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 
 function dateKey(value: string | null) {
   const candidate = value || new Date().toISOString().slice(0, 10);
@@ -12,6 +14,7 @@ function dateKey(value: string | null) {
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'reports', 'view');
+    if (!TENANT_WIDE_ROLES.has(context.role)) return NextResponse.json({ error: 'Las estadísticas globales requieren un rol administrativo.' }, { status: 403 });
     const key = dateKey(new URL(request.url).searchParams.get('date'));
     if (!key) return NextResponse.json({ error: 'La fecha debe tener formato YYYY-MM-DD.' }, { status: 400 });
     const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection('stats').doc('daily').collection('days').doc(key).get();

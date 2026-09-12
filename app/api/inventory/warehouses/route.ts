@@ -26,6 +26,9 @@ export async function GET(request: NextRequest) {
     const warehouseDocs = (await tenant.collection('warehouses').where('active', '==', true).orderBy('name').get()).docs;
     const warehouses: Array<Record<string, unknown> & { id: string }> = warehouseDocs.map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }));
     const visibleWarehouses = warehouses.filter((item) => context.branchIds.includes(String(item.branchId)) || ['owner', 'admin', 'gerente', 'jefe'].includes(context.role));
+    if (warehouseId && !visibleWarehouses.some((item) => item.id === warehouseId)) {
+      return NextResponse.json({ error: 'El almacén no está autorizado para este usuario.' }, { status: 403 });
+    }
     const stocksSnapshot = warehouseId
       ? await tenant.collection('inventoryStocks').where('warehouseId', '==', warehouseId).orderBy('updatedAt', 'desc').limit(500).get()
       : null;

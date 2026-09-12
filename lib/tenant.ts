@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
-import { assertTokenSessionPolicy } from '@/lib/auth-policy';
+import { assertTenantSessionNotRevoked, assertTokenSessionPolicy } from '@/lib/auth-policy';
 import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
 import { normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
@@ -94,6 +94,8 @@ export async function requireTenantMember(
     throw new Error('FORBIDDEN');
   }
 
+  assertTenantSessionNotRevoked(decoded, member.data()?.sessionRevokedAt);
+
   const memberTenantId = member.data()?.tenantId;
   if (typeof memberTenantId === 'string' && memberTenantId !== requestedTenant) {
     throw new Error('FORBIDDEN');
@@ -185,6 +187,10 @@ export function tenantErrorResponse(error: unknown) {
 
   if (code === 'SESSION_EXPIRED') {
     return { status: 401, body: { error: 'Tu sesión expiró. Inicia sesión nuevamente.', code } };
+  }
+
+  if (code === 'SESSION_REVOKED') {
+    return { status: 401, body: { error: 'Tu sesión fue invalidada por un cambio de acceso. Inicia sesión nuevamente.', code } };
   }
 
   if (code === 'MFA_REQUIRED') {

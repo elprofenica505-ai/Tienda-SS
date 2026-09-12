@@ -7,6 +7,7 @@ import { writeImmutableAudit } from '@/lib/audit';
 export const runtime = 'nodejs';
 
 const inventoryRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 
 function text(value: unknown, max = 180) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -49,6 +50,12 @@ export async function GET(request: NextRequest) {
         })()
       : null;
     const [movements, products] = await Promise.all([movementsQuery.get(), productsQuery?.get()]);
+    const visibleMovements = TENANT_WIDE_ROLES.has(context.role)
+      ? movements.docs
+      : movements.docs.filter((item) => {
+          const branchId = item.data()?.branchId;
+          return typeof branchId === 'string' && context.branchIds.includes(branchId);
+        });
     const productDocs = products?.docs || [];
     const pageDocs = productDocs.slice(0, pageSize);
     const productRows: Array<Record<string, unknown> & { id: string }> = pageDocs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
@@ -63,7 +70,7 @@ export async function GET(request: NextRequest) {
       summary: { products: productsRequested ? productRows.length : null, totalUnits: productsRequested ? totalUnits : null, lowStock: productsRequested ? lowStock.length : null },
       products: productRows,
       lowStock,
-      movements: movements.docs.map((item) => ({ id: item.id, ...item.data() })),
+      movements: visibleMovements.map((item) => ({ id: item.id, ...item.data() })),
       productsPage: paginatedResponse(productRows, pageSize, nextCursor)
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {

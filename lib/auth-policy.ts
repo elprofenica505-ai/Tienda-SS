@@ -21,9 +21,10 @@ export function getSessionPolicy(): SessionPolicy {
   return {
     maxAgeSeconds: Number.isFinite(configured) && configured >= 300 ? configured : DEFAULT_MAX_SESSION_AGE_SECONDS,
     requireVerifiedEmail: process.env.AUTH_REQUIRE_VERIFIED_EMAIL !== 'false',
-    // MFA remains available as an explicit enterprise/security option, but it
-    // must not block owners and admins by default on Firebase free plans.
-    requireMfaForAdmin: process.env.AUTH_REQUIRE_MFA_ADMIN === 'true',
+    // Production requires MFA for administrative tenant roles. The explicit
+    // flag remains useful for staging/security tests without changing local
+    // development behavior.
+    requireMfaForAdmin: process.env.VERCEL_ENV === 'production' || process.env.AUTH_REQUIRE_MFA_ADMIN === 'true',
   };
 }
 
@@ -38,4 +39,16 @@ export function assertTokenSessionPolicy(token: DecodedIdToken, role: string, no
   if (policy.requireMfaForAdmin && isAdministrativeRole(role) && token.firebase?.sign_in_second_factor == null && token.mfa_enrolled !== true) {
     throw new Error('MFA_REQUIRED');
   }
+}
+
+export function assertTenantSessionNotRevoked(token: DecodedIdToken, revokedAt: unknown): void {
+  if (!revokedAt || typeof token.auth_time !== 'number') return;
+  const revokedAtSeconds = revokedAt instanceof Date
+    ? Math.floor(revokedAt.getTime() / 1000)
+    : typeof revokedAt === 'number'
+      ? Math.floor(revokedAt / 1000)
+      : revokedAt && typeof (revokedAt as { toMillis?: () => number }).toMillis === 'function'
+        ? Math.floor((revokedAt as { toMillis: () => number }).toMillis() / 1000)
+        : NaN;
+  if (Number.isFinite(revokedAtSeconds) && token.auth_time <= revokedAtSeconds) throw new Error('SESSION_REVOKED');
 }

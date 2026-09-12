@@ -23,6 +23,7 @@ test('la creación de empresa no contiene semillas de productos, ventas o client
 test('el pre-login usa un límite versionado y razonable', () => {
   assert.match(authAttemptSource, /login-attempt:v2/);
   assert.match(authAttemptSource, /ip: 40, endpoint: 15, composite: 15/);
+  assert.match(authAttemptSource, /ENABLE_LOGIN_ATTEMPT_RATE_LIMIT = true/);
 });
 
 test('producción redirige aliases vercel al dominio canónico', () => {

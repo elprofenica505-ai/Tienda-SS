@@ -33,6 +33,13 @@ test('abonos actualizan cartera agregada y exponen vencidos', () => {
   assert.match(receivables, /summary: \{/);
 });
 
+test('cartera y abonos respetan sucursal y el límite no baja del saldo', () => {
+  assert.match(receivables, /assertBranchAccess/);
+  assert.match(receivables, /visibleSales/);
+  assert.match(receivables, /branchId: saleBranchId/);
+  assert.match(contacts, /creditLimit < creditBalance/);
+});
+
 test('dashboard usa stats diarias y carga tickets pendientes', () => {
   assert.match(dashboard, /\/api\/stats\/daily/);
   assert.match(dashboard, /\/api\/presales/);

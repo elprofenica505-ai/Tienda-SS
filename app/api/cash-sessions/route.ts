@@ -80,9 +80,10 @@ export async function POST(request: NextRequest) {
       if (session.status !== 'open') return NextResponse.json({ error: 'El turno no está abierto.' }, { status: 409 });
       const paymentMethod = text(body.paymentMethod, 30);
       const amount = cashMoney(body.amount);
-      if (!validCashMethod(paymentMethod) || amount <= 0 || text(body.description, 2).length < 2) return NextResponse.json({ error: 'Método, descripción y monto son obligatorios.' }, { status: 400 });
+      const direction = body.direction === 'in' || body.direction === 'out' ? body.direction : '';
+      if (!validCashMethod(paymentMethod) || !direction || amount <= 0 || text(body.description, 2).length < 2) return NextResponse.json({ error: 'Dirección, método, descripción y monto son obligatorios.' }, { status: 400 });
       const ref = tenant.collection('cashMovements').doc();
-      const data = { cashSessionId: sessionId, branchId, direction: body.direction === 'in' ? 'in' : 'out', amount, paymentMethod, description: text(body.description), notes: text(body.notes, 300), createdBy: context.uid, createdAt: now };
+      const data = { cashSessionId: sessionId, branchId, direction, amount, paymentMethod, description: text(body.description), notes: text(body.notes, 300), createdBy: context.uid, createdAt: now };
       await ref.create(data);
       await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'cash_movement.created', entity: 'cashMovement', entityId: ref.id, after: data, result: 'success' });
       return NextResponse.json({ ok: true, movement: { id: ref.id, ...data } }, { status: 201 });

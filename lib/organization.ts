@@ -1,5 +1,6 @@
 import type { CollectionReference, DocumentReference } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import type { TenantRole } from '@/lib/tenant';
 
 export type OrganizationResource = 'branches' | 'warehouses' | 'cashRegisters';
 
@@ -106,6 +107,19 @@ export async function getOrganization(tenantId: string) {
 export function branchIdsFrom(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(item)).slice(0, 50)));
+}
+
+export function filterOrganizationMembers<T extends Record<string, unknown>>(
+  members: readonly T[],
+  role: TenantRole,
+  branchIds: readonly string[],
+): T[] {
+  if (['owner', 'admin', 'gerente', 'jefe'].includes(role)) return [...members];
+  const allowed = new Set(branchIds);
+  return members.filter((member) => {
+    const assigned = Array.isArray(member.branchIds) ? member.branchIds : [];
+    return assigned.some((branchId) => typeof branchId === 'string' && allowed.has(branchId));
+  });
 }
 
 export function assertOrganizationResource(value: unknown): asserts value is OrganizationResource {

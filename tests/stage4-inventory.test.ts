@@ -4,6 +4,7 @@ import test from 'node:test';
 import { stockAfterDelta, stockKey, weightedAverageCost } from '@/lib/inventory-cost';
 
 const inventoryApi = readFileSync('app/api/inventory/warehouses/route.ts', 'utf8');
+const inventorySummaryApi = readFileSync('app/api/inventory/route.ts', 'utf8');
 const inventoryPage = readFileSync('app/workspace/warehouse-inventory/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
 
@@ -25,6 +26,13 @@ test('la API cubre recepción, transferencias, costos y conteos aprobables', () 
   assert.match(inventoryApi, /weightedAverageCost/);
   assert.match(inventoryApi, /inventoryTransfers/);
   assert.match(inventoryApi, /inventoryCounts/);
+});
+
+test('el inventario aplica ownership server-side por sucursal', () => {
+  assert.match(inventoryApi, /visibleWarehouses\.some/);
+  assert.match(inventoryApi, /El almacén no está autorizado para este usuario/);
+  assert.match(inventorySummaryApi, /visibleMovements/);
+  assert.match(inventorySummaryApi, /context\.branchIds\.includes/);
 });
 
 test('la UI expone almacén activo, transferencia y conteo físico', () => {

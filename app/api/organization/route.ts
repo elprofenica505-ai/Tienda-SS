@@ -3,7 +3,7 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
-import { assertOrganizationResource, branchIdsFrom, getOrganization, organizationCollection, organizationDocumentRef, organizationName, organizationParentId, safeCode, type OrganizationResource } from '@/lib/organization';
+import { assertOrganizationResource, branchIdsFrom, filterOrganizationMembers, getOrganization, organizationCollection, organizationDocumentRef, organizationName, organizationParentId, safeCode, type OrganizationResource } from '@/lib/organization';
 
 export const runtime = 'nodejs';
 
@@ -23,11 +23,12 @@ export async function GET(request: NextRequest) {
       ? organization.branches
       : organization.branches.filter((branch) => context.branchIds.includes(String(branch.id)));
     const branchSet = new Set(visibleBranches.map((branch) => String(branch.id)));
+    const visibleMembers = filterOrganizationMembers(organization.members, context.role, context.branchIds);
     return NextResponse.json({ ok: true, organization: {
       branches: visibleBranches,
       warehouses: organization.warehouses.filter((item) => branchSet.has(String(item.branchId))),
       cashRegisters: organization.cashRegisters.filter((item) => branchSet.has(String(item.branchId))),
-      members: organization.members,
+      members: visibleMembers,
     } }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error);

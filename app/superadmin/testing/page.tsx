@@ -10,7 +10,7 @@ type Check = { id: string; label: string; detail: string; status: CheckStatus; r
 
 const initialChecks: Check[] = [
   { id: 'health', label: 'Salud de la aplicación', detail: 'Comprueba que la API y sus dependencias responden.', status: 'idle' },
-  { id: 'login-attempt', label: 'Pre-login', detail: 'Confirma que el bloqueo temporal propio no está activo.', status: 'idle' },
+  { id: 'login-attempt', label: 'Pre-login', detail: 'Confirma que el rate limit propio responde correctamente.', status: 'idle' },
   { id: 'admin', label: 'Acceso administrativo', detail: 'Confirma que tu sesión tiene permisos de superadministrador.', status: 'idle' },
 ];
 
@@ -60,7 +60,7 @@ export default function SuperadminTestingPage() {
         const response = await fetch('/api/auth/login-attempt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: currentUser.email || '' }) });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-        updateCheck(id, { status: 'passed', result: 'El límite propio no bloqueó la solicitud' });
+        updateCheck(id, { status: 'passed', result: 'El rate limit propio respondió correctamente' });
         return;
       }
       const response = await fetch('/api/superadmin/metrics', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });

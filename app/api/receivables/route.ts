@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
+import { assertBranchAccess } from '@/lib/data-scope';
 
 export const runtime = 'nodejs';
 const paymentRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
+const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 const PAGE_SIZE = 25;
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function amount(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
@@ -17,9 +19,16 @@ export async function GET(request: NextRequest) {
       tenant.collection('sales').where('paymentMethod', '==', 'credit').orderBy('createdAt', 'desc').limit(PAGE_SIZE + 1).get(),
       tenant.collection('receivablePayments').orderBy('createdAt', 'desc').limit(PAGE_SIZE).get()
     ]);
-    const payments = paymentsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const payments: Array<Record<string, unknown> & { id: string }> = paymentsSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
     const now = new Date();
-    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string; overdue: boolean }> = salesSnapshot.docs.slice(0, PAGE_SIZE).map((item) => {
+    const visibleSales = TENANT_WIDE_ROLES.has(context.role)
+      ? salesSnapshot.docs
+      : salesSnapshot.docs.filter((item) => typeof item.data()?.branchId === 'string' && context.branchIds.includes(String(item.data()?.branchId)));
+    const visibleSaleIds = new Set(visibleSales.map((item) => item.id));
+    const visiblePayments = TENANT_WIDE_ROLES.has(context.role)
+      ? payments
+      : payments.filter((item) => visibleSaleIds.has(String(item.saleId || '')));
+    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string; overdue: boolean }> = visibleSales.slice(0, PAGE_SIZE).map((item) => {
       const data = item.data() as Record<string, unknown>;
       const total = amount(data.total);
       const paidAmount = amount(data.paidAmount);
@@ -34,7 +43,7 @@ export async function GET(request: NextRequest) {
       const current = byCustomer.get(key) || { customerId: key, customerName: String(sale.customerName || 'Cliente sin identificar'), sales: 0, total: 0, paid: 0, balance: 0 };
       current.sales += 1; current.total += amount(sale.total); current.paid += amount(sale.paidAmount); current.balance += amount(sale.balanceDue); byCustomer.set(key, current);
     }
-    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: salesSnapshot.size > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), overdue: sales.filter((sale) => sale.overdue).reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: visibleSales.length > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), overdue: sales.filter((sale) => sale.overdue).reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments: visiblePayments }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
@@ -52,11 +61,11 @@ export async function POST(request: NextRequest) {
     const result = await db.runTransaction(async (transaction) => {
       const sale = await transaction.get(saleRef);
       if (!sale.exists || sale.data()?.paymentMethod !== 'credit') throw new Error('SALE_NOT_FOUND');
-      const data = sale.data() || {}; const total = amount(data.total); const paidAmount = amount(data.paidAmount); const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount); const customerRef = data.customerId ? tenant.collection('customers').doc(String(data.customerId)) : null; const customerSnapshot = customerRef ? await transaction.get(customerRef) : null;
+      const data = sale.data() || {}; const saleBranchId = text(data.branchId, 128); if (!saleBranchId) throw new Error('SALE_BRANCH_REQUIRED'); assertBranchAccess(context, saleBranchId); const total = amount(data.total); const paidAmount = amount(data.paidAmount); const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount); const customerRef = data.customerId ? tenant.collection('customers').doc(String(data.customerId)) : null; const customerSnapshot = customerRef ? await transaction.get(customerRef) : null;
       if (payment > balanceDue) throw new Error('PAYMENT_EXCEEDS_BALANCE');
       const newPaid = amount(paidAmount + payment); const newBalance = amount(balanceDue - payment); const paymentStatus = newBalance <= 0 ? 'paid' : 'partial'; const now = new Date();
       transaction.update(saleRef, { paidAmount: newPaid, balanceDue: newBalance, paymentStatus, updatedAt: now, updatedBy: context.uid });
-      transaction.set(paymentRef, { saleId, customerId: data.customerId || null, customerName: data.customerName || 'Cliente sin identificar', amount: payment, paymentMethod: method, notes: text(body.notes, 300), createdBy: context.uid, createdAt: now });
+      transaction.set(paymentRef, { saleId, branchId: saleBranchId, customerId: data.customerId || null, customerName: data.customerName || 'Cliente sin identificar', amount: payment, paymentMethod: method, notes: text(body.notes, 300), createdBy: context.uid, createdAt: now });
       if (customerRef && customerSnapshot?.exists) { const currentCredit = amount(customerSnapshot.data()?.creditBalance); transaction.update(customerRef, { creditBalance: Math.max(0, currentCredit - payment), updatedAt: now, updatedBy: context.uid }); transaction.create(tenant.collection('creditMovements').doc(), { customerId: data.customerId, saleId, paymentId: paymentRef.id, type: 'payment', amount: payment, balanceAfter: Math.max(0, currentCredit - payment), createdBy: context.uid, createdAt: now }); }
       return { saleId, paymentId: paymentRef.id, paidAmount: newPaid, balanceDue: newBalance, paymentStatus };
     });
@@ -66,6 +75,7 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : '';
     if (message === 'SALE_NOT_FOUND') return NextResponse.json({ error: 'La venta a crédito no existe.' }, { status: 404 });
     if (message === 'PAYMENT_EXCEEDS_BALANCE') return NextResponse.json({ error: 'El pago no puede superar el saldo pendiente.' }, { status: 409 });
+    if (message === 'SALE_BRANCH_REQUIRED') return NextResponse.json({ error: 'La venta no tiene una sucursal válida.' }, { status: 409 });
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
 }

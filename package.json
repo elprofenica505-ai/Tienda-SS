@@ -20,7 +20,7 @@
     "backup:firestore": "./scripts/backup-firestore.sh",
     "check:production-env": "tsx scripts/check-production-env.ts",
     "emulators:start": "firebase emulators:start --only firestore",
-    "test:permissions": "node --import tsx --test tests/permissions.test.ts",
+    "test:permissions": "node --import tsx --test tests/permissions.test.ts tests/role-policy.test.ts tests/security-policy.test.ts",
     "test:migrations": "node --import tsx --test tests/migrate-user-roles.test.ts",
     "test:rules": "firebase emulators:exec --only firestore \"node --test tests/firestore.rules.test.mjs\""
   },

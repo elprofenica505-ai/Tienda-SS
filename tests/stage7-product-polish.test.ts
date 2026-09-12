@@ -7,6 +7,9 @@ const presales = readFileSync('app/api/presales/route.ts', 'utf8');
 const checkout = readFileSync('app/api/presales/checkout/route.ts', 'utf8');
 const sales = readFileSync('app/api/sales/route.ts', 'utf8');
 const receivables = readFileSync('app/api/receivables/route.ts', 'utf8');
+const reports = readFileSync('app/api/reports/route.ts', 'utf8');
+const exportRoute = readFileSync('app/api/reports/export/route.ts', 'utf8');
+const dailyStats = readFileSync('app/api/stats/daily/route.ts', 'utf8');
 const tenant = readFileSync('lib/tenant.ts', 'utf8');
 const cashier = readFileSync('app/workspace/cashier/page.tsx', 'utf8');
 const presalesPage = readFileSync('app/workspace/presales/page.tsx', 'utf8');
@@ -39,4 +42,11 @@ test('tickets tienen código visible y acciones imprimibles/copiables', () => {
 test('los endpoints no exponen secretos en el cliente', () => {
   assert.doesNotMatch(cashier, /STRIPE_SECRET_KEY|FIREBASE_ADMIN|sk_live_/);
   assert.doesNotMatch(presalesPage, /STRIPE_SECRET_KEY|FIREBASE_ADMIN|sk_live_/);
+});
+
+test('reportes y exportaciones respetan sucursal y rol administrativo', () => {
+  assert.match(reports, /scopedSales/);
+  assert.match(reports, /context\.branchIds/);
+  assert.match(exportRoute, /context\.branchIds/);
+  assert.match(dailyStats, /Las estadísticas globales requieren un rol administrativo/);
 });

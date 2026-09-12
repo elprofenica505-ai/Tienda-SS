@@ -71,7 +71,8 @@ function WorkspaceContent() {
         customers: contactsResponse.ok ? contacts.contacts || [] : current.customers,
         pendingPresales: presalesResponse.ok ? (presales.presales || []).filter((item: { status: string }) => item.status === 'sent_to_cashier') : current.pendingPresales,
       } : current);
-      if (!contactsResponse.ok || !presalesResponse.ok) setMessage('Algunos paneles secundarios no pudieron actualizarse.');
+      if (!presalesResponse.ok) setMessage('Algunos paneles secundarios no pudieron actualizarse.');
+      if (!contactsResponse.ok) setMessage('Algunos paneles secundarios no pudieron actualizarse.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo cargar el centro de mando.');
     } finally {

@@ -5,10 +5,9 @@ import { logEvent } from '@/lib/observability';
 
 export const runtime = 'nodejs';
 
-// TEMPORAL: el límite propio está desactivado mientras se investiga el bloqueo
-// persistente observado en producción. Reactivar con una política validada
-// antes de escalar el tráfico público; Firebase Auth mantiene su protección.
-const ENABLE_LOGIN_ATTEMPT_RATE_LIMIT = false;
+// Pre-login protection is deliberately independent from Firebase Auth so an
+// attacker cannot rotate credentials or consume provider capacity unchecked.
+const ENABLE_LOGIN_ATTEMPT_RATE_LIMIT = true;
 
 function normalizeEmail(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';

@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const returnsApi = readFileSync('app/api/sales/returns/route.ts', 'utf8');
 const voidApi = readFileSync('app/api/sales/void/route.ts', 'utf8');
+const salesApi = readFileSync('app/api/sales/route.ts', 'utf8');
 const notesApi = readFileSync('app/api/receivables/credit-notes/route.ts', 'utf8');
 const returnsPage = readFileSync('app/workspace/returns/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
@@ -41,4 +42,10 @@ test('los documentos de reversión no se pueden escribir directamente desde el c
   assert.match(rules, /match \/salesReturns/);
   assert.match(rules, /match \/creditNotes/);
   assert.match(rules, /allow create, update, delete: if false/);
+});
+
+test('el listado de ventas impone el alcance de sucursal server-side', () => {
+  assert.match(salesApi, /authorizedBranches/);
+  assert.match(salesApi, /La sucursal no está autorizada para este usuario/);
+  assert.match(salesApi, /where\('branchId', 'in'/);
 });

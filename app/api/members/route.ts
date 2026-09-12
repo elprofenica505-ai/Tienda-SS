@@ -3,6 +3,7 @@ import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { writeImmutableAudit } from '@/lib/audit';
+import { canManageRole } from '@/lib/role-policy';
 
 export const runtime = 'nodejs';
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
@@ -44,7 +45,11 @@ export async function PATCH(request: NextRequest) {
     if (!uid || !member.exists) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     const current = member.data() || {}; if (uid === context.uid) return NextResponse.json({ error: 'No puedes cambiar tu propio acceso desde aquí.' }, { status: 400 }); if (current.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede modificarse desde este módulo.' }, { status: 403 });
     const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid };
-    if (typeof body.role === 'string' && assignableRoles.includes(body.role as TenantRole)) changes.role = body.role;
+    if (body.role !== undefined) {
+      if (typeof body.role !== 'string' || !assignableRoles.includes(body.role as TenantRole)) return NextResponse.json({ error: 'Rol inválido.' }, { status: 400 });
+      if (typeof current.role !== 'string' || !canManageRole(context.role, current.role as TenantRole, body.role as TenantRole)) return NextResponse.json({ error: 'No puedes asignar ese rol a este miembro.' }, { status: 403 });
+      changes.role = body.role;
+    }
     if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) {
       if (body.status === 'active' && current.status !== 'active') {
         const db = getAdminDb();
@@ -57,6 +62,9 @@ export async function PATCH(request: NextRequest) {
       }
       changes.status = body.status;
     }
+    const roleChanged = changes.role !== undefined && changes.role !== current.role;
+    const disabling = changes.status === 'disabled' && current.status !== 'disabled';
+    if (roleChanged || disabling) changes.sessionRevokedAt = new Date();
     if (Object.keys(changes).length === 1) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     await memberRef.update(changes);
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.updated', entity: 'member', entityId: uid, before: current, after: { ...current, ...changes }, result: 'success' });
@@ -78,8 +86,9 @@ export async function DELETE(request: NextRequest) {
     if (member.data()?.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede eliminarse desde este módulo.' }, { status: 403 });
 
     const before = member.data() || {};
-    await memberRef.update({ status: 'disabled', updatedAt: new Date(), updatedBy: context.uid });
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.disabled', entity: 'member', entityId: uid, before, after: { ...before, status: 'disabled' }, result: 'success' });
+    const changes = { status: 'disabled', sessionRevokedAt: new Date(), updatedAt: new Date(), updatedBy: context.uid };
+    await memberRef.update(changes);
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'member.disabled', entity: 'member', entityId: uid, before, after: { ...before, ...changes }, result: 'success' });
     return NextResponse.json({ ok: true, uid, status: 'disabled' });
   } catch (error: unknown) { return errorResponse(error); }
 }
