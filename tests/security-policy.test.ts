@@ -28,14 +28,14 @@ test('MFA administrativo permanece disponible como opción explícita', () => {
   }
 });
 
-test('MFA administrativo se exige automáticamente en producción', () => {
+test('MFA administrativo no bloquea producción sin enrolamiento explícito', () => {
   const previousVercelEnv = process.env.VERCEL_ENV;
   const previousFlag = process.env.AUTH_REQUIRE_MFA_ADMIN;
   process.env.VERCEL_ENV = 'production';
   delete process.env.AUTH_REQUIRE_MFA_ADMIN;
   try {
-    assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'owner', 1_001), /MFA_REQUIRED/);
-    assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001), /MFA_REQUIRED/);
+    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'owner', 1_001));
+    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001));
   } finally {
     if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV;
     else process.env.VERCEL_ENV = previousVercelEnv;

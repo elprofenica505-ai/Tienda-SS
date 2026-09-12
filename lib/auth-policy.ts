@@ -21,10 +21,10 @@ export function getSessionPolicy(): SessionPolicy {
   return {
     maxAgeSeconds: Number.isFinite(configured) && configured >= 300 ? configured : DEFAULT_MAX_SESSION_AGE_SECONDS,
     requireVerifiedEmail: process.env.AUTH_REQUIRE_VERIFIED_EMAIL !== 'false',
-    // Production requires MFA for administrative tenant roles. The explicit
-    // flag remains useful for staging/security tests without changing local
-    // development behavior.
-    requireMfaForAdmin: process.env.VERCEL_ENV === 'production' || process.env.AUTH_REQUIRE_MFA_ADMIN === 'true',
+    // MFA remains available as an explicit rollout flag. Do not force it by
+    // environment until the product has an enrollment flow; otherwise an
+    // administrator without an enrolled factor is locked out of the tenant.
+    requireMfaForAdmin: process.env.AUTH_REQUIRE_MFA_ADMIN === 'true',
   };
 }
 
