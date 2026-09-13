@@ -5,6 +5,11 @@ insert into storage.buckets (id, name, public)
 values ('tenant-files', 'tenant-files', false)
 on conflict (id) do update set public = excluded.public;
 
+drop policy if exists tenant_files_select on storage.objects;
+drop policy if exists tenant_files_insert on storage.objects;
+drop policy if exists tenant_files_update on storage.objects;
+drop policy if exists tenant_files_delete_admin on storage.objects;
+
 create policy tenant_files_select
   on storage.objects for select
   to authenticated

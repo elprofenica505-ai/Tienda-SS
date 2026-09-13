@@ -345,6 +345,9 @@ BEGIN
     EXECUTE format('revoke all on table public.%I from anon, authenticated', table_name);
     EXECUTE format('grant select on table public.%I to authenticated', table_name);
     EXECUTE format('grant insert, update on table public.%I to authenticated', table_name);
+    EXECUTE format('drop policy if exists %I on public.%I', table_name || '_select_member', table_name);
+    EXECUTE format('drop policy if exists %I on public.%I', table_name || '_insert_admin', table_name);
+    EXECUTE format('drop policy if exists %I on public.%I', table_name || '_update_admin', table_name);
     EXECUTE format('create policy %I on public.%I for select to authenticated using (public.has_tenant_access(tenant_id))', table_name || '_select_member', table_name);
     EXECUTE format('create policy %I on public.%I for insert to authenticated with check (public.has_tenant_admin_access(tenant_id))', table_name || '_insert_admin', table_name);
     EXECUTE format('create policy %I on public.%I for update to authenticated using (public.has_tenant_admin_access(tenant_id)) with check (public.has_tenant_admin_access(tenant_id))', table_name || '_update_admin', table_name);
@@ -440,6 +443,9 @@ create index if not exists tenant_settings_tenant_key_idx on public.tenant_setti
 alter table public.tenant_settings enable row level security;
 revoke all on table public.tenant_settings from anon, authenticated;
 grant select, insert, update on table public.tenant_settings to authenticated;
+drop policy if exists tenant_settings_select_member on public.tenant_settings;
+drop policy if exists tenant_settings_write_admin on public.tenant_settings;
+drop policy if exists tenant_settings_update_admin on public.tenant_settings;
 create policy tenant_settings_select_member on public.tenant_settings for select to authenticated using (public.has_tenant_access(tenant_id));
 create policy tenant_settings_write_admin on public.tenant_settings for insert to authenticated with check (public.has_tenant_admin_access(tenant_id));
 create policy tenant_settings_update_admin on public.tenant_settings for update to authenticated using (public.has_tenant_admin_access(tenant_id)) with check (public.has_tenant_admin_access(tenant_id));
