@@ -1,5 +1,5 @@
 import { getSupabaseServer } from '@/lib/supabase/server';
-import { firebaseUidToProfileId } from '@/lib/repositories/organization-repository';
+import { supabaseAuthUserToProfileId } from '@/lib/repositories/organization-repository';
 
 function fail(error: { message?: string } | null): never { throw new Error(error?.message || 'SUPABASE_REQUEST_FAILED'); }
 
@@ -9,10 +9,10 @@ async function tenantRow(tenantId: string) {
   return result.data;
 }
 
-async function profileRow(firebaseUid: string, email?: string, name?: string) {
+async function profileRow(authUserId: string, email?: string, name?: string) {
   const supabase = getSupabaseServer();
-  const id = firebaseUidToProfileId(firebaseUid);
-  const result = await supabase.from('profiles').upsert({ id, auth_user_id: id, legacy_firestore_id: firebaseUid, email: email || null, display_name: name || email || null }, { onConflict: 'auth_user_id' }).select('*').single();
+  const id = supabaseAuthUserToProfileId(authUserId);
+  const result = await supabase.from('profiles').upsert({ id, auth_user_id: id, email: email || null, display_name: name || email || null }, { onConflict: 'auth_user_id' }).select('*').single();
   if (result.error) fail(result.error);
   return result.data;
 }
@@ -38,9 +38,9 @@ export async function listMembers(tenantId: string) {
   });
 }
 
-export async function findMemberByFirebaseUid(tenantId: string, firebaseUid: string) {
+export async function findMemberByAuthUserId(tenantId: string, authUserId: string) {
   const tenant = await tenantRow(tenantId);
-  const profile = await getSupabaseServer().from('profiles').select('*').eq('legacy_firestore_id', firebaseUid).maybeSingle();
+  const profile = await getSupabaseServer().from('profiles').select('*').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return null;
   const member = await getSupabaseServer().from('members').select('*, member_branches(branch_id, branches(legacy_firestore_id))').eq('tenant_id', tenant.id).eq('profile_id', profile.data.id).maybeSingle();
@@ -49,9 +49,9 @@ export async function findMemberByFirebaseUid(tenantId: string, firebaseUid: str
   return { tenant, profile: profile.data, member: member.data, branchIds: (member.data.member_branches || []).map((item: any) => String(item.branches?.legacy_firestore_id || item.branch_id)) };
 }
 
-export async function createMember(tenantId: string, firebaseUid: string, name: string, email: string, role: string, branchIds: string[]) {
+export async function createMember(tenantId: string, authUserId: string, name: string, email: string, role: string, branchIds: string[]) {
   const tenant = await tenantRow(tenantId);
-  const profile = await profileRow(firebaseUid, email, name);
+  const profile = await profileRow(authUserId, email, name);
   const supabase = getSupabaseServer();
   const member = await supabase.from('members').upsert({ tenant_id: tenant.id, profile_id: profile.id, role, status: 'active' }, { onConflict: 'tenant_id,profile_id' }).select('*').single();
   if (member.error) fail(member.error);
@@ -59,8 +59,8 @@ export async function createMember(tenantId: string, firebaseUid: string, name: 
   return { member: member.data, profile };
 }
 
-export async function updateMember(tenantId: string, firebaseUid: string, changes: Record<string, unknown>, branchIds?: string[]) {
-  const current = await findMemberByFirebaseUid(tenantId, firebaseUid);
+export async function updateMember(tenantId: string, authUserId: string, changes: Record<string, unknown>, branchIds?: string[]) {
+  const current = await findMemberByAuthUserId(tenantId, authUserId);
   if (!current) return null;
   const update = { ...changes, ...(changes.status === 'disabled' ? { status: 'inactive' } : {}) };
   const result = await getSupabaseServer().from('members').update(update).eq('id', current.member.id).eq('tenant_id', current.tenant.id).select('*').single();

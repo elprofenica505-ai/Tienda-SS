@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/lib/firebaseAdmin';
 import { normalizeCurrency, DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL } from '@/lib/currency';
-import { findTenantsForFirebaseUid } from '@/lib/repositories/organization-repository';
+import { findTenantsForAuthUserId } from '@/lib/repositories/organization-repository';
 import { updateTenant } from '@/lib/repositories/tenant-repository';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { tenantErrorResponse } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
@@ -22,8 +22,9 @@ export async function GET(request: NextRequest) {
     const header = request.headers.get('authorization') || '';
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
     if (!token) return NextResponse.json({ error: 'Autenticación requerida.' }, { status: 401 });
-    const decoded = await getAdminAuth().verifyIdToken(token, true);
-    const available = await findTenantsForFirebaseUid(decoded.uid);
+    const result = await getSupabaseServer().auth.getUser(token);
+    if (result.error || !result.data.user) return NextResponse.json({ error: 'Autenticación requerida.' }, { status: 401 });
+    const available = await findTenantsForAuthUserId(result.data.user.id);
     if (!available.length) return NextResponse.json({ error: 'Tu usuario no tiene una empresa activa.' }, { status: 403 });
     const requestedTenantId = request.headers.get('x-tenant-id')?.trim();
     const activeTenantId = requestedTenantId && available.some((item) => item.tenant.id === requestedTenantId)

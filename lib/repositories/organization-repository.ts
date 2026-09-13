@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import type { TenantRole } from '@/lib/tenant';
 
@@ -13,11 +12,6 @@ const resourceTables: Record<OrganizationResource, string> = {
 
 function fail(error: { message?: string } | null, fallback = 'SUPABASE_REQUEST_FAILED'): never {
   throw new Error(error?.message || fallback);
-}
-
-function userUuid(firebaseUid: string): string {
-  const hex = createHash('sha256').update(`firebase:${firebaseUid}`).digest('hex').slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${((parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, '0')}${hex.slice(18, 20)}-${hex.slice(20)}`;
 }
 
 function legacyId(value: unknown): string | null {
@@ -72,13 +66,13 @@ function mapOrganizationRow(resource: OrganizationResource, row: OrganizationRow
   };
 }
 
-export function firebaseUidToProfileId(firebaseUid: string): string {
-  return userUuid(firebaseUid);
+export function supabaseAuthUserToProfileId(authUserId: string): string {
+  return authUserId;
 }
 
-export async function findTenantsForFirebaseUid(firebaseUid: string) {
+export async function findTenantsForAuthUserId(authUserId: string) {
   const supabase = getSupabaseServer();
-  const profile = await supabase.from('profiles').select('*').eq('legacy_firestore_id', firebaseUid).maybeSingle();
+  const profile = await supabase.from('profiles').select('*').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return [];
   const memberships = await supabase.from('members').select('*, tenants(*)').eq('profile_id', profile.data.id).eq('status', 'active');
@@ -89,18 +83,17 @@ export async function findTenantsForFirebaseUid(firebaseUid: string) {
   }));
 }
 
-export async function ensureProfile(firebaseUid: string, email?: string, displayName?: string) {
+export async function ensureProfile(authUserId: string, email?: string, displayName?: string) {
   const supabase = getSupabaseServer();
-  const id = userUuid(firebaseUid);
-  const payload = { id, auth_user_id: id, legacy_firestore_id: firebaseUid, email: email || null, display_name: displayName || email || null };
+  const payload = { id: authUserId, auth_user_id: authUserId, email: email || null, display_name: displayName || email || null };
   const result = await supabase.from('profiles').upsert(payload, { onConflict: 'auth_user_id' }).select('*').single();
   if (result.error) fail(result.error);
   return result.data as OrganizationRow;
 }
 
-export async function findMembership(tenantId: string, firebaseUid: string) {
+export async function findMembership(tenantId: string, authUserId: string) {
   const supabase = getSupabaseServer();
-  const profile = await supabase.from('profiles').select('*').eq('legacy_firestore_id', firebaseUid).maybeSingle();
+  const profile = await supabase.from('profiles').select('*').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return null;
   const tenant = await supabase.from('tenants').select('*').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
@@ -179,8 +172,8 @@ export async function updateOrganizationResource(tenantId: string, resource: Org
   return { before: current, after: result.data as OrganizationRow, item: mapOrganizationRow(resource, result.data as OrganizationRow) };
 }
 
-export async function upsertMemberBranches(tenantId: string, firebaseUid: string, branchIds: string[]) {
-  const membership = await findMembership(tenantId, firebaseUid);
+export async function upsertMemberBranches(tenantId: string, authUserId: string, branchIds: string[]) {
+  const membership = await findMembership(tenantId, authUserId);
   if (!membership) throw new Error('FORBIDDEN');
   const supabase = getSupabaseServer();
   const branchRows = await supabase.from('branches').select('id, legacy_firestore_id').eq('tenant_id', membership.tenant.id).in('legacy_firestore_id', branchIds);
@@ -195,7 +188,7 @@ export async function upsertMemberBranches(tenantId: string, firebaseUid: string
   return branchIds;
 }
 
-export function toTenantContext(tenantId: string, firebaseUid: string, membership: Awaited<ReturnType<typeof findMembership>>) {
+export function toTenantContext(tenantId: string, authUserId: string, membership: Awaited<ReturnType<typeof findMembership>>) {
   if (!membership) throw new Error('FORBIDDEN');
-  return { uid: firebaseUid, tenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, subscriptionStatus: undefined };
+  return { uid: authUserId, tenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, subscriptionStatus: undefined };
 }

@@ -3,7 +3,7 @@ import { getAdminAuth } from '@/lib/firebaseAdmin';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
 import { tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { canAssignRole, canManageRole } from '@/lib/role-policy';
-import { createMember, findMemberByFirebaseUid, listMembers, updateMember } from '@/lib/repositories/member-repository';
+import { createMember, findMemberByAuthUserId, listMembers, updateMember } from '@/lib/repositories/member-repository';
 
 export const runtime = 'nodejs';
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
       user = await getAdminAuth().createUser({ email, password, displayName: name, disabled: false });
     }
-    const existing = await findMemberByFirebaseUid(context.tenantId, user.uid);
+    const existing = await findMemberByAuthUserId(context.tenantId, user.uid);
     if (existing?.member.status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
     await createMember(context.tenantId, user.uid, name, email, role, memberBranchIds);
     return NextResponse.json({ ok: true, uid: user.uid, email }, { status: 201 });
@@ -61,7 +61,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const context = await requireSupabaseTenantPermission(request, 'members', 'edit');
     const body = await request.json(); const uid = text(body.uid, 160);
-    const current = await findMemberByFirebaseUid(context.tenantId, uid);
+    const current = await findMemberByAuthUserId(context.tenantId, uid);
     if (!uid || !current) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     const currentMember = { ...current.member, branchIds: current.branchIds };
     if (uid === context.uid) return NextResponse.json({ error: 'No puedes cambiar tu propio acceso desde aquí.' }, { status: 400 });
@@ -89,7 +89,7 @@ export async function DELETE(request: NextRequest) {
     const context = await requireSupabaseTenantPermission(request, 'members', 'delete');
     const body = await request.json(); const uid = text(body.uid, 160);
     if (!uid || uid === context.uid) return NextResponse.json({ error: 'No puedes eliminar tu propio usuario.' }, { status: 400 });
-    const current = await findMemberByFirebaseUid(context.tenantId, uid);
+    const current = await findMemberByAuthUserId(context.tenantId, uid);
     if (!current) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     if (current.member.role === 'owner') return NextResponse.json({ error: 'El propietario principal no puede eliminarse desde este módulo.' }, { status: 403 });
     if (!canManageMemberBranches(context, { branchIds: current.branchIds })) return NextResponse.json({ error: 'El miembro está fuera de tus sucursales autorizadas.' }, { status: 403 });
