@@ -24,7 +24,11 @@ export async function requestSupabasePasswordRecovery(email: string): Promise<vo
 
 export async function sendSupabaseVerification(user: User): Promise<void> {
   if (user.email_confirmed_at) return;
-  const { error } = await getSupabaseBrowser().auth.resend({ type: 'signup', email: user.email || '' });
+  await resendSupabaseVerification(user.email || '');
+}
+
+export async function resendSupabaseVerification(email: string): Promise<void> {
+  const { error } = await getSupabaseBrowser().auth.resend({ type: 'signup', email: email.trim().toLowerCase() });
   if (error) throw new Error(error.message);
 }
 

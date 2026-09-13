@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { requestSupabasePasswordRecovery, sendSupabaseVerification, signInWithSupabase, signOutSupabase } from '@/lib/supabase/auth';
+import { requestSupabasePasswordRecovery, resendSupabaseVerification, sendSupabaseVerification, signInWithSupabase, signOutSupabase } from '@/lib/supabase/auth';
 
 type View = 'home' | 'login' | 'register';
 
@@ -133,10 +133,8 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         const response = await fetch('/api/tenants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: company, ownerName: name, email, password, website }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudo crear la empresa.');
-        const createdUser = await signInWithSupabase(email.trim(), password);
-        await sendSupabaseVerification(createdUser);
-        await signOutSupabase();
-        setMessage('Cuenta creada. Revisa tu correo y confirma la dirección antes de entrar al espacio de trabajo.');
+        await resendSupabaseVerification(email);
+        setMessage('Cuenta creada. Te enviamos un correo de confirmación. Revisa también Spam o Promociones.');
       } else {
         const attemptResponse = await fetch('/api/auth/login-attempt', {
           method: 'POST',
@@ -158,7 +156,17 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         window.location.href = '/onboarding';
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Ocurrió un error.');
+      const errorMessage = error instanceof Error ? error.message : 'Ocurrió un error.';
+      if (!isRegister && errorMessage.toLowerCase().includes('email not confirmed')) {
+        try {
+          await resendSupabaseVerification(email);
+          setMessage('Tu correo todavía no está confirmado. Te reenviamos el enlace; revisa Spam o Promociones.');
+        } catch (resendError) {
+          setMessage(resendError instanceof Error ? resendError.message : errorMessage);
+        }
+      } else {
+        setMessage(errorMessage);
+      }
     } finally { setLoading(false); }
   }
 
