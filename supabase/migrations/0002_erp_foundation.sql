@@ -452,3 +452,53 @@ alter table public.products add column if not exists created_by uuid references 
 alter table public.products add column if not exists updated_by uuid references auth.users(id) on delete set null;
 alter table public.categories add column if not exists created_by uuid references auth.users(id) on delete set null;
 alter table public.categories add column if not exists updated_by uuid references auth.users(id) on delete set null;
+
+
+create or replace function public.adjust_inventory(
+  target_tenant_id uuid,
+  target_product_id uuid,
+  target_warehouse_id uuid,
+  target_movement_type text,
+  target_quantity numeric,
+  target_reason text,
+  target_user_id uuid
+)
+returns table(previous_quantity numeric, new_quantity numeric, delta numeric, movement_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_quantity numeric;
+  calculated_delta numeric;
+  resulting_quantity numeric;
+  new_movement_id uuid;
+begin
+  if target_quantity <= 0 then raise exception 'INVALID_QUANTITY'; end if;
+  if target_movement_type not in ('receive', 'remove', 'set') then raise exception 'INVALID_MOVEMENT_TYPE'; end if;
+  if not exists (select 1 from public.products where id = target_product_id and tenant_id = target_tenant_id and active) then raise exception 'PRODUCT_NOT_FOUND'; end if;
+  if not exists (select 1 from public.warehouses where id = target_warehouse_id and tenant_id = target_tenant_id and active) then raise exception 'WAREHOUSE_NOT_FOUND'; end if;
+
+  select quantity into current_quantity
+  from public.inventory_stocks
+  where tenant_id = target_tenant_id and product_id = target_product_id and warehouse_id = target_warehouse_id
+  for update;
+  current_quantity := coalesce(current_quantity, 0);
+  resulting_quantity := case when target_movement_type = 'receive' then current_quantity + target_quantity when target_movement_type = 'remove' then current_quantity - target_quantity else target_quantity end;
+  if resulting_quantity < 0 then raise exception 'INSUFFICIENT_STOCK'; end if;
+  calculated_delta := resulting_quantity - current_quantity;
+
+  insert into public.inventory_stocks (tenant_id, product_id, warehouse_id, quantity, updated_at)
+  values (target_tenant_id, target_product_id, target_warehouse_id, resulting_quantity, now())
+  on conflict (tenant_id, product_id, warehouse_id) do update set quantity = excluded.quantity, updated_at = now();
+
+  insert into public.inventory_movements (tenant_id, product_id, warehouse_id, movement_type, quantity, reference_type, performed_by, metadata)
+  values (target_tenant_id, target_product_id, target_warehouse_id, 'adjustment', calculated_delta, 'manual', target_user_id, jsonb_build_object('reason', target_reason, 'operation', target_movement_type))
+  returning id into new_movement_id;
+
+  return query select current_quantity, resulting_quantity, calculated_delta, new_movement_id;
+end;
+$$;
+
+revoke all on function public.adjust_inventory(uuid, uuid, uuid, text, numeric, text, uuid) from public, anon, authenticated;
+grant execute on function public.adjust_inventory(uuid, uuid, uuid, text, numeric, text, uuid) to service_role;

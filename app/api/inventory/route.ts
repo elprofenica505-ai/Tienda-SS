@@ -1,82 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from '@/lib/pagination';
-import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { getSupabaseServer } from '@/lib/supabase/server';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
-
-const inventoryRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
-const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
-
-function text(value: unknown, max = 180) {
-  return typeof value === 'string' ? value.trim().slice(0, max) : '';
-}
-
-function positiveNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
-}
+function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
+function positiveNumber(value: unknown) { return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0; }
+type InventoryProduct = { id: string; name: string; sku: string; itemType: string; stock: number; minStock: number; active: boolean };
+function responseFor(error: unknown) { const message = error instanceof Error ? error.message : ''; if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 }); if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o está inactivo.' }, { status: 404 }); if (message.includes('INSUFFICIENT_STOCK')) return NextResponse.json({ error: 'El movimiento dejaría el inventario en negativo.' }, { status: 409 }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'inventory', 'view');
-    const db = getAdminDb();
-    const tenant = db.collection('tenants').doc(context.tenantId);
+    const supabase = getSupabaseServer();
     const params = new URL(request.url).searchParams;
     const productsRequested = params.get('products') === 'true';
     const pageSize = parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE);
     const rawCursor = parseCursor(params.get('cursor'));
-    let cursor: { name: string; id: string } | undefined;
-    if (rawCursor) {
-      try {
-        const parsed = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: unknown; id?: unknown };
-        if (typeof parsed.name === 'string' && typeof parsed.id === 'string') cursor = { name: parsed.name, id: parsed.id };
-      } catch {
-        return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 });
-      }
-    }
-
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 7);
-    const movementsQuery = tenant.collection('inventoryMovements')
-      .where('createdAt', '>=', cutoff)
-      .orderBy('createdAt', 'desc')
-      .limit(DEFAULT_PAGE_SIZE);
-    const productsQuery = productsRequested
-      ? (() => {
-          let query = tenant.collection('products').where('active', '==', true).orderBy('name').orderBy('__name__').limit(pageSize + 1);
-          if (cursor) query = query.startAfter(cursor.name, cursor.id);
-          return query;
-        })()
-      : null;
-    const [movements, products] = await Promise.all([movementsQuery.get(), productsQuery?.get()]);
-    const visibleMovements = TENANT_WIDE_ROLES.has(context.role)
-      ? movements.docs
-      : movements.docs.filter((item) => {
-          const branchId = item.data()?.branchId;
-          return typeof branchId === 'string' && context.branchIds.includes(branchId);
-        });
-    const productDocs = products?.docs || [];
-    const pageDocs = productDocs.slice(0, pageSize);
-    const productRows: Array<Record<string, unknown> & { id: string }> = pageDocs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
-    const lowStock = productRows.filter((item) => item.itemType !== 'service' && Number(item.stock || 0) <= Number(item.minStock || 0));
-    const totalUnits = productRows.reduce((total, item) => total + (item.itemType === 'service' ? 0 : Number(item.stock || 0)), 0);
-    const next = productDocs.length > pageSize ? pageDocs[pageDocs.length - 1] : undefined;
-    const nextCursor = next ? Buffer.from(JSON.stringify({ name: String(next.data().name || ''), id: next.id }), 'utf8').toString('base64url') : undefined;
-    return NextResponse.json({
-      ok: true,
-      tenantId: context.tenantId,
-      productsLoaded: productsRequested,
-      summary: { products: productsRequested ? productRows.length : null, totalUnits: productsRequested ? totalUnits : null, lowStock: productsRequested ? lowStock.length : null },
-      products: productRows,
-      lowStock,
-      movements: visibleMovements.map((item) => ({ id: item.id, ...item.data() })),
-      productsPage: paginatedResponse(productRows, pageSize, nextCursor)
-    }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    let productQuery = supabase.from('products').select('*').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
+    if (rawCursor) { try { const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string }; if (cursor.name && cursor.id) productQuery = productQuery.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`); } catch { return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 }); } }
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [movementsResult, productsResult] = await Promise.all([
+      supabase.from('inventory_movements').select('*').eq('tenant_id', context.tenantId).gte('created_at', cutoff).order('created_at', { ascending: false }).limit(DEFAULT_PAGE_SIZE),
+      productsRequested ? productQuery : Promise.resolve({ data: [], error: null } as any),
+    ]);
+    if (movementsResult.error) throw new Error(movementsResult.error.message);
+    if (productsResult.error) throw new Error(productsResult.error.message);
+    const movements = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String(row.branch_id || '')));
+    const productPage = (productsResult.data || []).slice(0, pageSize);
+    const productIds = productPage.map((row: any) => row.id);
+    const stocks = productIds.length ? await supabase.from('inventory_stocks').select('product_id, quantity, reorder_point, warehouse_id').eq('tenant_id', context.tenantId).in('product_id', productIds) : { data: [], error: null };
+    if (stocks.error) throw new Error(stocks.error.message);
+    const stockByProduct = new Map<string, number>();
+    for (const stock of stocks.data || []) stockByProduct.set(stock.product_id, (stockByProduct.get(stock.product_id) || 0) + Number(stock.quantity || 0));
+    const products: InventoryProduct[] = productPage.map((row: any) => ({ id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, stock: stockByProduct.get(row.id) || 0, minStock: Number(row.min_stock || 0), active: row.active }));
+    const lowStock = products.filter((item) => item.itemType !== 'service' && item.stock <= item.minStock);
+    const next = (productsResult.data || []).length > pageSize ? productPage[productPage.length - 1] : null;
+    const nextCursor = next ? Buffer.from(JSON.stringify({ name: next.name, id: next.id }), 'utf8').toString('base64url') : undefined;
+    return NextResponse.json({ ok: true, tenantId: context.tenantId, productsLoaded: productsRequested, summary: { products: productsRequested ? products.length : null, totalUnits: productsRequested ? products.reduce((sum: number, item: InventoryProduct) => sum + (item.itemType === 'service' ? 0 : item.stock), 0) : null, lowStock: productsRequested ? lowStock.length : null }, products, lowStock, movements, productsPage: paginatedResponse(products, pageSize, nextCursor) }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) { return responseFor(error); }
 }
 
 export async function POST(request: NextRequest) {
@@ -84,47 +47,15 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'create');
     const body = await request.json();
     const productId = text(body.productId, 120);
-    const movementType = body.movementType === 'receive' || body.movementType === 'remove' || body.movementType === 'set'
-      ? body.movementType
-      : '';
+    const movementType = body.movementType === 'receive' || body.movementType === 'remove' || body.movementType === 'set' ? body.movementType : '';
     const reason = text(body.reason) || 'Ajuste manual';
     const quantity = positiveNumber(body.quantity);
-    if (!productId || !movementType || quantity <= 0) {
-      return NextResponse.json({ error: 'Producto, tipo y cantidad son obligatorios.' }, { status: 400 });
-    }
-
-    const db = getAdminDb();
-    const productRef = db.collection('tenants').doc(context.tenantId).collection('products').doc(productId);
-    const movementRef = db.collection('tenants').doc(context.tenantId).collection('inventoryMovements').doc();
-    const result = await db.runTransaction(async (transaction) => {
-      const product = await transaction.get(productRef);
-      if (!product.exists || product.data()?.active === false) throw new Error('PRODUCT_NOT_FOUND');
-      const current = Math.max(0, Number(product.data()?.stock || 0));
-      const next = movementType === 'receive' ? current + quantity : movementType === 'remove' ? current - quantity : quantity;
-      if (next < 0) throw new Error('INSUFFICIENT_STOCK');
-      const delta = next - current;
-      transaction.update(productRef, { stock: next, updatedAt: new Date(), updatedBy: context.uid });
-      transaction.set(movementRef, {
-        productId,
-        type: movementType,
-        quantity: Math.abs(delta),
-        delta,
-        previousStock: current,
-        newStock: next,
-        reason,
-        createdBy: context.uid,
-        createdAt: new Date()
-      });
-      return { current, next, delta };
-    });
-
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.adjusted', entity: 'product', entityId: productId, before: { stock: result.current }, after: { stock: result.next, movementType, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory' }, result: 'success' });
-    return NextResponse.json({ ok: true, productId, ...result }, { status: 201 });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    if (message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 });
-    if (message === 'INSUFFICIENT_STOCK') return NextResponse.json({ error: 'El movimiento dejaría el inventario en negativo.' }, { status: 409 });
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    const warehouseId = text(body.warehouseId, 120);
+    if (!productId || !movementType || quantity <= 0 || !warehouseId) return NextResponse.json({ error: 'Producto, almacén, tipo y cantidad son obligatorios.' }, { status: 400 });
+    const result = await getSupabaseServer().rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: movementType, target_quantity: quantity, target_reason: reason, target_user_id: context.uid });
+    if (result.error) throw new Error(result.error.message);
+    const row = Array.isArray(result.data) ? result.data[0] : result.data;
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.adjusted', entity: 'product', entityId: productId, before: { stock: row?.previous_quantity }, after: { stock: row?.new_quantity, movementType, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory' }, result: 'success' });
+    return NextResponse.json({ ok: true, productId, current: row?.previous_quantity, next: row?.new_quantity, delta: row?.delta, movementId: row?.movement_id }, { status: 201 });
+  } catch (error: unknown) { return responseFor(error); }
 }
