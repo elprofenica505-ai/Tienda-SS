@@ -42,17 +42,17 @@ test('las transferencias soportan ciclo controlado y recepción parcial', () => 
 test('las compras reciben en el stock canónico del almacén autorizado', () => {
   assert.match(purchasesApi, /branchId/);
   assert.match(purchasesApi, /warehouseId/);
-  assert.match(purchasesApi, /assertBranchAccess/);
-  assert.match(purchasesApi, /inventoryStocks/);
-  assert.match(purchasesApi, /weightedAverageCost/);
-  assert.match(purchasesApi, /warehouse-main/);
-  assert.match(purchasesApi, /warehouseId === 'warehouse-main'/);
+  assert.match(purchasesApi, /receive_purchase/);
+  assert.match(purchasesApi, /target_warehouse_id/);
+  assert.match(purchasesApi, /writeImmutableAudit/);
+  assert.match(purchasesApi, /purchase_items/);
 });
 
 test('el inventario aplica ownership server-side por sucursal', () => {
+  assert.match(inventoryApi, /requireTenantPermission/);
   assert.match(inventoryApi, /visibleWarehouses\.some/);
-  assert.match(inventoryApi, /El almacén no está autorizado para este usuario/);
-  assert.match(inventorySummaryApi, /visibleMovements/);
+  assert.match(inventoryApi, /assertBranchAccess/);
+  assert.match(inventorySummaryApi, /inventory_movements/);
   assert.match(inventorySummaryApi, /context\.branchIds\.includes/);
 });
 

@@ -34,7 +34,7 @@ test('todas las rutas tenant críticas aplican autorización server-side', async
   for (const path of protectedRoutes) {
     await t.test(path, async () => {
       const code = await source(path);
-      assert.match(code, /requireTenant(?:Member|Permission)/, 'debe usar una guarda de tenant');
+      assert.match(code, /require(?:Supabase)?Tenant(?:Member|Permission)/, 'debe usar una guarda de tenant');
       assert.match(code, /tenantErrorResponse/, 'debe mapear errores de autenticación y autorización');
     });
   }

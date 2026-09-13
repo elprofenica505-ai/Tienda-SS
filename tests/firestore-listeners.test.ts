@@ -28,10 +28,11 @@ test('onSnapshot queda encapsulado en el hook realtime', () => {
   }
 });
 
-test('TenantProvider conserva cleanup para el listener de autenticación', () => {
+test('TenantProvider conserva cleanup para el listener de Supabase Auth', () => {
   const provider = read('components/tenant/TenantProvider.tsx');
-  assert.match(provider, /onIdTokenChanged/);
-  assert.match(provider, /useEffect\(\(\) => onIdTokenChanged/);
+  assert.match(provider, /onAuthStateChange/);
+  assert.match(provider, /listener\.subscription\.unsubscribe/);
+  assert.match(provider, /getSupabaseBrowser/);
 });
 
 test('la regla de costo queda documentada', () => {

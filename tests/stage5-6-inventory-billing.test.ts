@@ -11,17 +11,18 @@ const billingPage = readFileSync('app/workspace/billing/page.tsx', 'utf8');
 const rules = readFileSync('firestore.rules', 'utf8');
 
 test('compras aumentan stock y dejan movimiento auditado', () => {
-  assert.match(purchases, /purchases/);
-  assert.match(purchases, /type: 'purchase'/);
-  assert.match(purchases, /previousStock/);
-  assert.match(purchases, /newStock/);
+  assert.match(purchases, /receive_purchase/);
+  assert.match(purchases, /purchase_items/);
+  assert.match(purchases, /target_warehouse_id/);
   assert.match(purchases, /writeImmutableAudit/);
   assert.match(purchases, /evidenceRef/);
 });
 
 test('inventario conserva paginación y ajustes auditables', () => {
   assert.match(inventory, /parsePageSize/);
-  assert.match(inventory, /startAfter/);
+  assert.match(inventory, /rawCursor/);
+  assert.match(inventory, /nextCursor/);
+  assert.match(inventory, /adjust_inventory/);
   assert.match(inventory, /inventory\.adjusted/);
 });
 

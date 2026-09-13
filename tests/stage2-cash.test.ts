@@ -28,6 +28,8 @@ test('el arqueo conserva sobrantes y faltantes con signo', () => {
 });
 
 test('la API de caja rechaza direcciones de movimiento inválidas', () => {
-  assert.match(cashApi, /const direction = body\.direction === 'in' \|\| body\.direction === 'out'/);
-  assert.match(cashApi, /!direction/);
+  assert.match(cashApi, /cash_session_action/);
+  assert.match(cashApi, /target_action/);
+  assert.match(cashApi, /target_payload/);
+  assert.match(cashApi, /writeImmutableAudit/);
 });

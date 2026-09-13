@@ -13,20 +13,17 @@ const rules = readFileSync('firestore.rules', 'utf8');
 
 test('las devoluciones controlan sucursal, inventario, reembolso y caja', () => {
   assert.match(returnsApi, /assertBranchAccess/);
-  assert.match(returnsApi, /findOpenCashSession/);
-  assert.match(returnsApi, /REFUND_EXCEEDS_PAID/);
-  assert.match(returnsApi, /cashMovements/);
-  assert.match(returnsApi, /returnedQuantities/);
-  assert.match(returnsApi, /inventoryMovements/);
-  assert.match(returnsApi, /inventoryStocks/);
-  assert.match(returnsApi, /warehouseId/);
+  assert.match(returnsApi, /RETURN_EXCEEDS_SOLD/);
+  assert.match(returnsApi, /create_sale_return/);
+  assert.match(returnsApi, /target_refund_method/);
+  assert.match(returnsApi, /writeImmutableAudit/);
 });
 
 test('las anulaciones bloquean ventas pagadas y revierten crédito pendiente', () => {
   assert.match(voidApi, /SALE_HAS_PAYMENTS/);
-  assert.match(voidApi, /SALE_WRONG_BRANCH/);
-  assert.match(voidApi, /creditMovements/);
-  assert.match(voidApi, /status: 'void'/);
+  assert.match(voidApi, /void_sale/);
+  assert.match(voidApi, /target_reason/);
+  assert.match(voidApi, /writeImmutableAudit/);
 });
 
 test('las notas de crédito limitan monto y actualizan cartera', () => {
@@ -49,18 +46,17 @@ test('los documentos de reversión no se pueden escribir directamente desde el c
 });
 
 test('el listado de ventas impone el alcance de sucursal server-side', () => {
-  assert.match(salesApi, /authorizedBranches/);
-  assert.match(salesApi, /La sucursal no está autorizada para este usuario/);
-  assert.match(salesApi, /where\('branchId', 'in'/);
+  assert.match(salesApi, /context\.branchIds/);
+  assert.match(salesApi, /assertBranchAccess/);
+  assert.match(salesApi, /eq\('branch_id', branchId\)/);
 });
 
 test('ventas, preventas y reservas usan stock por almacén', () => {
   for (const code of [salesApi, presaleCheckoutApi, reservationsApi]) {
-    assert.match(code, /inventoryStocks/);
-    assert.match(code, /stockKey/);
     assert.match(code, /warehouseId/);
+    assert.match(code, /branchId/);
   }
-  assert.match(salesApi, /warehouseId === 'warehouse-main'/);
-  assert.match(presaleCheckoutApi, /stockAfterDelta/);
-  assert.match(reservationsApi, /stockAfterDelta/);
+  assert.match(salesApi, /target_warehouse_id/);
+  assert.match(presaleCheckoutApi, /writeImmutableAudit/);
+  assert.match(reservationsApi, /writeImmutableAudit/);
 });

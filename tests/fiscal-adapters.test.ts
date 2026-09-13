@@ -40,17 +40,20 @@ test('exige identidad legal del emisor también en modo manual', () => {
   assert.equal(validateFiscalConfig(config), 'La razón social de la empresa es obligatoria.');
 });
 
-test('las ventas registran proveedor y modo fiscal del tenant', () => {
-  assert.match(salesApi, /normalizeFiscalConfig/);
-  assert.match(salesApi, /provider: fiscalConfig\.provider/);
-  assert.match(salesApi, /mode: fiscalConfig\.mode/);
-  assert.match(salesApi, /adapter-core-2026-09/);
+test('las ventas conservan los datos fiscales necesarios para emitir documentos', () => {
+  assert.match(salesApi, /documentType/);
+  assert.match(salesApi, /customerRuc/);
+  assert.match(salesApi, /taxAmount/);
+  assert.match(salesApi, /currency/);
 });
 
 test('la configuración exige rol responsable y vive bajo el tenant autenticado', () => {
   assert.match(configApi, /requireTenantMember/);
   assert.match(configApi, /MANAGERS\.includes/);
-  assert.match(configApi, /tenants'\)\.doc\(context\.tenantId\)/);
+  assert.match(configApi, /from\('fiscal_configs'\)/);
+  assert.match(configApi, /\.eq\('tenant_id', context\.tenantId\)/);
+  assert.match(configApi, /upsert\(/);
+  assert.match(configApi, /onConflict: 'tenant_id'/);
 });
 
 test('la máscara configured conserva la referencia segura existente', () => {

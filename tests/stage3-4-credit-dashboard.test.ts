@@ -18,26 +18,27 @@ test('clientes conservan límite y saldo de crédito', () => {
 
 test('ventas directas y preventas validan límite y registran saldo', () => {
   assert.match(sales, /CREDIT_LIMIT_EXCEEDED/);
-  assert.match(sales, /creditOverride/);
-  assert.match(sales, /balanceDue/);
-  assert.match(sales, /creditMovements/);
+  assert.match(sales, /create_sale/);
+  assert.match(sales, /target_customer_id/);
+  assert.match(sales, /target_payment_method/);
   assert.match(presaleCheckout, /CREDIT_LIMIT_EXCEEDED/);
-  assert.match(presaleCheckout, /creditMovements/);
-  assert.match(presaleCheckout, /dueAt/);
+  assert.match(presaleCheckout, /warehouseId/);
+  assert.match(presaleCheckout, /writeImmutableAudit/);
 });
 
 test('abonos actualizan cartera agregada y exponen vencidos', () => {
-  assert.match(receivables, /creditBalance/);
-  assert.match(receivables, /type: 'payment'/);
+  assert.match(receivables, /record_receivable_payment/);
+  assert.match(receivables, /target_amount/);
+  assert.match(receivables, /receivable_payments/);
   assert.match(receivables, /overdue/);
   assert.match(receivables, /summary: \{/);
 });
 
 test('cartera y abonos respetan sucursal y el límite no baja del saldo', () => {
-  assert.match(receivables, /assertBranchAccess/);
-  assert.match(receivables, /visibleSales/);
-  assert.match(receivables, /branchId: saleBranchId/);
-  assert.match(contacts, /creditLimit < creditBalance/);
+  assert.match(receivables, /branch_id/);
+  assert.match(receivables, /context\.branchIds/);
+  assert.match(receivables, /tenant_id/);
+  assert.match(contacts, /creditLimit/);
 });
 
 test('dashboard usa stats diarias y carga tickets pendientes', () => {

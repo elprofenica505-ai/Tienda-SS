@@ -24,8 +24,10 @@ test('las invitaciones tienen pantalla de aceptación y el owner no solicita con
 });
 
 test('la creación de empresa crea tenant y owner sin datos operativos', () => {
-  assert.match(tenantRoute, /collection\('tenants'\)\.doc\(uid\)/);
-  assert.match(tenantRoute, /role: 'owner'/);
+  assert.match(tenantRoute, /auth\.admin\.createUser/);
+  assert.match(tenantRoute, /create_initial_tenant/);
+  assert.match(tenantRoute, /target_auth_user_id/);
+  assert.match(tenantRoute, /authProvider: 'supabase'/);
   assert.doesNotMatch(tenantRoute, /collection\(['"](products|sales|customers)['"]\)/);
 });
 
