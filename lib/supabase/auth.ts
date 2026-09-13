@@ -28,7 +28,9 @@ export async function sendSupabaseVerification(user: User): Promise<void> {
 }
 
 export async function resendSupabaseVerification(email: string): Promise<void> {
-  const { error } = await getSupabaseBrowser().auth.resend({ type: 'signup', email: email.trim().toLowerCase() });
+  const { error } = await getSupabaseBrowser().auth.resend(
+    { type: 'signup', email: email.trim().toLowerCase(), options: { emailRedirectTo: `${window.location.origin}/onboarding` } },
+  );
   if (error) throw new Error(error.message);
 }
 
