@@ -1,64 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
+import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from '@/lib/pagination';
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { redactSensitiveFields } from '@/lib/data-scope';
 
 export const runtime = 'nodejs';
-
 const productRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
 const categoryRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
-const MAX_PAGE_SIZE = 25;
 const MAX_CATEGORY_PAGE_SIZE = 100;
-
-function cleanText(value: unknown, max = 120) {
-  return typeof value === 'string' ? value.trim().slice(0, max) : '';
-}
-
-function cleanNumber(value: unknown, fallback = 0) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
+function cleanText(value: unknown, max = 120) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
+function cleanNumber(value: unknown, fallback = 0) { return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
+function mapCategory(row: Record<string, any>) { return { id: row.id, name: row.name, color: row.color || '#c7f57b', active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapProduct(row: Record<string, any>, stock = 0) { return { id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, categoryId: row.category_id || '', price: Number(row.price || 0), cost: Number(row.cost || 0), stock, minStock: Number(row.min_stock || 0), unit: row.unit, active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function responseFor(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'catalog', 'view');
-    const db = getAdminDb();
-    const tenant = db.collection('tenants').doc(context.tenantId);
+    const supabase = getSupabaseServer();
     const params = new URL(request.url).searchParams;
     const includeArchived = params.get('includeArchived') === 'true';
-    const requestedPageSize = Number(params.get('pageSize') || MAX_PAGE_SIZE);
-    const pageSize = Number.isFinite(requestedPageSize)
-      ? Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(requestedPageSize)))
-      : MAX_PAGE_SIZE;
-    const cursor = params.get('cursor')?.trim() || '';
-    let productQuery = (includeArchived
-      ? tenant.collection('products')
-      : tenant.collection('products').where('active', '==', true))
-      .orderBy('name').limit(pageSize + 1);
-    if (cursor) {
-      const cursorDoc = await tenant.collection('products').doc(cursor).get();
-      if (cursorDoc.exists) productQuery = productQuery.startAfter(cursorDoc);
+    const pageSize = Math.min(25, parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE));
+    const rawCursor = parseCursor(params.get('cursor'));
+    let query = supabase.from('products').select('*').eq('tenant_id', context.tenantId).order('name').order('id').limit(pageSize + 1);
+    if (!includeArchived) query = query.eq('active', true);
+    if (rawCursor) {
+      try {
+        const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string };
+        if (cursor.name && cursor.id) query = query.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`);
+      } catch { return NextResponse.json({ error: 'Cursor de catálogo inválido.' }, { status: 400 }); }
     }
-    const [categorySnapshot, productSnapshot] = await Promise.all([
-      tenant.collection('categories').orderBy('name').limit(MAX_CATEGORY_PAGE_SIZE).get(),
-      productQuery.get()
+    const [categoriesResult, productsResult] = await Promise.all([
+      supabase.from('categories').select('*').eq('tenant_id', context.tenantId).order('name').limit(MAX_CATEGORY_PAGE_SIZE),
+      query,
     ]);
-    const categories = includeArchived ? categorySnapshot : { docs: categorySnapshot.docs.filter((item) => item.data().active !== false) };
-    const visibleProductDocs = productSnapshot.docs;
-    const hasMore = visibleProductDocs.length > pageSize;
-    const products = visibleProductDocs.slice(0, pageSize);
-
-    return NextResponse.json({
-      ok: true,
-      tenantId: context.tenantId,
-      categories: categories.docs.map((item) => ({ id: item.id, ...item.data() })),
-      products: products.map((item) => ({ id: item.id, ...redactSensitiveFields(item.data() as Record<string, unknown>, context) })),
-      pagination: { pageSize, hasMore, nextCursor: hasMore ? products[products.length - 1]?.id || null : null }
-    }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    if (categoriesResult.error) throw new Error(categoriesResult.error.message);
+    if (productsResult.error) throw new Error(productsResult.error.message);
+    const products = productsResult.data || [];
+    const hasMore = products.length > pageSize;
+    const page = products.slice(0, pageSize);
+    const ids = page.map((item) => item.id);
+    const stocks = ids.length ? await supabase.from('inventory_stocks').select('product_id, quantity').eq('tenant_id', context.tenantId).in('product_id', ids) : { data: [], error: null };
+    if (stocks.error) throw new Error(stocks.error.message);
+    const stockByProduct = new Map<string, number>();
+    for (const item of stocks.data || []) stockByProduct.set(item.product_id, (stockByProduct.get(item.product_id) || 0) + Number(item.quantity || 0));
+    const mapped = page.map((item) => mapProduct(item, stockByProduct.get(item.id) || 0));
+    const next = hasMore ? page[page.length - 1] : null;
+    const nextCursor = next ? Buffer.from(JSON.stringify({ name: next.name, id: next.id }), 'utf8').toString('base64url') : undefined;
+    return NextResponse.json({ ok: true, tenantId: context.tenantId, categories: (categoriesResult.data || []).filter((item) => includeArchived || item.active !== false).map(mapCategory), products: mapped.map((item) => redactSensitiveFields(item, context)), pagination: { pageSize, hasMore, nextCursor: nextCursor || null }, productsPage: paginatedResponse(mapped, pageSize, nextCursor) }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) { return responseFor(error); }
 }
 
 export async function POST(request: NextRequest) {
@@ -66,53 +57,35 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const type = body.type === 'category' ? 'category' : body.type === 'product' ? 'product' : '';
     const context = await requireTenantPermission(request, 'catalog', 'create');
-    const db = getAdminDb();
-    const tenantRef = db.collection('tenants').doc(context.tenantId);
-    const now = new Date();
-
+    const supabase = getSupabaseServer();
     if (type === 'category') {
+      if (!categoryRoles.includes(context.role)) return NextResponse.json({ error: 'No tienes permiso para crear categorías.' }, { status: 403 });
       const name = cleanText(body.name);
       if (name.length < 2) return NextResponse.json({ error: 'El nombre de la categoría es obligatorio.' }, { status: 400 });
-      const duplicate = await db.collection('tenants').doc(context.tenantId).collection('categories').where('name', '==', name).limit(1).get();
-      if (!duplicate.empty) return NextResponse.json({ error: 'Ya existe una categoría con ese nombre.' }, { status: 409 });
-      const ref = db.collection('tenants').doc(context.tenantId).collection('categories').doc();
-      await ref.set({ name, color: cleanText(body.color, 20) || '#c7f57b', active: true, createdBy: context.uid, createdAt: now, updatedAt: now });
-      return NextResponse.json({ ok: true, item: { id: ref.id, name, color: cleanText(body.color, 20) || '#c7f57b', active: true } }, { status: 201 });
+      const duplicate = await supabase.from('categories').select('id').eq('tenant_id', context.tenantId).ilike('name', name).maybeSingle();
+      if (duplicate.error) throw new Error(duplicate.error.message);
+      if (duplicate.data) return NextResponse.json({ error: 'Ya existe una categoría con ese nombre.' }, { status: 409 });
+      const result = await supabase.from('categories').insert({ tenant_id: context.tenantId, name, color: cleanText(body.color, 20) || '#c7f57b', active: true, created_by: context.uid }).select('*').single();
+      if (result.error) throw new Error(result.error.message);
+      return NextResponse.json({ ok: true, item: mapCategory(result.data) }, { status: 201 });
     }
-
+    if (!productRoles.includes(context.role)) return NextResponse.json({ error: 'No tienes permiso para crear productos.' }, { status: 403 });
     const name = cleanText(body.name);
-    const tenantSnapshot = await tenantRef.get();
-    const activeProducts = await tenantRef.collection('products').where('active', '==', true).count().get();
-    const plan = tenantSnapshot.data()?.plan;
-    try { assertPlanCapacity(plan, 'products', activeProducts.data().count, 1); } catch (error) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
     const sku = cleanText(body.sku, 50).toUpperCase();
-    const categoryId = cleanText(body.categoryId, 80);
     const itemType = body.itemType === 'service' ? 'service' : 'physical';
     if (name.length < 2) return NextResponse.json({ error: 'El nombre del producto es obligatorio.' }, { status: 400 });
     if (itemType === 'physical' && !sku) return NextResponse.json({ error: 'Los productos físicos necesitan SKU.' }, { status: 400 });
-    if (sku) {
-      const duplicate = await db.collection('tenants').doc(context.tenantId).collection('products').where('sku', '==', sku).limit(1).get();
-      if (!duplicate.empty) return NextResponse.json({ error: 'Ya existe un producto con ese SKU.' }, { status: 409 });
-    }
-
-    const ref = db.collection('tenants').doc(context.tenantId).collection('products').doc();
-    const product = {
-      name, sku, itemType, categoryId,
-      price: Math.max(0, cleanNumber(body.price)),
-      cost: context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe'
-        ? Math.max(0, cleanNumber(body.cost))
-        : 0,
-      stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.stock)),
-      minStock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)),
-      unit: cleanText(body.unit, 20) || 'unidad',
-      active: true, createdBy: context.uid, createdAt: now, updatedAt: now
-    };
-    await ref.set(product);
-    return NextResponse.json({ ok: true, item: { id: ref.id, ...redactSensitiveFields(product, context) } }, { status: 201 });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    if (sku) { const duplicate = await supabase.from('products').select('id').eq('tenant_id', context.tenantId).eq('sku', sku).maybeSingle(); if (duplicate.error) throw new Error(duplicate.error.message); if (duplicate.data) return NextResponse.json({ error: 'Ya existe un producto con ese SKU.' }, { status: 409 }); }
+    const tenant = await supabase.from('tenants').select('plan').eq('id', context.tenantId).single();
+    if (tenant.error) throw new Error(tenant.error.message);
+    const active = await supabase.from('products').select('id', { count: 'exact', head: true }).eq('tenant_id', context.tenantId).eq('active', true);
+    if (active.error) throw new Error(active.error.message);
+    try { assertPlanCapacity(tenant.data.plan, 'products', active.count || 0, 1); } catch (error) { return responseFor(error); }
+    const categoryId = cleanText(body.categoryId, 80) || null;
+    const result = await supabase.from('products').insert({ tenant_id: context.tenantId, category_id: categoryId, sku: sku || `SERV-${Date.now()}`, name, item_type: itemType, price: Math.max(0, cleanNumber(body.price)), cost: productRoles.slice(0, 4).includes(context.role) ? Math.max(0, cleanNumber(body.cost)) : 0, min_stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)), unit: cleanText(body.unit, 20) || 'unidad', active: true, created_by: context.uid }).select('*').single();
+    if (result.error) throw new Error(result.error.message);
+    return NextResponse.json({ ok: true, item: redactSensitiveFields(mapProduct(result.data, 0), context) }, { status: 201 });
+  } catch (error: unknown) { return responseFor(error); }
 }
 
 export async function PATCH(request: NextRequest) {
@@ -122,31 +95,17 @@ export async function PATCH(request: NextRequest) {
     const context = await requireTenantPermission(request, 'catalog', 'edit');
     const id = cleanText(body.id, 120);
     if (!type || !id) return NextResponse.json({ error: 'Tipo o identificador inválido.' }, { status: 400 });
-
-    const ref = getAdminDb().collection('tenants').doc(context.tenantId).collection(type === 'category' ? 'categories' : 'products').doc(id);
-    const current = await ref.get();
-    if (!current.exists) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
-
-    const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid };
+    const supabase = getSupabaseServer();
+    const table = type === 'category' ? 'categories' : 'products';
+    const current = await supabase.from(table).select('*').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    if (current.error) throw new Error(current.error.message);
+    if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
+    const changes: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: context.uid };
     if (typeof body.active === 'boolean') changes.active = body.active;
-    if (type === 'category' && typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name);
-    if (type === 'product') {
-      if (body.active === true && current.data()?.active === false) {
-        const tenantSnapshot = await getAdminDb().collection('tenants').doc(context.tenantId).get();
-        const activeProducts = await getAdminDb().collection('tenants').doc(context.tenantId).collection('products').where('active', '==', true).count().get();
-        const plan = tenantSnapshot.data()?.plan;
-        try { assertPlanCapacity(plan, 'products', activeProducts.data().count, 1); } catch (error) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
-      }
-      if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name);
-      if (typeof body.price === 'number') changes.price = Math.max(0, body.price);
-      if (typeof body.stock === 'number') changes.stock = Math.max(0, body.stock);
-      if (typeof body.categoryId === 'string') changes.categoryId = cleanText(body.categoryId, 80);
-    }
-
-    await ref.update(changes);
-    return NextResponse.json({ ok: true, id, changes });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    if (type === 'category') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.color === 'string') changes.color = cleanText(body.color, 20); }
+    if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
+    const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('*').single();
+    if (updated.error) throw new Error(updated.error.message);
+    return NextResponse.json({ ok: true, id, changes, item: type === 'product' ? mapProduct(updated.data, 0) : mapCategory(updated.data) });
+  } catch (error: unknown) { return responseFor(error); }
 }

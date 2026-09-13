@@ -443,3 +443,12 @@ grant select, insert, update on table public.tenant_settings to authenticated;
 create policy tenant_settings_select_member on public.tenant_settings for select to authenticated using (public.has_tenant_access(tenant_id));
 create policy tenant_settings_write_admin on public.tenant_settings for insert to authenticated with check (public.has_tenant_admin_access(tenant_id));
 create policy tenant_settings_update_admin on public.tenant_settings for update to authenticated using (public.has_tenant_admin_access(tenant_id)) with check (public.has_tenant_admin_access(tenant_id));
+
+
+alter table public.categories add column if not exists color text not null default '#c7f57b';
+alter table public.products add column if not exists item_type text not null default 'physical' check (item_type in ('physical', 'service'));
+alter table public.products add column if not exists min_stock numeric(14,4) not null default 5 check (min_stock >= 0);
+alter table public.products add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.products add column if not exists updated_by uuid references auth.users(id) on delete set null;
+alter table public.categories add column if not exists created_by uuid references auth.users(id) on delete set null;
+alter table public.categories add column if not exists updated_by uuid references auth.users(id) on delete set null;
