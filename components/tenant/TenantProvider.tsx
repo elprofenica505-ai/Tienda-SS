@@ -58,6 +58,7 @@ const TenantContext = createContext<TenantContextValue | null>(null);
 const STORAGE_KEY = 'ConexiaX.activeTenantId';
 const BRANCH_STORAGE_PREFIX = 'ConexiaX.activeBranchId:';
 const ADMIN_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
+let contextCache: { userId: string; expiresAt: number; tenant: Tenant; member: TenantMember; organization: TenantOrganization; branchId: string | null } | null = null;
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<TenantAuthUser | null>(null);
@@ -78,7 +79,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     const sessionResult = await getSupabaseBrowser().auth.getSession();
     const session = sessionResult.data.session;
     if (!session) {
+      contextCache = null;
       setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); return;
+    }
+    if (contextCache && contextCache.userId === session.user.id && contextCache.expiresAt > Date.now()) {
+      setTenant(contextCache.tenant); setMember(contextCache.member); setOrganization(contextCache.organization); setActiveBranchIdState(contextCache.branchId); setLoading(false); return;
     }
     setLoading(true); setError('');
     try {
@@ -101,6 +106,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       const storedBranch = window.localStorage.getItem(`${BRANCH_STORAGE_PREFIX}${selected.tenant.id}`);
       const nextBranch = visibleBranches.find((branch) => branch.id === storedBranch)?.id || visibleBranches[0]?.id || null;
       setTenant(selected.tenant); setMember(selected.member); setOrganization(normalizedOrganization); setActiveBranchIdState(nextBranch);
+      contextCache = { userId: session.user.id, expiresAt: Date.now() + 30_000, tenant: selected.tenant, member: selected.member, organization: normalizedOrganization, branchId: nextBranch };
       if (nextBranch) window.localStorage.setItem(`${BRANCH_STORAGE_PREFIX}${selected.tenant.id}`, nextBranch);
     } catch (cause) {
       setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null);
@@ -114,7 +120,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       const user = session?.user || null;
       setAuthUser(adaptAuthUser(user));
       if (user) void refresh();
-      else { setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); }
+      else { contextCache = null; setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); }
     });
     return () => listener.subscription.unsubscribe();
   }, [refresh]);

@@ -31,17 +31,30 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
     const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
-    const warehouseId = text(body.warehouseId, 128);
+    let warehouseId = text(body.warehouseId, 128);
     const customerId = text(body.customerId, 128) || null;
     const rawItems = Array.isArray(body.items) ? body.items : [];
-    if (!branchId || !warehouseId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, almacén, método de pago y productos son obligatorios.' }, { status: 400 });
+    if (!branchId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, método de pago y productos son obligatorios.' }, { status: 400 });
     assertBranchAccess(context, branchId);
+    const supabase = getSupabaseServer();
+    if (!warehouseId) {
+      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
+      if (warehouse.error) throw new Error(warehouse.error.message);
+      warehouseId = warehouse.data?.id || '';
+    }
+    if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente.' }, { status: 400 });
     const items = rawItems.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: typeof item.quantity === 'number' && Number.isInteger(item.quantity) ? item.quantity : 0, unitPrice: money(item.unitPrice) })).filter((item: { productId: string; quantity: number }) => item.productId && item.quantity > 0);
     if (!items.length || items.length > 50) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 productos.' }, { status: 400 });
     const taxAmount = money(body.taxAmount ?? body.tax);
     const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160) };
-    const result = await getSupabaseServer().rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: paymentMethod === 'credit' ? null : (text(body.cashSessionId, 128) || null), target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
+    let cashSessionId = paymentMethod === 'credit' ? null : text(body.cashSessionId, 128);
+    if (paymentMethod !== 'credit' && !cashSessionId) {
+      const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
+      if (session.error) throw new Error(session.error.message);
+      cashSessionId = session.data?.id || null;
+    }
+    const result = await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
