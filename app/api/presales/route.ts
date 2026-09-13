@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
 
@@ -49,13 +50,14 @@ export async function POST(request: NextRequest) {
     const unique = new Map<string, number>();
     for (const item of rawItems) { const productId = text(item?.productId, 120); const quantity = Number.isInteger(item?.quantity) ? item.quantity : 0; if (productId && quantity > 0) unique.set(productId, (unique.get(productId) || 0) + quantity); }
     if (!unique.size) return NextResponse.json({ error: 'Las cantidades de la preventa no son válidas.' }, { status: 400 });
-    const db = getAdminDb(); const tenant = db.collection('tenants').doc(context.tenantId); const productRefs = Array.from(unique.keys()).map((id) => tenant.collection('products').doc(id));
+    const db = getAdminDb(); const tenant = db.collection('tenants').doc(context.tenantId);
+    const productIds = Array.from(unique.keys());
+    const supabaseProducts = await getSupabaseServer().from('products').select('id,name,sku,price,active').eq('tenant_id', context.tenantId).in('id', productIds);
+    if (supabaseProducts.error) throw new Error(supabaseProducts.error.message);
+    const productById = new Map((supabaseProducts.data || []).map((product) => [String(product.id), product]));
+    if (productById.size !== productIds.length || productIds.some((id) => productById.get(id)?.active === false)) throw new Error('PRODUCT_NOT_FOUND');
     const presaleRef = tenant.collection('presales').doc(); const now = new Date();
-    const lines = await db.runTransaction(async (transaction) => {
-      const products = await transaction.getAll(...productRefs); const result: PreSaleLine[] = [];
-      products.forEach((snapshot, index) => { if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('PRODUCT_NOT_FOUND'); const data = snapshot.data() || {}; const quantity = unique.get(productRefs[index].id) || 0; const unitPrice = money(data.price); result.push({ productId: productRefs[index].id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity }); });
-      return result;
-    });
+    const lines: PreSaleLine[] = productIds.map((id) => { const data = productById.get(id)!; const quantity = unique.get(id) || 0; const unitPrice = money(Number(data.price)); return { productId: id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity }; });
     const total = lines.reduce((sum, line) => sum + line.total, 0);
     await presaleRef.create({ ticketCode: ticketCode(), items: lines, total, vendedorUid: context.uid, vendedorEmail: context.email || null, vendedorRole: context.role, status: action, evidenceRefs, createdAt: now, updatedAt: now });
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: presaleRef.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });

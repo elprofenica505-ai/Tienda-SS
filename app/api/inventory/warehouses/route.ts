@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
@@ -21,12 +22,24 @@ async function warehouseFor(tenant: FirebaseFirestore.DocumentReference, context
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'inventory', 'view');
-    const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
+    const supabase = getSupabaseServer();
     const warehouseId = text(new URL(request.url).searchParams.get('warehouseId'), 128);
+    const [warehouseResult, stockResult] = await Promise.all([
+      supabase.from('warehouses').select('id,tenant_id,branch_id,code,name,active').eq('tenant_id', context.tenantId).eq('active', true).order('name').limit(100),
+      warehouseId ? supabase.from('inventory_stocks').select('id,warehouse_id,product_id,quantity,reorder_point,updated_at,products(id,name,sku,price,cost,item_type,active)').eq('tenant_id', context.tenantId).eq('warehouse_id', warehouseId).limit(500) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (warehouseResult.error) throw new Error(warehouseResult.error.message);
+    if (stockResult.error) throw new Error(stockResult.error.message);
+    const visibleWarehouses = (warehouseResult.data || []).filter((item) => ['owner', 'admin', 'gerente', 'jefe'].includes(context.role) || context.branchIds.includes(String(item.branch_id)));
+    if (warehouseId && !visibleWarehouses.some((item) => item.id === warehouseId)) return NextResponse.json({ error: 'El almacén no está autorizado para este usuario.' }, { status: 403 });
+    const stocks = (stockResult.data || []).map((row: any) => ({ id: row.id, warehouseId: row.warehouse_id, productId: row.product_id, quantity: Number(row.quantity || 0), averageCost: Number(row.products?.cost || 0), reorderPoint: Number(row.reorder_point || 0), updatedAt: row.updated_at }));
+    return NextResponse.json({ ok: true, warehouses: visibleWarehouses.map((item) => ({ id: item.id, branchId: item.branch_id, code: item.code, name: item.name, active: item.active })), stocks, transfers: [] }, { headers: { 'Cache-Control': 'no-store' } });
+    /* The legacy Firestore reader below remains only for historical data not yet migrated. */
+    const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
     const warehouseDocs = (await tenant.collection('warehouses').where('active', '==', true).orderBy('name').get()).docs;
     const warehouses: Array<Record<string, unknown> & { id: string }> = warehouseDocs.map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }));
-    const visibleWarehouses = warehouses.filter((item) => context.branchIds.includes(String(item.branchId)) || ['owner', 'admin', 'gerente', 'jefe'].includes(context.role));
-    if (warehouseId && !visibleWarehouses.some((item) => item.id === warehouseId)) {
+    const legacyVisibleWarehouses = warehouses.filter((item) => context.branchIds.includes(String(item.branchId)) || ['owner', 'admin', 'gerente', 'jefe'].includes(context.role));
+    if (warehouseId && !legacyVisibleWarehouses.some((item) => item.id === warehouseId)) {
       return NextResponse.json({ error: 'El almacén no está autorizado para este usuario.' }, { status: 403 });
     }
     const stocksSnapshot = warehouseId
@@ -35,8 +48,8 @@ export async function GET(request: NextRequest) {
     const transferSnapshot = await tenant.collection('inventoryTransfers').orderBy('createdAt', 'desc').limit(100).get();
     const transfers = transferSnapshot.docs
       .map<Record<string, unknown> & { id: string }>((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }))
-      .filter((item) => visibleWarehouses.some((warehouse) => warehouse.id === String(item['fromWarehouseId'] || '') || warehouse.id === String(item['toWarehouseId'] || '')));
-    return NextResponse.json({ ok: true, warehouses: visibleWarehouses, stocks: stocksSnapshot?.docs.map((doc) => ({ id: doc.id, ...doc.data() })) || [], transfers }, { headers: { 'Cache-Control': 'no-store' } });
+      .filter((item) => legacyVisibleWarehouses.some((warehouse) => warehouse.id === String(item['fromWarehouseId'] || '') || warehouse.id === String(item['toWarehouseId'] || '')));
+    return NextResponse.json({ ok: true, warehouses: legacyVisibleWarehouses, stocks: stocksSnapshot?.docs.map((doc) => ({ id: doc.id, ...doc.data() })) || [], transfers }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
