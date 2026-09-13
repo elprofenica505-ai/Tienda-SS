@@ -11,6 +11,9 @@ function validEmail(value: unknown): value is string {
 
 function responseFor(error: unknown) {
   const message = error instanceof Error ? error.message : '';
+  if (message.includes('Gateway Timeout') || message.includes('TIMEOUT') || message.includes('timed out')) {
+    return NextResponse.json({ error: 'El servicio de registro tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo.' }, { status: 503 });
+  }
   if (message.startsWith('SUPABASE_') || message.includes('relation') || message.includes('schema cache')) {
     return NextResponse.json({ error: 'La conexión del servidor con Supabase no está configurada correctamente.' }, { status: 503 });
   }
@@ -47,7 +50,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseServer();
     const created = await supabase.auth.admin.createUser({ email, password, user_metadata: { display_name: ownerName }, email_confirm: false });
-    if (created.error || !created.data.user) throw new Error(created.error?.message || 'SUPABASE_USER_CREATE_FAILED');
+    if (created.error || !created.data.user) throw new Error(`SUPABASE_AUTH_CREATE_FAILED: ${created.error?.message || 'No se pudo crear el usuario.'}`);
     createdUserId = created.data.user.id;
 
     const onboarding = await supabase.rpc('create_initial_tenant', {
@@ -56,7 +59,7 @@ export async function POST(request: NextRequest) {
       target_display_name: ownerName,
       target_company_name: companyName,
     });
-    if (onboarding.error) throw new Error(onboarding.error.message || 'SUPABASE_ONBOARDING_FAILED');
+    if (onboarding.error) throw new Error(`SUPABASE_ONBOARDING_FAILED: ${onboarding.error.message || 'No se pudo crear la empresa.'}`);
 
     return NextResponse.json({ ok: true, tenantId: onboarding.data, authProvider: 'supabase' }, { status: 201 });
   } catch (error: unknown) {
