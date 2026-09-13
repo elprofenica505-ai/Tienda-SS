@@ -25,6 +25,7 @@ function mapTenant(row: OrganizationRow): OrganizationRow {
     id: String(row.legacy_firestore_id || row.id),
     currencySymbol: row.currency_symbol || 'C$',
     locale: row.locale || 'es-NI',
+    onboardingCompleted: row.onboarding_completed === true,
   };
 }
 

@@ -60,9 +60,10 @@ export async function PATCH(request: NextRequest) {
       changes.name = name;
     }
     if (typeof body.currency === 'string') changes.currency = normalizeCurrency(body.currency);
+    if (typeof body.onboardingCompleted === 'boolean') changes.onboarding_completed = body.onboardingCompleted;
     if (Object.keys(changes).length === 0) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
     const tenant = await updateTenant(context.tenantId, changes);
-    return NextResponse.json({ ok: true, ...changes, tenant }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ok: true, onboardingCompleted: tenant.onboarding_completed, tenant }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     return supabaseError(error);
   }
