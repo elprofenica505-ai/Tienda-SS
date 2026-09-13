@@ -110,7 +110,7 @@ export async function PATCH(request: NextRequest) {
     const changes: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: context.uid };
     if (typeof body.active === 'boolean') changes.active = body.active;
     if (type === 'category') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.color === 'string') changes.color = cleanText(body.color, 20); }
-    if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
+    if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.cost === 'number') changes.cost = Math.max(0, body.cost); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
     const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('*').single();
     if (updated.error) throw new Error(updated.error.message);
     return NextResponse.json({ ok: true, id, changes, item: type === 'product' ? mapProduct(updated.data, 0) : mapCategory(updated.data) });
