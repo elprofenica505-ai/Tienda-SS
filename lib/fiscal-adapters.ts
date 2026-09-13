@@ -39,6 +39,9 @@ export type FiscalTenantConfig = {
   email?: string;
   phone?: string;
   logoDataUrl?: string;
+  ticketTitle?: string;
+  ticketFooter?: string;
+  showBarcode?: boolean;
   updatedAt?: unknown;
   updatedBy?: string;
 };
@@ -92,6 +95,9 @@ export function normalizeFiscalConfig(input: Record<string, unknown>, current?: 
     email: typeof input.email === 'string' ? input.email.trim().slice(0, 160).toLowerCase() : current?.email,
     phone: typeof input.phone === 'string' ? input.phone.trim().slice(0, 40) : current?.phone,
     logoDataUrl: typeof input.logoDataUrl === 'string' && /^(data:image\/(png|jpeg|jpg|webp);base64,)/i.test(input.logoDataUrl) && input.logoDataUrl.length <= 350_000 ? input.logoDataUrl : current?.logoDataUrl,
+    ticketTitle: typeof input.ticketTitle === 'string' ? input.ticketTitle.trim().slice(0, 120) : (current?.ticketTitle || 'Comprobante de venta'),
+    ticketFooter: typeof input.ticketFooter === 'string' ? input.ticketFooter.trim().slice(0, 240) : (current?.ticketFooter || ''),
+    showBarcode: typeof input.showBarcode === 'boolean' ? input.showBarcode : (current?.showBarcode ?? true),
   };
 }
 

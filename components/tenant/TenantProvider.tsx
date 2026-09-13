@@ -110,7 +110,6 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const supabase = getSupabaseBrowser();
-    void supabase.auth.getUser().then(({ data }) => { setAuthUser(adaptAuthUser(data.user)); void refresh(); });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user || null;
       setAuthUser(adaptAuthUser(user));

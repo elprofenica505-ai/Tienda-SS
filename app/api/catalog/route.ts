@@ -82,9 +82,16 @@ export async function POST(request: NextRequest) {
     if (active.error) throw new Error(active.error.message);
     try { assertPlanCapacity(tenant.data.plan, 'products', active.count || 0, 1); } catch (error) { return responseFor(error); }
     const categoryId = cleanText(body.categoryId, 80) || null;
+    const initialStock = itemType === 'service' ? 0 : Math.max(0, Math.floor(cleanNumber(body.stock)));
     const result = await supabase.from('products').insert({ tenant_id: context.tenantId, category_id: categoryId, sku: sku || `SERV-${Date.now()}`, name, item_type: itemType, price: Math.max(0, cleanNumber(body.price)), cost: productRoles.slice(0, 4).includes(context.role) ? Math.max(0, cleanNumber(body.cost)) : 0, min_stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)), unit: cleanText(body.unit, 20) || 'unidad', active: true, created_by: context.uid }).select('*').single();
     if (result.error) throw new Error(result.error.message);
-    return NextResponse.json({ ok: true, item: redactSensitiveFields(mapProduct(result.data, 0), context) }, { status: 201 });
+    if (itemType === 'physical') {
+      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('active', true).order('created_at').limit(1).maybeSingle();
+      if (warehouse.error || !warehouse.data) throw new Error(warehouse.error?.message || 'No hay un almacén activo para guardar el stock.');
+      const stock = await supabase.from('inventory_stocks').upsert({ tenant_id: context.tenantId, product_id: result.data.id, warehouse_id: warehouse.data.id, quantity: initialStock, reorder_point: Math.max(0, Math.floor(cleanNumber(body.minStock, 5))), updated_at: new Date().toISOString() }, { onConflict: 'tenant_id,product_id,warehouse_id' });
+      if (stock.error) throw new Error(stock.error.message);
+    }
+    return NextResponse.json({ ok: true, item: redactSensitiveFields(mapProduct(result.data, initialStock), context) }, { status: 201 });
   } catch (error: unknown) { return responseFor(error); }
 }
 
