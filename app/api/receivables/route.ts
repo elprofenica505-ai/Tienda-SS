@@ -1,81 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
-import { writeImmutableAudit } from '@/lib/audit';
+import { getSupabaseServer } from '@/lib/supabase/server';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
-const paymentRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
-const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
+const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 const PAGE_SIZE = 25;
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function amount(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
+function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { RECEIVABLE_NOT_FOUND: ['La venta a crédito no tiene saldo pendiente.', 404], PAYMENT_EXCEEDS_BALANCE: ['El pago no puede superar el saldo pendiente.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INVALID_RECEIVABLE_PAYMENT: ['Venta, monto y método de pago son obligatorios.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'receivables', 'view');
-    const tenant = getAdminDb().collection('tenants').doc(context.tenantId);
-    const [salesSnapshot, paymentsSnapshot] = await Promise.all([
-      tenant.collection('sales').where('paymentMethod', '==', 'credit').orderBy('createdAt', 'desc').limit(PAGE_SIZE + 1).get(),
-      tenant.collection('receivablePayments').orderBy('createdAt', 'desc').limit(PAGE_SIZE).get()
-    ]);
-    const payments: Array<Record<string, unknown> & { id: string }> = paymentsSnapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Record<string, unknown>) }));
-    const now = new Date();
-    const visibleSales = TENANT_WIDE_ROLES.has(context.role)
-      ? salesSnapshot.docs
-      : salesSnapshot.docs.filter((item) => typeof item.data()?.branchId === 'string' && context.branchIds.includes(String(item.data()?.branchId)));
-    const visibleSaleIds = new Set(visibleSales.map((item) => item.id));
-    const visiblePayments = TENANT_WIDE_ROLES.has(context.role)
-      ? payments
-      : payments.filter((item) => visibleSaleIds.has(String(item.saleId || '')));
-    const sales: Array<Record<string, unknown> & { id: string; total: number; paidAmount: number; balanceDue: number; paymentStatus: string; overdue: boolean }> = visibleSales.slice(0, PAGE_SIZE).map((item) => {
-      const data = item.data() as Record<string, unknown>;
-      const total = amount(data.total);
-      const paidAmount = amount(data.paidAmount);
-      const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount);
-      const dueAtValue = data.dueAt as { toDate?: () => Date } | Date | undefined;
-      const dueAt = dueAtValue && 'toDate' in dueAtValue && typeof dueAtValue.toDate === 'function' ? dueAtValue.toDate() : dueAtValue;
-      return { id: item.id, ...data, total, paidAmount, balanceDue, overdue: balanceDue > 0 && dueAt instanceof Date && dueAt < now, paymentStatus: balanceDue <= 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'pending' };
-    }).filter((item) => item.balanceDue > 0 || item.paymentStatus === 'paid');
-    const byCustomer = new Map<string, { customerId: string; customerName: string; sales: number; total: number; paid: number; balance: number }>();
-    for (const sale of sales) {
-      const key = String(sale.customerId || 'unknown');
-      const current = byCustomer.get(key) || { customerId: key, customerName: String(sale.customerName || 'Cliente sin identificar'), sales: 0, total: 0, paid: 0, balance: 0 };
-      current.sales += 1; current.total += amount(sale.total); current.paid += amount(sale.paidAmount); current.balance += amount(sale.balanceDue); byCustomer.set(key, current);
-    }
-    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: visibleSales.length > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), overdue: sales.filter((sale) => sale.overdue).reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers: Array.from(byCustomer.values()).sort((a, b) => b.balance - a.balance), sales, payments: visiblePayments }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
-  }
+    const branchId = text(request.headers.get('x-branch-id'), 128);
+    if (branchId) assertBranchAccess(context, branchId);
+    let query = getSupabaseServer().from('receivables').select('*, customers(name), sales(id,invoice_number,branch_id,total,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE + 1);
+    if (branchId) query = query.eq('sales.branch_id', branchId);
+    else if (!MANAGER_ROLES.has(context.role)) query = query.in('sales.branch_id', context.branchIds.slice(0, 100));
+    const result = await query;
+    if (result.error) throw new Error(result.error.message);
+    const rows = (result.data || []).slice(0, PAGE_SIZE);
+    const paymentsResult = await getSupabaseServer().from('receivable_payments').select('*, receivables!inner(sale_id,tenant_id)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE);
+    if (paymentsResult.error) throw new Error(paymentsResult.error.message);
+    const sales = rows.map((row: any) => ({ id: row.sales?.id || row.sale_id, saleId: row.sale_id, customerId: row.customer_id, customerName: row.customers?.name || 'Cliente sin identificar', total: Number(row.original_amount || 0), paidAmount: Number(row.original_amount || 0) - Number(row.outstanding_amount || 0), balanceDue: Number(row.outstanding_amount || 0), paymentStatus: row.status, dueAt: row.due_date, overdue: Number(row.outstanding_amount || 0) > 0 && row.due_date && new Date(row.due_date) < new Date(), branchId: row.sales?.branch_id, invoiceNumber: row.sales?.invoice_number, createdAt: row.created_at }));
+    const customers = Array.from(sales.reduce((map, sale) => { const key = sale.customerId; const current = map.get(key) || { customerId: key, customerName: sale.customerName, sales: 0, total: 0, paid: 0, balance: 0 }; current.sales += 1; current.total += sale.total; current.paid += sale.paidAmount; current.balance += sale.balanceDue; map.set(key, current); return map; }, new Map<string, any>()).values()).sort((a: any, b: any) => b.balance - a.balance);
+    return NextResponse.json({ ok: true, pagination: { pageSize: PAGE_SIZE, hasMoreSales: (result.data || []).length > PAGE_SIZE }, summary: { receivables: sales.filter((sale) => sale.balanceDue > 0).length, balance: sales.reduce((sum, sale) => sum + sale.balanceDue, 0), overdue: sales.filter((sale) => sale.overdue).reduce((sum, sale) => sum + sale.balanceDue, 0), collected: sales.reduce((sum, sale) => sum + sale.paidAmount, 0) }, customers, sales, payments: paymentsResult.data || [] }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) { return failure(error); }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'receivables', 'create');
     const body = await request.json();
-    const saleId = text(body.saleId, 120);
+    const saleId = text(body.saleId, 128);
     const payment = amount(body.amount);
     const method = ['cash', 'card', 'transfer'].includes(body.paymentMethod) ? body.paymentMethod : '';
     if (!saleId || payment <= 0 || !method) return NextResponse.json({ error: 'Venta, monto y método de pago son obligatorios.' }, { status: 400 });
-    const db = getAdminDb(); const tenant = db.collection('tenants').doc(context.tenantId); const saleRef = tenant.collection('sales').doc(saleId); const paymentRef = tenant.collection('receivablePayments').doc();
-    const result = await db.runTransaction(async (transaction) => {
-      const sale = await transaction.get(saleRef);
-      if (!sale.exists || sale.data()?.paymentMethod !== 'credit') throw new Error('SALE_NOT_FOUND');
-      const data = sale.data() || {}; const saleBranchId = text(data.branchId, 128); if (!saleBranchId) throw new Error('SALE_BRANCH_REQUIRED'); assertBranchAccess(context, saleBranchId); const total = amount(data.total); const paidAmount = amount(data.paidAmount); const balanceDue = typeof data.balanceDue === 'number' ? amount(data.balanceDue) : Math.max(0, total - paidAmount); const customerRef = data.customerId ? tenant.collection('customers').doc(String(data.customerId)) : null; const customerSnapshot = customerRef ? await transaction.get(customerRef) : null;
-      if (payment > balanceDue) throw new Error('PAYMENT_EXCEEDS_BALANCE');
-      const newPaid = amount(paidAmount + payment); const newBalance = amount(balanceDue - payment); const paymentStatus = newBalance <= 0 ? 'paid' : 'partial'; const now = new Date();
-      transaction.update(saleRef, { paidAmount: newPaid, balanceDue: newBalance, paymentStatus, updatedAt: now, updatedBy: context.uid });
-      transaction.set(paymentRef, { saleId, branchId: saleBranchId, customerId: data.customerId || null, customerName: data.customerName || 'Cliente sin identificar', amount: payment, paymentMethod: method, notes: text(body.notes, 300), createdBy: context.uid, createdAt: now });
-      if (customerRef && customerSnapshot?.exists) { const currentCredit = amount(customerSnapshot.data()?.creditBalance); transaction.update(customerRef, { creditBalance: Math.max(0, currentCredit - payment), updatedAt: now, updatedBy: context.uid }); transaction.create(tenant.collection('creditMovements').doc(), { customerId: data.customerId, saleId, paymentId: paymentRef.id, type: 'payment', amount: payment, balanceAfter: Math.max(0, currentCredit - payment), createdBy: context.uid, createdAt: now }); }
-      return { saleId, paymentId: paymentRef.id, paidAmount: newPaid, balanceDue: newBalance, paymentStatus };
-    });
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, before: { balanceDue: result.balanceDue + payment, paidAmount: result.paidAmount - payment }, after: result, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/receivables' }, result: 'success' });
-    return NextResponse.json({ ok: true, ...result }, { status: 201 });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    if (message === 'SALE_NOT_FOUND') return NextResponse.json({ error: 'La venta a crédito no existe.' }, { status: 404 });
-    if (message === 'PAYMENT_EXCEEDS_BALANCE') return NextResponse.json({ error: 'El pago no puede superar el saldo pendiente.' }, { status: 409 });
-    if (message === 'SALE_BRANCH_REQUIRED') return NextResponse.json({ error: 'La venta no tiene una sucursal válida.' }, { status: 409 });
-    const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
-  }
+    const sale = await getSupabaseServer().from('sales').select('branch_id').eq('id', saleId).eq('tenant_id', context.tenantId).single();
+    if (sale.error || !sale.data) return NextResponse.json({ error: 'La venta a crédito no existe.' }, { status: 404 });
+    assertBranchAccess(context, sale.data.branch_id);
+    const result = await getSupabaseServer().rpc('record_receivable_payment', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_payment_method: method, target_amount: payment, target_notes: text(body.notes, 300), target_cash_session_id: text(body.cashSessionId, 128) || null });
+    if (result.error) throw new Error(result.error.message);
+    const data = result.data || {};
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, after: data, result: 'success' });
+    return NextResponse.json({ ok: true, ...data }, { status: 201 });
+  } catch (error: unknown) { return failure(error); }
 }
