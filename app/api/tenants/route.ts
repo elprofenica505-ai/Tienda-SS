@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { tenantErrorResponse } from '@/lib/tenant';
 import { consumeDistributedRateLimits, getClientAddress, hashRateLimitIdentity, rateLimitResponse } from '@/lib/rate-limit';
-import { DEFAULT_TENANT_CURRENCY, DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL } from '@/lib/currency';
 
 export const runtime = 'nodejs';
 
@@ -10,9 +9,23 @@ function validEmail(value: unknown): value is string {
   return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-export async function POST(request: NextRequest) {
-  let uid: string | undefined;
+function responseFor(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message.startsWith('SUPABASE_') || message.includes('relation') || message.includes('schema cache')) {
+    return NextResponse.json({ error: 'La conexión del servidor con Supabase no está configurada correctamente.' }, { status: 503 });
+  }
+  if (message.includes('email_exists') || message.includes('already registered')) {
+    return NextResponse.json({ error: 'Ese correo ya está registrado.' }, { status: 409 });
+  }
+  if (message.includes('AUTH_USER_ALREADY_ONBOARDED')) {
+    return NextResponse.json({ error: 'Ese usuario ya tiene una empresa configurada.' }, { status: 409 });
+  }
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
+export async function POST(request: NextRequest) {
+  let createdUserId: string | null = null;
   try {
     const body = await request.json();
     const companyName = typeof body.name === 'string' ? body.name.trim() : '';
@@ -21,12 +34,7 @@ export async function POST(request: NextRequest) {
     const password = typeof body.password === 'string' ? body.password : '';
     const website = typeof body.website === 'string' ? body.website.trim() : '';
     if (website) return NextResponse.json({ error: 'No se pudo crear la empresa.' }, { status: 400 });
-
-    if (
-      companyName.length < 2 || companyName.length > 120 ||
-      ownerName.length < 2 || ownerName.length > 120 ||
-      !validEmail(email) || password.length < 8
-    ) {
+    if (companyName.length < 2 || companyName.length > 120 || ownerName.length < 2 || ownerName.length > 120 || !validEmail(email) || password.length < 8) {
       return NextResponse.json({ error: 'Revisa el nombre, correo y contraseña.' }, { status: 400 });
     }
 
@@ -37,86 +45,37 @@ export async function POST(request: NextRequest) {
     );
     if (!rate.allowed) return rateLimitResponse(rate.retryAfterSeconds, rate.blockedBy);
 
-    const auth = getAdminAuth();
-    const db = getAdminDb();
-    const user = await auth.createUser({ email, password, displayName: ownerName, disabled: false });
-    uid = user.uid;
+    const supabase = getSupabaseServer();
+    const created = await supabase.auth.admin.createUser({ email, password, user_metadata: { display_name: ownerName }, email_confirm: false });
+    if (created.error || !created.data.user) throw new Error(created.error?.message || 'SUPABASE_USER_CREATE_FAILED');
+    createdUserId = created.data.user.id;
 
-    const now = new Date();
-    const tenantRef = db.collection('tenants').doc(uid);
-    const memberRef = tenantRef.collection('members').doc(uid);
-    const branchRef = tenantRef.collection('branches').doc('branch-main');
-    const warehouseRef = tenantRef.collection('warehouses').doc('warehouse-main');
-    const registerRef = tenantRef.collection('cashRegisters').doc('register-main');
-    const batch = db.batch();
-
-    batch.set(tenantRef, {
-      tenantId: uid,
-      name: companyName,
-      ownerUid: uid,
-      status: 'active',
-      plan: 'starter',
-      currency: DEFAULT_TENANT_CURRENCY,
-      currencySymbol: DEFAULT_TENANT_SYMBOL,
-      locale: DEFAULT_TENANT_LOCALE,
-      onboardingCompleted: false,
-      createdAt: now,
-      updatedAt: now
+    const onboarding = await supabase.rpc('create_initial_tenant', {
+      target_auth_user_id: created.data.user.id,
+      target_email: email,
+      target_display_name: ownerName,
+      target_company_name: companyName,
     });
+    if (onboarding.error) throw new Error(onboarding.error.message || 'SUPABASE_ONBOARDING_FAILED');
 
-    batch.set(memberRef, {
-      uid,
-      tenantId: uid,
-      email,
-      name: ownerName,
-      role: 'owner',
-      status: 'active',
-      branchIds: [branchRef.id],
-      createdAt: now,
-      updatedAt: now
-    });
-
-    batch.set(branchRef, { name: 'Sucursal principal', code: 'PRINCIPAL', active: true, timezone: 'America/Managua', createdAt: now, updatedAt: now });
-    batch.set(warehouseRef, { branchId: branchRef.id, name: 'Almacén principal', code: 'ALM-PRINCIPAL', type: 'warehouse', active: true, createdAt: now, updatedAt: now });
-    batch.set(registerRef, { branchId: branchRef.id, name: 'Caja principal', code: 'CAJA-PRINCIPAL', active: true, createdAt: now, updatedAt: now });
-
-    await batch.commit();
-    return NextResponse.json({ ok: true, tenantId: uid }, { status: 201 });
+    return NextResponse.json({ ok: true, tenantId: onboarding.data, authProvider: 'supabase' }, { status: 201 });
   } catch (error: unknown) {
-    if (uid) {
-      try { await getAdminAuth().deleteUser(uid); } catch { console.error('tenant_owner_cleanup_failed'); }
+    if (createdUserId) {
+      try { await getSupabaseServer().auth.admin.deleteUser(createdUserId); } catch { console.error('supabase_owner_cleanup_failed'); }
     }
-
-    const message = error instanceof Error ? error.message : '';
-    if (message.includes('email-already-exists')) {
-      return NextResponse.json({ error: 'Ese correo ya está registrado.' }, { status: 409 });
-    }
-
-    console.error('tenant_creation_failed', { message });
-    if (message.includes('FIREBASE_PROJECT_MISMATCH')) {
-      return NextResponse.json({ error: 'Vercel está usando una cuenta de servicio de otro proyecto Firebase. Genera una nueva clave en ConexiaX y reemplaza FIREBASE_SERVICE_ACCOUNT_KEY.' }, { status: 503 });
-    }
-    if (message.includes('FIREBASE_SERVICE_ACCOUNT_KEY')) {
-      return NextResponse.json({ error: 'La conexión del servidor con Firebase no está configurada correctamente en Vercel.' }, { status: 503 });
-    }
-    if (message.includes('permission-denied') || message.includes('Missing or insufficient permissions')) {
-      return NextResponse.json({ error: 'Firebase rechazó el acceso del servidor. Revisa la cuenta de servicio y que Firestore esté creado en este proyecto.' }, { status: 503 });
-    }
-    if (message.includes('5 NOT_FOUND') || message.includes('The database')) {
-      return NextResponse.json({ error: 'Firestore todavía no está creado en el proyecto de Firebase.' }, { status: 503 });
-    }
-    return NextResponse.json({ error: 'No se pudo crear la empresa. Revisa los registros de Vercel para ver el detalle.' }, { status: 500 });
+    console.error('supabase_tenant_creation_failed', { message: error instanceof Error ? error.message : 'unknown' });
+    return responseFor(error);
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { requireTenantMember } = await import('@/lib/tenant');
-    const context = await requireTenantMember(request);
-    const tenant = await getAdminDb().collection('tenants').doc(context.tenantId).get();
-    return NextResponse.json({ ok: true, tenant: tenant.exists ? { id: tenant.id, ...tenant.data() } : null, member: context });
+    const { requireSupabaseTenantPermission } = await import('@/lib/supabase/tenant-access');
+    const context = await requireSupabaseTenantPermission(request, 'dashboard', 'view');
+    const tenant = await getSupabaseServer().from('tenants').select('*').eq('id', context.tenantId).maybeSingle();
+    if (tenant.error) throw new Error(tenant.error.message);
+    return NextResponse.json({ ok: true, tenant: tenant.data, member: context });
   } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
+    return responseFor(error);
   }
 }

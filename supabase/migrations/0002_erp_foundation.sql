@@ -356,3 +356,67 @@ comment on table public.inventory_stocks is 'Current stock by tenant, product an
 comment on table public.sales is 'Sales header; operations become PostgreSQL transactions/RPC.';
 comment on table public.fiscal_configs is 'Tenant-scoped electronic invoicing configuration; secrets remain server-side.';
 comment on table public.file_metadata is 'Metadata for private objects stored in Supabase Storage.';
+
+
+create or replace function public.create_initial_tenant(
+  target_auth_user_id uuid,
+  target_email text,
+  target_display_name text,
+  target_company_name text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  new_tenant_id uuid;
+  new_branch_id uuid;
+  base_slug text;
+  next_slug text;
+begin
+  if target_auth_user_id is null then raise exception 'AUTH_USER_REQUIRED'; end if;
+  if length(trim(target_company_name)) < 2 then raise exception 'TENANT_NAME_INVALID'; end if;
+  if exists (select 1 from public.profiles where auth_user_id = target_auth_user_id) then
+    raise exception 'AUTH_USER_ALREADY_ONBOARDED';
+  end if;
+
+  base_slug := regexp_replace(lower(trim(target_company_name)), '[^a-z0-9]+', '-', 'g');
+  base_slug := trim(both '-' from base_slug);
+  if base_slug = '' then base_slug := 'empresa'; end if;
+  next_slug := left(base_slug, 70);
+  if exists (select 1 from public.tenants where slug = next_slug) then
+    next_slug := left(base_slug, 55) || '-' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 12);
+  end if;
+
+  insert into public.profiles (id, auth_user_id, email, display_name)
+  values (target_auth_user_id, target_auth_user_id, nullif(lower(trim(target_email)), ''), nullif(trim(target_display_name), ''));
+
+  insert into public.tenants (slug, name, status)
+  values (next_slug, trim(target_company_name), 'active')
+  returning id into new_tenant_id;
+
+  insert into public.members (tenant_id, profile_id, role, status)
+  values (new_tenant_id, target_auth_user_id, 'owner', 'active');
+
+  insert into public.branches (tenant_id, code, name)
+  values (new_tenant_id, 'PRINCIPAL', 'Sucursal principal')
+  returning id into new_branch_id;
+
+  insert into public.member_branches (tenant_id, member_id, branch_id)
+  select new_tenant_id, m.id, new_branch_id
+  from public.members m
+  where m.tenant_id = new_tenant_id and m.profile_id = target_auth_user_id;
+
+  insert into public.warehouses (tenant_id, branch_id, code, name)
+  values (new_tenant_id, new_branch_id, 'ALM-PRINCIPAL', 'Almacén principal');
+
+  insert into public.cash_registers (tenant_id, branch_id, code, name)
+  values (new_tenant_id, new_branch_id, 'CAJA-PRINCIPAL', 'Caja principal');
+
+  return new_tenant_id;
+end;
+$$;
+
+revoke all on function public.create_initial_tenant(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.create_initial_tenant(uuid, text, text, text) to service_role;

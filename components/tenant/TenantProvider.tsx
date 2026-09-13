@@ -1,8 +1,9 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { onIdTokenChanged, signOut, User } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import type { User } from '@supabase/supabase-js';
+import { getSupabaseBrowser } from '@/lib/supabase/client';
+import { getSupabaseAccessToken } from '@/lib/supabase/auth';
 
 export type TenantRole =
   | 'owner' | 'admin' | 'gerente' | 'supervisor_sucursal' | 'vendedor' | 'cajero'
@@ -27,7 +28,7 @@ export type TenantOrganization = {
 };
 
 type TenantContextValue = {
-  authUser: User | null;
+  authUser: TenantAuthUser | null;
   tenant: Tenant | null;
   member: TenantMember | null;
   organization: TenantOrganization | null;
@@ -38,13 +39,28 @@ type TenantContextValue = {
   refresh: () => Promise<void>;
 };
 
+export type TenantAuthUser = User & { uid: string; displayName?: string; getIdToken: () => Promise<string> };
+
+function adaptAuthUser(user: User | null): TenantAuthUser | null {
+  if (!user) return null;
+  return Object.assign(user, {
+    uid: user.id,
+    displayName: user.user_metadata?.display_name || user.user_metadata?.full_name || undefined,
+    getIdToken: async () => {
+      const token = await getSupabaseAccessToken();
+      if (!token) throw new Error('SESSION_EXPIRED');
+      return token;
+    },
+  });
+}
+
 const TenantContext = createContext<TenantContextValue | null>(null);
 const STORAGE_KEY = 'ConexiaX.activeTenantId';
 const BRANCH_STORAGE_PREFIX = 'ConexiaX.activeBranchId:';
 const ADMIN_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<TenantAuthUser | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [member, setMember] = useState<TenantMember | null>(null);
   const [organization, setOrganization] = useState<TenantOrganization | null>(null);
@@ -58,32 +74,25 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setActiveBranchIdState(branchId);
   }, [tenant, organization]);
 
-  async function refresh() {
-    if (!auth.currentUser) {
+  const refresh = useCallback(async () => {
+    const sessionResult = await getSupabaseBrowser().auth.getSession();
+    const session = sessionResult.data.session;
+    if (!session) {
       setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); return;
     }
     setLoading(true); setError('');
     try {
-      const token = await auth.currentUser.getIdToken();
       const tenantId = window.localStorage.getItem(STORAGE_KEY);
-      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      const headers: Record<string, string> = { Authorization: `Bearer ${session.access_token}` };
       if (tenantId) headers['x-tenant-id'] = tenantId;
       const response = await fetch('/api/tenants/me', { headers, cache: 'no-store' });
       const data = await response.json();
-      if (data.code === 'SESSION_EXPIRED' || data.code === 'SESSION_REVOKED') {
-        await signOut(auth);
-        throw new Error('Tu sesión terminó por seguridad. Inicia sesión nuevamente.');
-      }
       if (!response.ok) throw new Error(data.error || 'No se pudo cargar la empresa.');
       const selected = data.tenants?.find((item: { tenant: Tenant }) => item.tenant.id === data.activeTenantId) || data.tenants?.[0];
       if (!selected) throw new Error('No tienes una empresa activa.');
       window.localStorage.setItem(STORAGE_KEY, selected.tenant.id);
       const organizationResponse = await fetch('/api/organization', { headers: { ...headers, 'x-tenant-id': selected.tenant.id }, cache: 'no-store' });
       const organizationData = await organizationResponse.json();
-      if (organizationData.code === 'SESSION_EXPIRED' || organizationData.code === 'SESSION_REVOKED') {
-        await signOut(auth);
-        throw new Error('Tu sesión terminó por seguridad. Inicia sesión nuevamente.');
-      }
       if (!organizationResponse.ok) throw new Error(organizationData.error || 'No se pudo cargar la organización.');
       const nextOrganization = organizationData.organization as TenantOrganization;
       const assigned = Array.isArray(selected.member.branchIds) ? selected.member.branchIds : [];
@@ -97,15 +106,21 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null);
       setError(cause instanceof Error ? cause.message : 'No se pudo cargar tu empresa.');
     } finally { setLoading(false); }
-  }
+  }, []);
 
-  useEffect(() => onIdTokenChanged(auth, (user) => {
-    setAuthUser(user);
-    if (user) void refresh();
-    else { setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); }
-  }), []);
+  useEffect(() => {
+    const supabase = getSupabaseBrowser();
+    void supabase.auth.getUser().then(({ data }) => { setAuthUser(adaptAuthUser(data.user)); void refresh(); });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user || null;
+      setAuthUser(adaptAuthUser(user));
+      if (user) void refresh();
+      else { setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null); setLoading(false); }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [refresh]);
 
-  const value = useMemo(() => ({ authUser, tenant, member, organization, activeBranchId, setActiveBranchId, loading, error, refresh }), [authUser, tenant, member, organization, activeBranchId, setActiveBranchId, loading, error]);
+  const value = useMemo(() => ({ authUser, tenant, member, organization, activeBranchId, setActiveBranchId, loading, error, refresh }), [authUser, tenant, member, organization, activeBranchId, setActiveBranchId, loading, error, refresh]);
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }
 

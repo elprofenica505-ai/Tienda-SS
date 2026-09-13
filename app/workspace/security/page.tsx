@@ -31,7 +31,8 @@ function SecurityContent() {
   if (loading) return <main className="workspace-page"><section className="workspace-main"><p>Cargando configuración de seguridad…</p></section></main>;
   if (!authUser || !member || !ADMIN_ROLES.has(member.role)) return <main className="workspace-page"><section className="workspace-main"><h1>Acceso restringido</h1><p>Solo los administradores pueden gestionar la autenticación multifactor.</p></section></main>;
 
-  const enrolled = hasEnrolledMfa(authUser);
+  // Temporary type bridge while the MFA implementation is replaced by Supabase MFA.
+  const enrolled = hasEnrolledMfa(authUser as never);
 
   async function startEnrollment() {
     setBusy(true); setMessage('');
