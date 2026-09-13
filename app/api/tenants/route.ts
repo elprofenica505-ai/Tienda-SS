@@ -14,11 +14,11 @@ function responseFor(error: unknown) {
   if (message.includes('Gateway Timeout') || message.includes('TIMEOUT') || message.includes('timed out')) {
     return NextResponse.json({ error: 'El servicio de registro tardó demasiado en responder. Espera unos segundos y vuelve a intentarlo.' }, { status: 503 });
   }
+  if (message.includes('email_exists') || message.includes('already registered') || message.includes('already been registered')) {
+    return NextResponse.json({ error: 'Ese correo ya está registrado. Prueba iniciar sesión con ese correo.' }, { status: 409 });
+  }
   if (message.startsWith('SUPABASE_') || message.includes('relation') || message.includes('schema cache')) {
     return NextResponse.json({ error: 'La conexión del servidor con Supabase no está configurada correctamente.' }, { status: 503 });
-  }
-  if (message.includes('email_exists') || message.includes('already registered')) {
-    return NextResponse.json({ error: 'Ese correo ya está registrado.' }, { status: 409 });
   }
   if (message.includes('AUTH_USER_ALREADY_ONBOARDED')) {
     return NextResponse.json({ error: 'Ese usuario ya tiene una empresa configurada.' }, { status: 409 });
