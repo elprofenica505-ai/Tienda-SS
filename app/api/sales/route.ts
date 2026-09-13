@@ -1,187 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { getSupabaseServer } from '@/lib/supabase/server';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
-import { FieldValue } from 'firebase-admin/firestore';
-import { assertPlanCapacity } from '@/lib/entitlement-guard';
-import { getEntitlementLimit } from '@/lib/entitlements';
-import { createFiscalSaleFields, fiscalMoney, formatFiscalNumber, validateFiscalFields } from '@/lib/fiscal-ni';
-import { normalizeFiscalConfig } from '@/lib/fiscal-adapters';
-import { findOpenCashSession } from '@/lib/cash';
-import { inventoryNumber, stockAfterDelta, stockKey } from '@/lib/inventory-cost';
 
 export const runtime = 'nodejs';
-const salesRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
-const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
-
+const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
-function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
-function getMonthlyLimit(plan: unknown) { return getEntitlementLimit(plan, 'monthlySales'); }
-async function warehouseFor(tenant: FirebaseFirestore.DocumentReference, context: Parameters<typeof assertBranchAccess>[0], warehouseId: string) {
-  const snapshot = await tenant.collection('warehouses').doc(warehouseId).get();
-  if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('WAREHOUSE_NOT_FOUND');
-  const warehouseBranchId = text(snapshot.data()?.branchId, 128);
-  if (!warehouseBranchId) throw new Error('WAREHOUSE_BRANCH_REQUIRED');
-  assertBranchAccess(context, warehouseBranchId);
-  return { id: warehouseId, branchId: warehouseBranchId, ...snapshot.data() };
-}
-
-type SaleLineInput = { productId?: unknown; quantity?: unknown };
-
-type SaleLine = { productId: string; name: string; sku: string; quantity: number; unitPrice: number; total: number };
+function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * 100) / 100) : 0; }
+function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
-    const salesCollection = getAdminDb().collection('tenants').doc(context.tenantId).collection('sales');
-    const branchId = request.headers.get('x-branch-id')?.trim();
-    let rows: Array<{ id: string; data: Record<string, unknown> }> = [];
-    if (TENANT_WIDE_ROLES.has(context.role)) {
-      const snapshot = await salesCollection.orderBy('createdAt', 'desc').limit(50).get();
-      rows = snapshot.docs.map((item) => ({ id: item.id, data: item.data() as Record<string, unknown> }));
-    } else {
-      const authorizedBranches = context.branchIds.slice(0, 100);
-      if (branchId && !authorizedBranches.includes(branchId)) return NextResponse.json({ error: 'La sucursal no está autorizada para este usuario.' }, { status: 403 });
-      const requestedBranches = branchId ? [branchId] : authorizedBranches;
-      const snapshots = await Promise.all(Array.from({ length: Math.ceil(requestedBranches.length / 10) }, (_, index) =>
-        salesCollection.where('branchId', 'in', requestedBranches.slice(index * 10, index * 10 + 10)).orderBy('createdAt', 'desc').limit(50).get(),
-      ));
-      rows = snapshots.flatMap((snapshot) => snapshot.docs.map((item) => ({ id: item.id, data: item.data() as Record<string, unknown> })))
-        .sort((left, right) => String(right.data.createdAt || '').localeCompare(String(left.data.createdAt || '')))
-        .slice(0, 50);
-    }
-    return NextResponse.json({ ok: true, sales: rows.map((item) => ({ id: item.id, ...item.data })) }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) {
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    const branchId = text(request.headers.get('x-branch-id'), 128);
+    if (branchId) assertBranchAccess(context, branchId);
+    let query = getSupabaseServer().from('sales').select('*, sale_items(*), sale_payments(*)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(50);
+    if (branchId) query = query.eq('branch_id', branchId);
+    else if (!MANAGER_ROLES.has(context.role)) query = query.in('branch_id', context.branchIds.slice(0, 100));
+    const result = await query;
+    if (result.error) throw new Error(result.error.message);
+    const sales = (result.data || []).map((row: any) => ({ id: row.id, invoiceNumber: row.invoice_number, branchId: row.branch_id, customerId: row.customer_id, status: row.status, subtotal: Number(row.subtotal || 0), tax: Number(row.tax || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), soldBy: row.sold_by, paymentMethod: row.metadata?.paymentMethod || row.sale_payments?.[0]?.payment_method, createdAt: row.created_at, updatedAt: row.updated_at, items: row.sale_items || [], payments: row.sale_payments || [] }));
+    return NextResponse.json({ ok: true, sales }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) { return failure(error); }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'create');
     const body = await request.json();
-    const rawLines = Array.isArray(body.items) ? body.items as SaleLineInput[] : [];
     const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
-    const customerId = text(body.customerId, 120);
-    const branchId = text(body.branchId, 120) || request.headers.get('x-branch-id')?.trim() || context.branchIds[0] || '';
-    const warehouseId = text(body.warehouseId, 128) || 'warehouse-main';
-    if (!branchId) return NextResponse.json({ error: 'Selecciona una sucursal antes de registrar la venta.' }, { status: 400 });
-    if (branchId) assertBranchAccess(context, branchId);
-    const warehouse = await warehouseFor(getAdminDb().collection('tenants').doc(context.tenantId), context, warehouseId);
-    if (warehouse.branchId !== branchId) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal seleccionada.' }, { status: 400 });
-    const openSession = paymentMethod === 'credit' ? null : await findOpenCashSession(context.tenantId, branchId);
-    if (paymentMethod !== 'credit' && !openSession) return NextResponse.json({ error: 'Abre una sesión de caja antes de registrar cobros.' }, { status: 409 });
-    const idempotencyKey = request.headers.get('idempotency-key')?.trim().slice(0, 160) || '';
-    const discount = money(body.discount);
-    if (!rawLines.length || rawLines.length > 50 || !paymentMethod) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 líneas de productos.' }, { status: 400 });
-    if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente guardado.' }, { status: 400 });
-
-    const unique = new Map<string, number>();
-    for (const line of rawLines) {
-      const productId = text(line.productId, 120);
-      const quantity = typeof line.quantity === 'number' && Number.isInteger(line.quantity) ? line.quantity : 0;
-      if (productId && quantity > 0) unique.set(productId, (unique.get(productId) || 0) + quantity);
-    }
-    if (!unique.size) return NextResponse.json({ error: 'Las cantidades de la venta no son válidas.' }, { status: 400 });
-    if (unique.size > 50) return NextResponse.json({ error: 'Una venta no puede contener más de 50 productos distintos.' }, { status: 400 });
-
-    const db = getAdminDb();
-    const tenant = db.collection('tenants').doc(context.tenantId);
-    const saleRef = tenant.collection('sales').doc();
-      const statsRef = tenant.collection('stats').doc('daily').collection('days').doc(new Date().toISOString().slice(0, 10));
-    const productIds = Array.from(unique.keys());
-    const movementRefs = productIds.map(() => tenant.collection('inventoryMovements').doc());
-    const productRefs = productIds.map((id) => tenant.collection('products').doc(id));
-    const stockRefs = productIds.map((id) => tenant.collection('inventoryStocks').doc(stockKey(warehouseId, id)));
-    const customerRef = customerId ? tenant.collection('customers').doc(customerId) : null;
-    const cashSessionRef = openSession ? tenant.collection('cashSessions').doc(openSession.id) : null;
-    const idempotencyRef = idempotencyKey ? tenant.collection('idempotencyKeys').doc(`sale-${idempotencyKey}`) : null;
-
-    const fiscalRef = tenant.collection('settings').doc('fiscal');
-    const result = await db.runTransaction(async (transaction) => {
-      const tenantSnapshot = await transaction.get(tenant);
-      const fiscalSnapshot = await transaction.get(fiscalRef);
-      const cashSessionSnapshot = cashSessionRef ? await transaction.get(cashSessionRef) : null;
-      if (cashSessionRef && (!cashSessionSnapshot?.exists || cashSessionSnapshot.data()?.status !== 'open')) throw new Error('CASH_SESSION_NOT_OPEN');
-      const plan = tenantSnapshot.data()?.plan;
-      const monthlyLimit = Number.isFinite(getMonthlyLimit(plan)) ? getMonthlyLimit(plan) : null;
-      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-      const monthlySales = monthlyLimit === null ? null : await transaction.get(tenant.collection('sales').where('createdAt', '>=', monthStart).limit(monthlyLimit + 1));
-      if (monthlySales && monthlyLimit !== null) assertPlanCapacity(plan, 'monthlySales', monthlySales.size, 1);
-      const readRefs = customerRef ? [...productRefs, ...stockRefs, customerRef] : [...productRefs, ...stockRefs];
-      if (idempotencyRef) readRefs.push(idempotencyRef);
-      const snapshots = await transaction.getAll(...readRefs);
-      const productSnapshots = snapshots.slice(0, productRefs.length);
-      const stockSnapshots = snapshots.slice(productRefs.length, productRefs.length + stockRefs.length);
-      const customerSnapshot = customerRef ? snapshots[productRefs.length + stockRefs.length] : null;
-      const idempotencySnapshot = idempotencyRef ? snapshots[snapshots.length - 1] : null;
-      if (idempotencySnapshot?.exists) return idempotencySnapshot.data()?.response as { saleId: string; total: number; lines: SaleLine[] };
-      if (customerRef && (!customerSnapshot || !customerSnapshot.exists || customerSnapshot.data()?.active === false)) throw new Error('CUSTOMER_NOT_FOUND');
-      const customerName = customerSnapshot ? text(customerSnapshot.data()?.name, 120) : '';
-      const lines: SaleLine[] = [];
-      let subtotal = 0;
-      productSnapshots.forEach((snapshot, index) => {
-        if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('PRODUCT_NOT_FOUND');
-        const data = snapshot.data() || {};
-        const quantity = unique.get(productRefs[index].id) || 0;
-        const stockSnapshot = stockSnapshots[index];
-        const currentStock = stockSnapshot?.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0;
-        if (data.itemType !== 'service' && currentStock < quantity) throw new Error(`INSUFFICIENT_STOCK:${data.name || productRefs[index].id}`);
-        const unitPrice = money(data.price);
-        const total = unitPrice * quantity;
-        subtotal += total;
-        lines.push({ productId: productRefs[index].id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total });
-      });
-      const fiscal = createFiscalSaleFields({ ...body, customerName: body.customerName || customerName }, subtotal, discount);
-      const fiscalError = validateFiscalFields(fiscal);
-      if (fiscalError) throw new Error(`FISCAL_INVALID:${fiscalError}`);
-      const fiscalConfig = normalizeFiscalConfig(fiscalSnapshot.exists ? fiscalSnapshot.data() || {} : {});
-      const sequence = fiscalConfig.nextInvoiceSequence;
-      const invoiceNumber = formatFiscalNumber(fiscalConfig.invoicePrefix, sequence);
-      const total = fiscalMoney(fiscal.total);
-      const customerCreditBalance = customerSnapshot ? money(customerSnapshot.data()?.creditBalance) : 0;
-      const customerCreditLimit = customerSnapshot ? money(customerSnapshot.data()?.creditLimit) : 0;
-      const creditOverride = body.creditOverride === true && ['owner', 'admin'].includes(context.role);
-      if (paymentMethod === 'credit' && customerCreditBalance + total > customerCreditLimit && !creditOverride) throw new Error(`CREDIT_LIMIT_EXCEEDED:${customerCreditLimit}:${customerCreditBalance}`);
-      const now = new Date();
-      productSnapshots.forEach((snapshot, index) => {
-        const data = snapshot.data() || {};
-        if (data.itemType === 'service') return;
-        const quantity = unique.get(productRefs[index].id) || 0;
-        const stockSnapshot = stockSnapshots[index];
-        const previousStock = stockSnapshot?.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0;
-        const newStock = stockAfterDelta(previousStock, -quantity);
-        transaction.set(stockRefs[index], { warehouseId, branchId, productId: productRefs[index].id, quantity: newStock, averageCost: inventoryNumber(stockSnapshot?.data()?.averageCost || data.averageCost), updatedAt: now, updatedBy: context.uid }, { merge: true });
-        if (warehouseId === 'warehouse-main') transaction.update(productRefs[index], { stock: newStock, updatedAt: now, updatedBy: context.uid });
-        transaction.set(movementRefs[index], { warehouseId, branchId, productId: productRefs[index].id, type: 'sale', quantity, delta: -quantity, previousStock, newStock, reason: `Venta ${saleRef.id}`, saleId: saleRef.id, createdBy: context.uid, createdAt: now });
-      });
-      const response = { saleId: saleRef.id, total, lines, invoiceNumber };
-      const paidAmount = paymentMethod === 'credit' ? 0 : total;
-      transaction.set(saleRef, { saleNumber: `V-${Date.now().toString(36).toUpperCase()}`, invoiceNumber, documentType: fiscal.documentType, items: lines, subtotal, discount, taxableBase: fiscal.taxableBase, exemptAmount: fiscal.exemptAmount, taxRate: fiscal.taxRate, taxAmount: fiscal.taxAmount, total, paidAmount, balanceDue: paymentMethod === 'credit' ? total : 0, paymentStatus: paymentMethod === 'credit' ? 'pending' : 'paid', dueAt: paymentMethod === 'credit' ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000) : null, currency: fiscal.currency, customerId: customerId || null, customerName: customerName || fiscal.customerName || null, customerRuc: fiscal.customerRuc || null, customerAddress: fiscal.customerAddress || null, paymentMethod, branchId: branchId || null, warehouseId, cashSessionId: openSession?.id || null, fiscal: { provider: fiscalConfig.provider, mode: fiscalConfig.mode, status: fiscalConfig.mode === 'manual' ? 'not_requested' : 'pending', adapterVersion: 'adapter-core-2026-09' }, status: 'completed', createdBy: context.uid, createdAt: now, updatedAt: now });
-      if (paymentMethod === 'credit' && customerRef) {
-        transaction.update(customerRef, { creditBalance: customerCreditBalance + total, updatedAt: now, updatedBy: context.uid });
-        transaction.create(tenant.collection('creditMovements').doc(), { customerId, saleId: saleRef.id, type: 'charge', amount: total, balanceAfter: customerCreditBalance + total, createdBy: context.uid, createdAt: now });
-      }
-      transaction.set(fiscalRef, { nextInvoiceSequence: sequence + 1, invoicePrefix: fiscalConfig.invoicePrefix, currency: fiscalConfig.currency, provider: fiscalConfig.provider, mode: fiscalConfig.mode, updatedAt: now }, { merge: true });
-      transaction.set(statsRef, { salesCount: FieldValue.increment(1), salesTotal: FieldValue.increment(total), updatedAt: now }, { merge: true });
-      if (idempotencyRef) transaction.create(idempotencyRef, { response, createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000) });
-      return response;
-    });
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created', entity: 'sale', entityId: result.saleId, after: result, request: { method: 'POST', path: '/api/sales', requestId: request.headers.get('x-correlation-id') || undefined }, result: 'success' });
-    return NextResponse.json({ ok: true, ...result }, { status: 201 });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    if (message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos ya no está disponible.' }, { status: 404 });
-    if (message === 'CUSTOMER_NOT_FOUND') return NextResponse.json({ error: 'El cliente seleccionado no existe o está archivado.' }, { status: 404 });
-    if (message.startsWith('INSUFFICIENT_STOCK:')) return NextResponse.json({ error: `Stock insuficiente para ${message.split(':').slice(1).join(':')}.` }, { status: 409 });
-    if (message.startsWith('FISCAL_INVALID:')) return NextResponse.json({ error: message.slice('FISCAL_INVALID:'.length) }, { status: 400 });
-    if (message.startsWith('CREDIT_LIMIT_EXCEEDED:')) return NextResponse.json({ error: `El crédito disponible es insuficiente. Límite: $${message.split(':')[1]}, saldo actual: $${message.split(':')[2]}.` }, { status: 409 });
-    if (message === 'CASH_SESSION_NOT_OPEN') return NextResponse.json({ error: 'La sesión de caja se cerró antes de completar la venta.' }, { status: 409 });
-    if (message === 'WAREHOUSE_NOT_FOUND') return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
-    if (message === 'WAREHOUSE_BRANCH_REQUIRED') return NextResponse.json({ error: 'El almacén no tiene una sucursal válida.' }, { status: 409 });
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
-  }
+    const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const warehouseId = text(body.warehouseId, 128);
+    const customerId = text(body.customerId, 128) || null;
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    if (!branchId || !warehouseId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, almacén, método de pago y productos son obligatorios.' }, { status: 400 });
+    assertBranchAccess(context, branchId);
+    if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente.' }, { status: 400 });
+    const items = rawItems.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: typeof item.quantity === 'number' && Number.isInteger(item.quantity) ? item.quantity : 0, unitPrice: money(item.unitPrice) })).filter((item: { productId: string; quantity: number }) => item.productId && item.quantity > 0);
+    if (!items.length || items.length > 50) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 productos.' }, { status: 400 });
+    const taxAmount = money(body.taxAmount ?? body.tax);
+    const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160) };
+    const result = await getSupabaseServer().rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: paymentMethod === 'credit' ? null : (text(body.cashSessionId, 128) || null), target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
+    if (result.error) throw new Error(result.error.message);
+    const data = result.data || {};
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
+    return NextResponse.json({ ok: true, ...data }, { status: data.replayed ? 200 : 201 });
+  } catch (error: unknown) { return failure(error); }
 }
