@@ -19,6 +19,8 @@ function errorResponse(error: unknown) {
     CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409],
     PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404],
     INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar el cobro.', 409],
+    CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409],
+    INVALID_SALE_TOTAL: ['El total de la venta debe ser mayor que cero.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
   };
   for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] });
