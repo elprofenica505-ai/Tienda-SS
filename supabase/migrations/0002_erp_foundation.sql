@@ -420,3 +420,26 @@ $$;
 
 revoke all on function public.create_initial_tenant(uuid, text, text, text) from public, anon, authenticated;
 grant execute on function public.create_initial_tenant(uuid, text, text, text) to service_role;
+
+
+alter table public.tenants add column if not exists plan text not null default 'starter';
+alter table public.tenants add column if not exists subscription_status text not null default 'active';
+
+create table if not exists public.tenant_settings (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  setting_key text not null,
+  value jsonb not null default '{}'::jsonb,
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  unique (tenant_id, setting_key),
+  unique (id, tenant_id)
+);
+
+create index if not exists tenant_settings_tenant_key_idx on public.tenant_settings (tenant_id, setting_key);
+alter table public.tenant_settings enable row level security;
+revoke all on table public.tenant_settings from anon, authenticated;
+grant select, insert, update on table public.tenant_settings to authenticated;
+create policy tenant_settings_select_member on public.tenant_settings for select to authenticated using (public.has_tenant_access(tenant_id));
+create policy tenant_settings_write_admin on public.tenant_settings for insert to authenticated with check (public.has_tenant_admin_access(tenant_id));
+create policy tenant_settings_update_admin on public.tenant_settings for update to authenticated using (public.has_tenant_admin_access(tenant_id)) with check (public.has_tenant_admin_access(tenant_id));
