@@ -2,8 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { getSupabaseBrowser } from '@/lib/supabase/client';
 
 function AcceptInvitationContent() {
   const searchParams = useSearchParams();
@@ -29,12 +28,13 @@ function AcceptInvitationContent() {
     if (!invitation) return;
     setSaving(true); setMessage('');
     try {
-      const currentUser = auth.currentUser;
-      const response = await fetch('/api/invitations/accept', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(currentUser ? { Authorization: `Bearer ${await currentUser.getIdToken()}` } : {}) }, body: JSON.stringify({ token, email: invitation.email, name, password }) });
+      const supabase = getSupabaseBrowser();
+      const session = (await supabase.auth.getSession()).data.session;
+      const response = await fetch('/api/invitations/accept', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) }, body: JSON.stringify({ token, email: invitation.email, name, password }) });
       const data = await response.json();
       if (response.status === 409 && data.uid) throw new Error('Ese correo ya tiene una cuenta. Inicia sesión con esa cuenta y vuelve a abrir este enlace para aceptar la invitación.');
       if (!response.ok) throw new Error(data.error || 'No se pudo aceptar la invitación.');
-      if (!currentUser) await signInWithEmailAndPassword(auth, invitation.email, password);
+      if (!session) await supabase.auth.signInWithPassword({ email: invitation.email, password });
       router.replace('/onboarding');
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo aceptar la invitación.'); }
     finally { setSaving(false); }

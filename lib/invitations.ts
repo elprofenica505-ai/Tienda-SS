@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Resend } from 'resend';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import type { TenantContext, TenantRole } from '@/lib/tenant';
 import { canAssignRole } from '@/lib/role-policy';
+import { writeImmutableAudit } from '@/lib/audit';
 
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const INVITATION_RESEND_COOLDOWN_MS = 60 * 1000;
@@ -43,27 +43,30 @@ export function invitationExpiry(from = Date.now()): Date {
 }
 
 export function isInvitationExpired(expiresAt: unknown, now = Date.now()): boolean {
-  const value = expiresAt instanceof Date ? expiresAt.getTime() : expiresAt && typeof (expiresAt as { toMillis?: () => number }).toMillis === 'function' ? (expiresAt as { toMillis: () => number }).toMillis() : NaN;
+  const value = expiresAt instanceof Date ? expiresAt.getTime() : typeof expiresAt === 'string' ? Date.parse(expiresAt) : typeof expiresAt === 'number' ? expiresAt : expiresAt && typeof (expiresAt as { toMillis?: () => number }).toMillis === 'function' ? (expiresAt as { toMillis: () => number }).toMillis() : NaN;
   return !Number.isFinite(value) || value <= now;
 }
 
 export function canResendInvitation(lastSentAt: unknown, now = Date.now()): boolean {
   if (!lastSentAt) return true;
-  const value = lastSentAt instanceof Date ? lastSentAt.getTime() : lastSentAt && typeof (lastSentAt as { toMillis?: () => number }).toMillis === 'function' ? (lastSentAt as { toMillis: () => number }).toMillis() : NaN;
+  const value = lastSentAt instanceof Date ? lastSentAt.getTime() : typeof lastSentAt === 'string' ? Date.parse(lastSentAt) : typeof lastSentAt === 'number' ? lastSentAt : lastSentAt && typeof (lastSentAt as { toMillis?: () => number }).toMillis === 'function' ? (lastSentAt as { toMillis: () => number }).toMillis() : NaN;
   return !Number.isFinite(value) || now - value >= INVITATION_RESEND_COOLDOWN_MS;
 }
 
 export async function writeInvitationAudit(tenantId: string, event: string, context: Partial<TenantContext> & { invitationId?: string; email?: string; role?: string; metadata?: Record<string, unknown> }) {
-  const tenantRef = getAdminDb().collection('tenants').doc(tenantId);
-  await tenantRef.collection('auditLogs').doc().set({
-    event,
-    actorUid: context.uid || null,
-    actorRole: context.role || null,
-    invitationId: context.invitationId || null,
-    email: context.email || null,
-    role: context.role || null,
-    metadata: context.metadata || {},
-    createdAt: new Date(),
+  await writeImmutableAudit({
+    tenantId,
+    actor: context,
+    action: event,
+    entity: 'tenant_invitation',
+    entityId: context.invitationId,
+    metadata: {
+      invitationId: context.invitationId || null,
+      email: context.email || null,
+      role: context.role || context.metadata?.role || null,
+      ...context.metadata,
+    },
+    result: 'success',
   });
 }
 

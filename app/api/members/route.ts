@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
 import { tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { canAssignRole, canManageRole } from '@/lib/role-policy';
@@ -15,6 +15,11 @@ function responseFor(error: unknown) {
   if (message.startsWith('SUPABASE_') || message.includes('relation') || message.includes('schema cache')) return NextResponse.json({ error: 'La conexión del servidor con Supabase no está configurada correctamente.' }, { status: 503 });
   const response = tenantErrorResponse(error);
   return NextResponse.json(response.body, { status: response.status });
+}
+async function findAuthUserByEmail(email: string) {
+  const result = await getSupabaseServer().auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (result.error) throw new Error(result.error.message);
+  return (result.data.users || []).find((item) => item.email?.toLowerCase() === email) || null;
 }
 function canManageMemberBranches(context: { role: TenantRole; branchIds: string[] }, member: { branchIds?: unknown }) {
   if (globalMemberRoles.has(context.role)) return true;
@@ -45,15 +50,17 @@ export async function POST(request: NextRequest) {
     if (!canAssignRole(context.role, role)) return NextResponse.json({ error: 'No puedes asignar ese nivel de rol.' }, { status: 403 });
     let memberBranchIds: string[];
     try { memberBranchIds = requestedBranchIds(context, body.branchIds); } catch (error) { return responseFor(error); }
-    let user;
-    try { user = await getAdminAuth().getUserByEmail(email); } catch (error: unknown) {
-      if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
-      user = await getAdminAuth().createUser({ email, password, displayName: name, disabled: false });
+    const auth = getSupabaseServer().auth.admin;
+    let user = await findAuthUserByEmail(email);
+    if (!user) {
+      const created = await auth.createUser({ email, password, user_metadata: { display_name: name }, email_confirm: false });
+      if (created.error || !created.data.user) throw new Error(created.error?.message || 'SUPABASE_AUTH_CREATE_FAILED');
+      user = created.data.user;
     }
-    const existing = await findMemberByAuthUserId(context.tenantId, user.uid);
+    const existing = await findMemberByAuthUserId(context.tenantId, user.id);
     if (existing?.member.status === 'active') return NextResponse.json({ error: 'Ese usuario ya pertenece a esta empresa.' }, { status: 409 });
-    await createMember(context.tenantId, user.uid, name, email, role, memberBranchIds);
-    return NextResponse.json({ ok: true, uid: user.uid, email }, { status: 201 });
+    await createMember(context.tenantId, user.id, name, email, role, memberBranchIds);
+    return NextResponse.json({ ok: true, uid: user.id, email }, { status: 201 });
   } catch (error: unknown) { return responseFor(error); }
 }
 
