@@ -1,143 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import type { DocumentReference } from 'firebase-admin/firestore';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { failedEventRetryable, getStripe, isSubscriptionEvent, shouldApplyEvent } from '@/lib/stripe';
 import { notifyTenant } from '@/lib/notifications';
 import { logEvent } from '@/lib/observability';
 
 export const runtime = 'nodejs';
-
-function subscriptionFields(subscription: Stripe.Subscription, eventCreated: number) {
-  const item = subscription.items.data[0];
-  const priceId = item?.price.id || '';
-  const plan = Object.entries({ starter: process.env.STRIPE_PRICE_STARTER, growth: process.env.STRIPE_PRICE_GROWTH, scale: process.env.STRIPE_PRICE_SCALE }).find(([, value]) => value === priceId)?.[0] || 'starter';
-  return {
-    plan,
-    subscriptionStatus: subscription.status,
-    stripeSubscriptionId: subscription.id,
-    subscriptionCurrentPeriodEnd: new Date(item?.current_period_end ? item.current_period_end * 1000 : Date.now()),
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    lastStripeEventCreated: eventCreated,
-    updatedAt: new Date(),
-  };
-}
-
-async function tenantByCustomer(customer: string) {
-  const snapshot = await getAdminDb().collection('tenants').where('stripeCustomerId', '==', customer).limit(1).get();
-  return snapshot.empty ? null : snapshot.docs[0].ref;
-}
-
-function currencyAmount(value: number | null | undefined) {
-  return typeof value === 'number' ? (value / 100).toFixed(2) : '0.00';
-}
-
-async function claimEvent(eventRef: DocumentReference, event: Stripe.Event): Promise<'claimed' | 'duplicate'> {
-  const db = getAdminDb();
-  return db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(eventRef);
-    const data = snapshot.exists ? snapshot.data() : undefined;
-    if (data?.status === 'processed') return 'duplicate';
-    if (data && !failedEventRetryable(data)) return 'duplicate';
-    transaction.set(eventRef, {
-      eventId: event.id,
-      type: event.type,
-      stripeCreated: event.created,
-      status: 'processing',
-      retryCount: Number(data?.retryCount || 0) + 1,
-      receivedAt: data?.receivedAt || new Date(),
-      processingStartedAt: new Date(),
-      updatedAt: new Date(),
-    }, { merge: true });
-    return 'claimed';
-  });
-}
-
-async function receiveEvent(eventRef: DocumentReference, event: Stripe.Event): Promise<'received' | 'duplicate'> {
-  const db = getAdminDb();
-  return db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(eventRef);
-    if (snapshot.exists && snapshot.data()?.status === 'processed') return 'duplicate';
-    if (!snapshot.exists) transaction.create(eventRef, { eventId: event.id, type: event.type, stripeCreated: event.created, status: 'received', receivedAt: new Date(), retryCount: 0, updatedAt: new Date() });
-    return 'received';
-  });
-}
-
+function subscriptionFields(subscription: Stripe.Subscription, eventCreated: number) { const item = subscription.items.data[0]; const priceId = item?.price.id || ''; const plan = Object.entries({ starter: process.env.STRIPE_PRICE_STARTER, growth: process.env.STRIPE_PRICE_GROWTH, scale: process.env.STRIPE_PRICE_SCALE }).find(([, value]) => value === priceId)?.[0] || 'starter'; return { plan, subscription_status: subscription.status, stripe_subscription_id: subscription.id, subscription_current_period_end: new Date(item?.current_period_end ? item.current_period_end * 1000 : Date.now()).toISOString(), cancel_at_period_end: subscription.cancel_at_period_end, last_stripe_event_created: eventCreated, updated_at: new Date().toISOString() }; }
+async function tenantByCustomer(customer: string) { const result = await getSupabaseServer().from('tenants').select('id').eq('stripe_customer_id', customer).maybeSingle(); if (result.error) throw new Error(result.error.message); return result.data?.id || null; }
+function currencyAmount(value: number | null | undefined) { return typeof value === 'number' ? (value / 100).toFixed(2) : '0.00'; }
+async function claimEvent(event: Stripe.Event) { const supabase = getSupabaseServer(); const existing = await supabase.from('billing_events').select('status,retry_count,updated_at').eq('event_id', event.id).maybeSingle(); if (existing.error) throw new Error(existing.error.message); if (existing.data?.status === 'processed' || (existing.data && !failedEventRetryable(existing.data as any))) return false; const result = await supabase.from('billing_events').upsert({ event_id: event.id, event_type: event.type, stripe_created: event.created, status: 'processing', retry_count: Number(existing.data?.retry_count || 0) + 1, processing_started_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: 'event_id' }); if (result.error) throw new Error(result.error.message); return true; }
 export async function POST(request: NextRequest) {
-  const signature = request.headers.get('stripe-signature');
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!signature || !secret) return NextResponse.json({ error: 'Webhook no configurado.' }, { status: 400 });
-
-  let eventRef: DocumentReference | undefined;
+  const signature = request.headers.get('stripe-signature'); const secret = process.env.STRIPE_WEBHOOK_SECRET; if (!signature || !secret) return NextResponse.json({ error: 'Webhook no configurado.' }, { status: 400 });
+  let event: Stripe.Event | undefined;
   try {
-    const payload = await request.text();
-    const event = getStripe().webhooks.constructEvent(payload, signature, secret);
-    const db = getAdminDb();
-    eventRef = db.collection('billingEvents').doc(event.id);
-    if (await receiveEvent(eventRef, event) === 'duplicate') return NextResponse.json({ received: true, duplicate: true });
-    if (await claimEvent(eventRef, event) === 'duplicate') return NextResponse.json({ received: true, duplicate: true });
-
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const tenantId = session.metadata?.tenantId;
-      if (tenantId && session.subscription) {
-        const tenantRef = db.collection('tenants').doc(tenantId);
-        await db.runTransaction(async (transaction) => {
-          const tenantSnapshot = await transaction.get(tenantRef);
-          if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) transaction.set(tenantRef, { stripeCustomerId: String(session.customer), stripeSubscriptionId: String(session.subscription), plan: session.metadata?.plan || 'starter', subscriptionStatus: 'active', lastStripeEventCreated: event.created, updatedAt: new Date() }, { merge: true });
-        });
-      }
-    }
-
-    if (isSubscriptionEvent(event.type)) {
-      const subscription = event.data.object as Stripe.Subscription;
-      const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id;
-      const tenantRef = subscription.metadata?.tenantId ? db.collection('tenants').doc(subscription.metadata.tenantId) : customerId ? await tenantByCustomer(customerId) : null;
-      if (tenantRef) {
-        await db.runTransaction(async (transaction) => {
-          const tenantSnapshot = await transaction.get(tenantRef);
-          if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) {
-            transaction.set(tenantRef, subscriptionFields(subscription, event.created), { merge: true });
-          }
-        });
-        if (event.type === 'customer.subscription.deleted') {
-          await notifyTenant(tenantRef.id, 'subscription_updated', 'Suscripción cancelada', 'La suscripción de tu empresa fue cancelada. Revisa el plan y la facturación para reactivarla.', { eventId: event.id });
-        }
-      }
-    }
-
-    if (event.type === 'invoice.payment_failed') {
-      const invoice = event.data.object as Stripe.Invoice;
-      const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
-      if (customerId) {
-        const tenantRef = await tenantByCustomer(customerId);
-        if (tenantRef) {
-          await db.runTransaction(async (transaction) => {
-            const tenantSnapshot = await transaction.get(tenantRef);
-            if (!tenantSnapshot.exists || shouldApplyEvent(tenantSnapshot.data()?.lastStripeEventCreated, event.created)) transaction.set(tenantRef, { subscriptionStatus: 'past_due', lastPaymentFailureAt: new Date(), lastStripeEventCreated: event.created, updatedAt: new Date() }, { merge: true });
-          });
-          logEvent('warn', 'alert.billing.payment_failed', { eventId: event.id, invoiceId: invoice.id, tenantId: tenantRef.id });
-          await notifyTenant(tenantRef.id, 'payment_failed', 'Pago de suscripción fallido', `No pudimos procesar el cobro de tu suscripción por $${currencyAmount(invoice.amount_due)}. Actualiza tu método de pago para evitar una interrupción.`, { eventId: event.id, invoiceId: invoice.id });
-        }
-      }
-    }
-
-    if (event.type === 'invoice.upcoming') {
-      const invoice = event.data.object as Stripe.Invoice;
-      const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
-      if (customerId) {
-        const tenantRef = await tenantByCustomer(customerId);
-        if (tenantRef) await notifyTenant(tenantRef.id, 'renewal_upcoming', 'Próxima renovación de suscripción', `Tu suscripción se renovará próximamente por $${currencyAmount(invoice.amount_due)}. Verifica que tu método de pago esté actualizado.`, { eventId: event.id, invoiceId: invoice.id, dueDate: invoice.due_date || null });
-      }
-    }
-
-    await eventRef.update({ status: 'processed', processedAt: new Date(), updatedAt: new Date() });
-    return NextResponse.json({ received: true });
-  } catch (error: unknown) {
-    if (eventRef) {
-      try { await eventRef.set({ status: 'failed', failedAt: new Date(), error: error instanceof Error ? error.message.slice(0, 500) : 'unknown', updatedAt: new Date() }, { merge: true }); } catch { logEvent('error', 'stripe_webhook_event_update_failed', { eventId: eventRef.id }); }
-    }
-    logEvent('error', 'alert.stripe.webhook.failed', { eventId: eventRef?.id, message: error instanceof Error ? error.message : 'unknown' });
-    return NextResponse.json({ error: 'No se pudo procesar el webhook.' }, { status: 500 });
-  }
+    const payload = await request.text(); event = getStripe().webhooks.constructEvent(payload, signature, secret); if (!(await claimEvent(event))) return NextResponse.json({ received: true, duplicate: true }); const supabase = getSupabaseServer();
+    if (event.type === 'checkout.session.completed') { const session = event.data.object as Stripe.Checkout.Session; const tenantId = session.metadata?.tenantId; if (tenantId && session.subscription) { const update = await supabase.from('tenants').update({ stripe_customer_id: String(session.customer), stripe_subscription_id: String(session.subscription), plan: session.metadata?.plan || 'starter', subscription_status: 'active', last_stripe_event_created: event.created, updated_at: new Date().toISOString() }).eq('id', tenantId); if (update.error) throw new Error(update.error.message); } }
+    if (isSubscriptionEvent(event.type)) { const subscription = event.data.object as Stripe.Subscription; const customerId = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer?.id; const tenantId = subscription.metadata?.tenantId || (customerId ? await tenantByCustomer(customerId) : null); if (tenantId) { const current = await supabase.from('tenants').select('last_stripe_event_created').eq('id', tenantId).single(); if (current.error) throw new Error(current.error.message); if (shouldApplyEvent(current.data?.last_stripe_event_created, event.created)) { const update = await supabase.from('tenants').update(subscriptionFields(subscription, event.created)).eq('id', tenantId); if (update.error) throw new Error(update.error.message); } if (event.type === 'customer.subscription.deleted') await notifyTenant(tenantId, 'subscription_updated', 'Suscripción cancelada', 'La suscripción de tu empresa fue cancelada. Revisa el plan y la facturación para reactivarla.', { eventId: event.id }); } }
+    if (event.type === 'invoice.payment_failed') { const invoice = event.data.object as Stripe.Invoice; const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id; if (customerId) { const tenantId = await tenantByCustomer(customerId); if (tenantId) { const update = await supabase.from('tenants').update({ subscription_status: 'past_due', last_payment_failure_at: new Date().toISOString(), last_stripe_event_created: event.created, updated_at: new Date().toISOString() }).eq('id', tenantId); if (update.error) throw new Error(update.error.message); logEvent('warn', 'alert.billing.payment_failed', { eventId: event.id, invoiceId: invoice.id, tenantId }); await notifyTenant(tenantId, 'payment_failed', 'Pago de suscripción fallido', `No pudimos procesar el cobro de tu suscripción por $${currencyAmount(invoice.amount_due)}. Actualiza tu método de pago para evitar una interrupción.`, { eventId: event.id, invoiceId: invoice.id }); } } }
+    if (event.type === 'invoice.upcoming') { const invoice = event.data.object as Stripe.Invoice; const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id; if (customerId) { const tenantId = await tenantByCustomer(customerId); if (tenantId) await notifyTenant(tenantId, 'renewal_upcoming', 'Próxima renovación de suscripción', `Tu suscripción se renovará próximamente por $${currencyAmount(invoice.amount_due)}. Verifica que tu método de pago esté actualizado.`, { eventId: event.id, invoiceId: invoice.id, dueDate: invoice.due_date || null }); } }
+    const done = await supabase.from('billing_events').update({ status: 'processed', processed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('event_id', event.id); if (done.error) throw new Error(done.error.message); return NextResponse.json({ received: true });
+  } catch (error: unknown) { if (event) { try { await getSupabaseServer().from('billing_events').update({ status: 'failed', failed_at: new Date().toISOString(), error: error instanceof Error ? error.message.slice(0, 500) : 'unknown', updated_at: new Date().toISOString() }).eq('event_id', event.id); } catch { logEvent('error', 'stripe_webhook_event_update_failed', { eventId: event.id }); } } logEvent('error', 'alert.stripe.webhook.failed', { eventId: event?.id, message: error instanceof Error ? error.message : 'unknown' }); return NextResponse.json({ error: 'No se pudo procesar el webhook.' }, { status: 500 }); }
 }
