@@ -1,97 +1,18 @@
-import {
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  User as FirebaseUser,
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import type { User } from '@supabase/supabase-js';
+import { getSupabaseBrowser } from '@/lib/supabase/client';
+import { getSupabaseAccessToken, requestSupabasePasswordRecovery, resendSupabaseVerification, signInWithSupabase, signOutSupabase } from '@/lib/supabase/auth';
 import { isValidAuthEmail, normalizeAuthEmail } from '@/lib/auth-policy';
 
-export const ROLES = [
-  'owner',
-  'admin',
-  'gerente',
-  'supervisor_sucursal',
-  'vendedor',
-  'cajero',
-  'bodega',
-  'compras',
-  'chofer',
-  'despachador',
-  'solo_lectura',
-  'jefe',
-] as const;
+export const ROLES = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'] as const;
 export type Rol = (typeof ROLES)[number];
-
-export interface Usuario {
-  id: string;
-  email: string;
-  nombre: string;
-  rol: Rol;
-  activo: boolean;
-}
-
-function userToLegacyProfile(user: FirebaseUser): Usuario {
-  return {
-    id: user.uid,
-    email: user.email || '',
-    nombre: user.displayName || user.email || 'Sin nombre',
-    rol: 'solo_lectura',
-    activo: true,
-  };
-}
-
-/**
- * Firebase Auth is the source of truth for login. Tenant membership and role
- * are loaded by TenantProvider through /api/tenants/me.
- */
-function normalizedEmail(email: string): string {
-  return normalizeAuthEmail(email);
-}
-
-export async function login(email: string, password: string): Promise<FirebaseUser> {
-  const credential = await signInWithEmailAndPassword(auth, normalizedEmail(email), password);
-  return credential.user;
-}
-
-export async function sendVerification(user: FirebaseUser): Promise<void> {
-  await sendEmailVerification(user, {
-    url: `${window.location.origin}/login?verified=1`,
-    handleCodeInApp: false,
-  });
-}
-
-export async function requestPasswordRecovery(email: string): Promise<void> {
-  const value = normalizedEmail(email);
-  if (!isValidAuthEmail(value)) throw new Error('Introduce un correo válido.');
-  await sendPasswordResetEmail(auth, value, {
-    url: `${window.location.origin}/login?reset=1`,
-    handleCodeInApp: false,
-  });
-}
-
-export async function refreshSessionClaims(user: FirebaseUser) {
-  return user.getIdTokenResult(true);
-}
-
-/**
- * Kept for compatibility with older UI code. It no longer reads the removed
- * legacy usuarios/{uid} collection, which was causing permission errors.
- */
-export async function obtenerPerfil(uid: string): Promise<Usuario> {
-  const user = auth.currentUser;
-  if (!user || user.uid !== uid) throw new Error('Usuario no autenticado.');
-  return userToLegacyProfile(user);
-}
-
-export function cerrarSesion() {
-  return signOut(auth);
-}
-
-export function escucharSesion(callback: (usuario: Usuario | null) => void) {
-  return onAuthStateChanged(auth, (user) => {
-    callback(user ? userToLegacyProfile(user) : null);
-  });
-}
+export interface Usuario { id: string; email: string; nombre: string; rol: Rol; activo: boolean; }
+export type AuthUser = User & { uid: string; displayName?: string; getIdToken: () => Promise<string> };
+function adaptUser(user: User): AuthUser { return Object.assign(user, { uid: user.id, displayName: user.user_metadata?.display_name || user.user_metadata?.full_name || undefined, getIdToken: async () => { const token = await getSupabaseAccessToken(); if (!token) throw new Error('SESSION_EXPIRED'); return token; } }); }
+function normalizedEmail(email: string): string { return normalizeAuthEmail(email); }
+export async function login(email: string, password: string): Promise<AuthUser> { return adaptUser(await signInWithSupabase(normalizedEmail(email), password)); }
+export async function sendVerification(user: User): Promise<void> { await resendSupabaseVerification(user.email || ''); }
+export async function requestPasswordRecovery(email: string): Promise<void> { const value = normalizedEmail(email); if (!isValidAuthEmail(value)) throw new Error('Introduce un correo válido.'); await requestSupabasePasswordRecovery(value); }
+export async function refreshSessionClaims(user: User) { const session = await getSupabaseBrowser().auth.refreshSession(); if (session.error) throw new Error(session.error.message); return { user: session.data.user || user, session: session.data.session }; }
+export async function obtenerPerfil(uid: string): Promise<Usuario> { const user = (await getSupabaseBrowser().auth.getUser()).data.user; if (!user || user.id !== uid) throw new Error('Usuario no autenticado.'); return { id: user.id, email: user.email || '', nombre: user.user_metadata?.display_name || user.user_metadata?.full_name || user.email || 'Sin nombre', rol: 'solo_lectura', activo: true }; }
+export function cerrarSesion() { return signOutSupabase(); }
+export function escucharSesion(callback: (usuario: Usuario | null) => void) { const supabase = getSupabaseBrowser(); const { data } = supabase.auth.onAuthStateChange((_event, session) => { const user = session?.user; callback(user ? { id: user.id, email: user.email || '', nombre: user.user_metadata?.display_name || user.user_metadata?.full_name || user.email || 'Sin nombre', rol: 'solo_lectura', activo: true } : null); }); return () => data.subscription.unsubscribe(); }

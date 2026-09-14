@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import type { AuthUser } from '@/lib/auth';
+import { getSupabaseBrowser } from '@/lib/supabase/client';
 
 type CheckStatus = 'idle' | 'running' | 'passed' | 'failed';
 type Check = { id: string; label: string; detail: string; status: CheckStatus; result?: string };
@@ -29,14 +29,14 @@ function StatusBadge({ status }: { status: CheckStatus }) {
 }
 
 export default function SuperadminTestingPage() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [checks, setChecks] = useState<Check[]>(initialChecks);
   const [manual, setManual] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState('');
   const [runningAll, setRunningAll] = useState(false);
 
-  useEffect(() => onAuthStateChanged(auth, (current) => { setUser(current); setAuthLoading(false); }), []);
+  useEffect(() => { const supabase = getSupabaseBrowser(); supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ? Object.assign(data.session.user, { uid: data.session.user.id, displayName: data.session.user.user_metadata?.display_name, getIdToken: async () => data.session?.access_token || '' }) : null); setAuthLoading(false); }); const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user ? Object.assign(session.user, { uid: session.user.id, displayName: session.user.user_metadata?.display_name, getIdToken: async () => (await supabase.auth.getSession()).data.session?.access_token || '' }) : null); setAuthLoading(false); }); return () => listener.subscription.unsubscribe(); }, []);
 
   const completedManual = useMemo(() => manualSteps.filter(([id]) => manual[id]).length, [manual]);
   const completedChecks = checks.filter((item) => item.status === 'passed').length;
@@ -45,7 +45,7 @@ export default function SuperadminTestingPage() {
     setChecks((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   }
 
-  async function runCheck(id: string, currentUser: User) {
+  async function runCheck(id: string, currentUser: AuthUser) {
     updateCheck(id, { status: 'running', result: undefined });
     try {
       const token = await currentUser.getIdToken();
