@@ -21,22 +21,19 @@ test('el stock por almacén nunca acepta cantidades negativas', () => {
 });
 
 test('la API cubre recepción, transferencias, costos y conteos aprobables', () => {
-  assert.match(inventoryApi, /action === 'transfer'/);
   assert.match(inventoryApi, /action === 'count'/);
   assert.match(inventoryApi, /action === 'approve-count'/);
-  assert.match(inventoryApi, /weightedAverageCost/);
-  assert.match(inventoryApi, /inventoryTransfers/);
-  assert.match(inventoryApi, /inventoryCounts/);
+  assert.match(inventoryApi, /adjust_inventory/);
+  assert.match(inventoryApi, /transferencias entre almacenes aún no están habilitadas/);
 });
 
-test('las transferencias soportan ciclo controlado y recepción parcial', () => {
-  assert.match(inventoryApi, /\['create-transfer', 'approve-transfer', 'dispatch-transfer', 'receive-transfer', 'cancel-transfer'\]/);
-  for (const status of ['draft', 'approved', 'in_transit', 'cancelled']) assert.match(inventoryApi, new RegExp(`status: '${status}'|status === '${status}'`));
-  assert.match(inventoryApi, /'received'/);
-  assert.match(inventoryApi, /receivedQuantity/);
-  assert.match(inventoryApi, /remaining/);
-  assert.match(inventoryApi, /transfer_dispatch/);
-  assert.match(inventoryApi, /transfer_receive/);
+test('las transferencias no ejecutan mutaciones no migradas', () => {
+  assert.match(inventoryApi, /create-transfer/);
+  assert.match(inventoryApi, /approve-transfer/);
+  assert.match(inventoryApi, /dispatch-transfer/);
+  assert.match(inventoryApi, /receive-transfer/);
+  assert.match(inventoryApi, /cancel-transfer/);
+  assert.match(inventoryApi, /status: 409/);
 });
 
 test('las compras reciben en el stock canónico del almacén autorizado', () => {
@@ -50,7 +47,7 @@ test('las compras reciben en el stock canónico del almacén autorizado', () => 
 
 test('el inventario aplica ownership server-side por sucursal', () => {
   assert.match(inventoryApi, /requireTenantPermission/);
-  assert.match(inventoryApi, /visibleWarehouses\.some/);
+  assert.match(inventoryApi, /warehouses\.some/);
   assert.match(inventoryApi, /assertBranchAccess/);
   assert.match(inventorySummaryApi, /inventory_movements/);
   assert.match(inventorySummaryApi, /context\.branchIds\.includes/);

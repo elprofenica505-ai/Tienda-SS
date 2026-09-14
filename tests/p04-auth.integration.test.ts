@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { DecodedIdToken } from 'firebase-admin/auth';
-import { assertTokenSessionPolicy, isValidAuthEmail, normalizeAuthEmail } from '@/lib/auth-policy';
+import { assertTokenSessionPolicy, isValidAuthEmail, normalizeAuthEmail, type AuthSessionToken } from '@/lib/auth-policy';
 import { tenantErrorResponse } from '@/lib/tenant';
 
-function token(overrides: Partial<DecodedIdToken> = {}): DecodedIdToken {
+function token(overrides: Partial<AuthSessionToken> = {}): AuthSessionToken {
   return {
     aud: 'test-project',
     auth_time: 1_000,
@@ -17,7 +16,7 @@ function token(overrides: Partial<DecodedIdToken> = {}): DecodedIdToken {
     sub: 'uid-1',
     uid: 'uid-1',
     ...overrides,
-  } as DecodedIdToken;
+  } as AuthSessionToken;
 }
 
 test('P0.4 integración: usuario operativo verificado con sesión vigente puede continuar', () => {

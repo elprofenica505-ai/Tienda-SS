@@ -45,7 +45,7 @@ test('los endpoints no exponen secretos en el cliente', () => {
 });
 
 test('reportes y exportaciones respetan sucursal y rol administrativo', () => {
-  assert.match(reports, /scopedSales/);
+  assert.match(reports, /const sales = .*branch_id/);
   assert.match(reports, /context\.branchIds/);
   assert.match(exportRoute, /context\.branchIds/);
   assert.match(dailyStats, /Las estadísticas globales requieren un rol administrativo/);

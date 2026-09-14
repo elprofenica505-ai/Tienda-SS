@@ -24,11 +24,10 @@ function SecurityContent() {
   const [enrolled, setEnrolled] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  useEffect(() => { let active = true; if (authUser) void hasEnrolledMfa(authUser as never).then((value) => { if (active) setEnrolled(value); }); else setEnrolled(false); return () => { active = false; }; }, [authUser]);
 
   if (loading) return <main className="workspace-page"><section className="workspace-main"><p>Cargando configuración de seguridad…</p></section></main>;
   if (!authUser || !member || !ADMIN_ROLES.has(member.role)) return <main className="workspace-page"><section className="workspace-main"><h1>Acceso restringido</h1><p>Solo los administradores pueden gestionar la autenticación multifactor.</p></section></main>;
-
-  useEffect(() => { let active = true; void hasEnrolledMfa(authUser as never).then((value) => { if (active) setEnrolled(value); }); return () => { active = false; }; }, [authUser]);
 
   async function startEnrollment() {
     setBusy(true); setMessage('');

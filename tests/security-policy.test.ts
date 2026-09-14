@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { DecodedIdToken } from 'firebase-admin/auth';
-import { assertTenantSessionNotRevoked, assertTokenSessionPolicy, isValidAuthEmail, normalizeAuthEmail } from '@/lib/auth-policy';
+import { assertTenantSessionNotRevoked, assertTokenSessionPolicy, isValidAuthEmail, normalizeAuthEmail, type AuthSessionToken } from '@/lib/auth-policy';
 import { assertBranchAccess, assertWritableFields, filterByBranch } from '@/lib/data-scope';
 import { filterOrganizationMembers } from '@/lib/organization';
 import { buildRateLimitKey } from '@/lib/rate-limit';
@@ -13,15 +12,15 @@ const baseToken = {
 } as unknown as { auth_time: number; email_verified: boolean; firebase: { sign_in_provider: string } };
 
 test('la política rechaza sesiones antiguas y no bloquea MFA por defecto', () => {
-  assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_000 + 12 * 60 * 60 + 1), /SESSION_EXPIRED/);
-  assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001));
+  assert.throws(() => assertTokenSessionPolicy(baseToken as AuthSessionToken, 'admin', 1_000 + 12 * 60 * 60 + 1), /SESSION_EXPIRED/);
+  assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as AuthSessionToken, 'admin', 1_001));
 });
 
 test('MFA administrativo permanece disponible como opción explícita', () => {
   const previous = process.env.AUTH_REQUIRE_MFA_ADMIN;
   process.env.AUTH_REQUIRE_MFA_ADMIN = 'true';
   try {
-    assert.throws(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001), /MFA_REQUIRED/);
+    assert.throws(() => assertTokenSessionPolicy(baseToken as AuthSessionToken, 'admin', 1_001), /MFA_REQUIRED/);
   } finally {
     if (previous === undefined) delete process.env.AUTH_REQUIRE_MFA_ADMIN;
     else process.env.AUTH_REQUIRE_MFA_ADMIN = previous;
@@ -34,8 +33,8 @@ test('MFA administrativo no bloquea producción sin enrolamiento explícito', ()
   process.env.VERCEL_ENV = 'production';
   delete process.env.AUTH_REQUIRE_MFA_ADMIN;
   try {
-    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'owner', 1_001));
-    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as unknown as DecodedIdToken, 'admin', 1_001));
+    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as AuthSessionToken, 'owner', 1_001));
+    assert.doesNotThrow(() => assertTokenSessionPolicy(baseToken as AuthSessionToken, 'admin', 1_001));
   } finally {
     if (previousVercelEnv === undefined) delete process.env.VERCEL_ENV;
     else process.env.VERCEL_ENV = previousVercelEnv;
@@ -51,14 +50,14 @@ test('recuperación normaliza y valida el correo de forma determinista', () => {
 });
 
 test('la política exige correo verificado', () => {
-  assert.throws(() => assertTokenSessionPolicy({ ...baseToken, email_verified: false } as unknown as DecodedIdToken, 'vendedor', 1_001), /EMAIL_NOT_VERIFIED/);
+  assert.throws(() => assertTokenSessionPolicy({ ...baseToken, email_verified: false } as AuthSessionToken, 'vendedor', 1_001), /EMAIL_NOT_VERIFIED/);
 });
 
 test('la revocación por tenant bloquea tokens anteriores y permite tokens posteriores', () => {
   const revokedAt = new Date(2_000 * 1000);
-  assert.throws(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 2_000 } as unknown as DecodedIdToken, revokedAt), /SESSION_REVOKED/);
-  assert.doesNotThrow(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 2_001 } as unknown as DecodedIdToken, revokedAt));
-  assert.doesNotThrow(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 1_000 } as unknown as DecodedIdToken, undefined));
+  assert.throws(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 2_000 } as AuthSessionToken, revokedAt), /SESSION_REVOKED/);
+  assert.doesNotThrow(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 2_001 } as AuthSessionToken, revokedAt));
+  assert.doesNotThrow(() => assertTenantSessionNotRevoked({ ...baseToken, auth_time: 1_000 } as AuthSessionToken, undefined));
 });
 
 test('roles operativos solo leen su sucursal y no reciben campos sensibles', () => {
