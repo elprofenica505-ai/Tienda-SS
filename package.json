@@ -18,8 +18,7 @@
     "test:e2e:report": "playwright show-report",
     "start": "next start",
     "lint": "eslint .",
-    "test:permissions": "node --import tsx --test tests/permissions.test.ts tests/role-policy.test.ts tests/security-policy.test.ts",
-    "test:migrations": "node --import tsx --test tests/migrate-user-roles.test.ts tests/migrate-inventory-stocks.test.ts"
+    "test:permissions": "node --import tsx --test tests/permissions.test.ts tests/role-policy.test.ts tests/security-policy.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
