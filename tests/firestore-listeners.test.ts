@@ -19,7 +19,6 @@ test('onSnapshot queda encapsulado en el hook realtime', () => {
     'app/workspace/catalog/page.tsx',
     'app/workspace/inventory/page.tsx',
     'components/tenant/TenantProvider.tsx',
-    'components/legacy/LegacyApp.tsx',
     'components/ProductosAdmin.tsx',
     'lib/firebase.ts',
   ];

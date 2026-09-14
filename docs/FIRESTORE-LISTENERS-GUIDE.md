@@ -10,17 +10,17 @@ La carga inicial de listados, catálogos, ventas, compras, reportes y dashboards
 
 La auditoría de la rama `SaaS-MultiTenant-Profesional` no encontró usos de `onSnapshot` en componentes de negocio, providers ni rutas activas. El único uso permitido queda encapsulado en `hooks/useFirestoreCollection.ts`, dentro de `useCollectionRealtime`, para evitar que cada pantalla implemente listeners sin cleanup.
 
-La revisión histórica de Git confirmó que versiones anteriores sí usaban `onSnapshot` en `components/ProductosAdmin.tsx` y `components/legacy/LegacyApp.tsx`. Esos listeners fueron reemplazados por cargas puntuales antes de la medición actual. También se encontró un polling de la auditoría de superadmin cada 10 segundos; ahora la auditoría se actualiza al entrar, al cambiar filtros/página o al pulsar la actualización manual, y ya no permanece consultando en segundo plano.
+La revisión histórica de Git confirmó que versiones anteriores sí usaban `onSnapshot` en `components/ProductosAdmin.tsx` y `components/legacy/LegacyApp.tsx`. El árbol `LegacyApp` fue retirado del producto; `ProductosAdmin` queda pendiente de la limpieza final de componentes históricos. También se encontró un polling de la auditoría de superadmin cada 10 segundos; ahora la auditoría se actualiza al entrar, al cambiar filtros/página o al pulsar la actualización manual, y ya no permanece consultando en segundo plano.
 
-El `onAuthStateChanged` de `components/tenant/TenantProvider.tsx` es un listener de Firebase Authentication, no un listener de lecturas de Firestore. Su callback devuelve el cleanup de Firebase Auth al desmontar el provider. No se debe confundir con `onSnapshot`.
+El `onAuthStateChange` de `components/tenant/TenantProvider.tsx` es un listener de Supabase Auth, no un listener de lecturas de Firestore. Su callback devuelve el cleanup al desmontar el provider. No se debe confundir con `onSnapshot`.
 
 | Zona auditada | Resultado | Decisión |
 |---|---|---|
 | `components/tenant/TenantProvider.tsx` | `onAuthStateChanged` de Auth | Se conserva; es necesario para conocer login/logout y tiene cleanup. |
-| `components/ProductosAdmin.tsx` | Carga puntual de productos y categorías | Usa `useCollectionOnce`; no abre listener. |
-| `components/legacy/LegacyApp.tsx` | Cargas puntuales con `getDocs`/`getDoc` | Se mantienen puntuales; el flujo legacy no usa realtime. Las versiones históricas tenían listeners y fueron corregidas. |
+| `components/ProductosAdmin.tsx` | Componente histórico | No forma parte del Workspace activo; queda para la limpieza final. |
+| `components/legacy/LegacyApp.tsx` | Componente histórico | Eliminado de la rama `migration/supabase-only`; no existe una ruta activa que lo renderice. |
 | `app/superadmin/page.tsx` | Auditoría administrativa | Se eliminó el polling de 10 segundos; la actualización es bajo demanda. |
-| Workspace SaaS | Lecturas mediante rutas API con Admin SDK | No mantiene listeners Firestore en el navegador. |
+| Workspace SaaS | Lecturas mediante rutas API con Supabase | No mantiene listeners Firestore en el navegador. |
 | `hooks/useFirestoreCollection.ts` | Implementación común de carga puntual y realtime | `useCollectionOnce` es la opción por defecto; `useCollectionRealtime` exige una decisión explícita. |
 
 ## Hooks reutilizables
@@ -33,9 +33,9 @@ El `onAuthStateChanged` de `components/tenant/TenantProvider.tsx` es un listener
 
 ## Aplicación actual
 
-`components/ProductosAdmin.tsx` usa `useCollectionOnce` para cargar como máximo 25 productos y 100 categorías. Las cargas de productos del flujo SaaS se realizan a través de endpoints API paginados, por lo que el navegador no ejecuta consultas libres ni listeners directos sobre las colecciones multi-tenant.
+Las cargas de productos del flujo SaaS se realizan a través de endpoints API paginados, por lo que el navegador no ejecuta consultas libres ni listeners directos sobre las colecciones multi-tenant. `ProductosAdmin` es un componente histórico pendiente de eliminación.
 
-No se modificó el login multi-tenant. La suscripción de Firebase Auth se conserva porque determina el estado de autenticación y se desmonta automáticamente mediante la función retornada por `onAuthStateChanged`.
+El login multi-tenant usa Supabase Auth. La suscripción se desmonta automáticamente mediante la función retornada por `onAuthStateChange`.
 
 ## Verificación en Firebase Console
 
