@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
@@ -40,23 +39,22 @@ export async function POST(request: NextRequest) {
     if (!branchId) throw new Error('BRANCH_NOT_FOUND');
     assertBranchAccess(context, branchId);
 
-    const db = getAdminDb();
-    const presaleRef = db.collection('tenants').doc(context.tenantId).collection('presales').doc(presaleId);
-    const presaleSnapshot = await presaleRef.get();
-    if (!presaleSnapshot.exists) throw new Error('PRESALE_NOT_FOUND');
-    const presale = presaleSnapshot.data() || {};
-    if (presale.status === 'paid') return NextResponse.json({ ok: true, saleId: presale.saleId, total: Number(presale.total || 0), alreadyPaid: true });
+    const supabase = getSupabaseServer();
+    const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
+    if (presaleResult.error) throw new Error(presaleResult.error.message);
+    if (!presaleResult.data) throw new Error('PRESALE_NOT_FOUND');
+    const presale = presaleResult.data;
+    if (presale.status === 'paid') return NextResponse.json({ ok: true, saleId: presale.sale_id, total: Number(presale.total || 0), alreadyPaid: true });
     if (presale.status !== 'sent_to_cashier') throw new Error('PRESALE_NOT_READY');
-    const rawItems = Array.isArray(presale.items) ? presale.items : [];
+    const rawItems = Array.isArray(presale.items) ? presale.items as Array<Record<string, unknown>> : [];
     const itemsMap = new Map<string, number>();
     rawItems.forEach((item: Record<string, unknown>) => { const id = text(item.productId, 128); const quantity = Number(item.quantity); if (id && Number.isInteger(quantity) && quantity > 0) itemsMap.set(id, (itemsMap.get(id) || 0) + quantity); });
     if (!itemsMap.size) throw new Error('PRESALE_EMPTY');
-    const presaleTotal = money(presale.total);
+    const presaleTotal = money(Number(presale.total));
     const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : 0;
     if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
-    const supabase = getSupabaseServer();
     const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
@@ -83,7 +81,7 @@ export async function POST(request: NextRequest) {
       target_payment_method: paymentMethod,
       target_discount: money(body.discount),
       target_idempotency_key: `presale:${presaleId}`,
-      target_metadata: { presaleId, ticketCode: text(presale.ticketCode, 80), cashReceived, changeAmount, sellerUid: text(presale.vendedorUid, 128), sellerEmail: text(presale.vendedorEmail, 160) },
+      target_metadata: { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) },
       target_items: items,
     });
     if (result.error) throw new Error(result.error.message);
@@ -91,10 +89,12 @@ export async function POST(request: NextRequest) {
     const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
     const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
     const issuer = { legalName: fiscalConfig.data?.legal_name || undefined, taxId: fiscalConfig.data?.tax_id || undefined, address: typeof fiscalMetadata.address === 'string' ? fiscalMetadata.address : undefined, phone: typeof fiscalMetadata.phone === 'string' ? fiscalMetadata.phone : undefined, email: typeof fiscalMetadata.email === 'string' ? fiscalMetadata.email : undefined, logoDataUrl: typeof fiscalMetadata.logoDataUrl === 'string' ? fiscalMetadata.logoDataUrl : undefined };
-    const sellerProfile = presale.vendedorUid ? await supabase.from('profiles').select('display_name,email').eq('auth_user_id', presale.vendedorUid).maybeSingle() : { data: null };
-    const seller = { name: sellerProfile.data?.display_name || presale.vendedorEmail || presale.vendedorUid || 'Vendedor', email: sellerProfile.data?.email || presale.vendedorEmail || undefined };
-    await presaleRef.update({ status: 'paid', saleId: data.saleId, paidBy: context.uid, paidAt: new Date(), updatedAt: new Date() });
+    const sellerProfile = presale.seller_uid ? await supabase.from('profiles').select('display_name,email').eq('auth_user_id', presale.seller_uid).maybeSingle() : { data: null };
+    const seller = { name: sellerProfile.data?.display_name || presale.seller_email || presale.seller_uid || 'Vendedor', email: sellerProfile.data?.email || presale.seller_email || undefined };
+    const updatedPresale = await supabase.from('presales').update({ status: 'paid', sale_id: data.saleId, paid_by: context.uid, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId).eq('status', 'sent_to_cashier').select('id').maybeSingle();
+    if (updatedPresale.error) throw new Error(updatedPresale.error.message);
+    if (!updatedPresale.data) throw new Error('PRESALE_NOT_READY');
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
-    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticketCode, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
+    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
