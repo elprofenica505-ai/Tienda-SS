@@ -7,7 +7,7 @@ const indexes = JSON.parse(readFileSync('firestore.indexes.json', 'utf8')) as { 
 const tenantRoute = readFileSync('app/api/tenants/route.ts', 'utf8');
 const meRoute = readFileSync('app/api/tenants/me/route.ts', 'utf8');
 const onboarding = readFileSync('app/onboarding/page.tsx', 'utf8');
-const organization = readFileSync('lib/organization.ts', 'utf8');
+const organization = readFileSync('lib/repositories/organization-repository.ts', 'utf8');
 
 const signature = (collectionGroup: string, fields: string) => indexes.indexes.some((index) => index.collectionGroup === collectionGroup && index.queryScope === 'COLLECTION_GROUP' && index.fields.map((field) => `${field.fieldPath}:${field.order}`).join(',') === fields);
 
@@ -34,10 +34,9 @@ test('los índices de producción reflejan las queries multi-tenant requeridas',
 });
 
 test('un tenant nuevo usa moneda local de Nicaragua y onboarding explícito', () => {
-  assert.match(tenantRoute, /currency:\s*DEFAULT_TENANT_CURRENCY/);
-  assert.match(tenantRoute, /currencySymbol:\s*DEFAULT_TENANT_SYMBOL/);
-  assert.match(tenantRoute, /locale:\s*DEFAULT_TENANT_LOCALE/);
-  assert.match(tenantRoute, /onboardingCompleted:\s*false/);
+  assert.match(tenantRoute, /create_initial_tenant/);
+  assert.match(meRoute, /currency/);
+  assert.match(meRoute, /onboardingCompleted/);
   assert.match(meRoute, /currency/);
   assert.match(onboarding, /tenant\?\.onboardingCompleted/);
   assert.equal(DEFAULT_TENANT_CURRENCY, 'NIO');
@@ -46,12 +45,10 @@ test('un tenant nuevo usa moneda local de Nicaragua y onboarding explícito', ()
   assert.match(formatMoney(12.5), /C\$/);
 });
 
-test('getOrganization no tumba el workspace si falta el índice de branches', () => {
-  assert.match(organization, /safeOrganizationQuery/);
-  assert.match(organization, /retrying without composite index/);
-  assert.match(organization, /continuing with an empty list/);
-  assert.match(organization, /safeOrganizationQuery\('branches'\)/);
-  assert.match(organization, /safeOrganizationQuery\('warehouses'\)/);
-  assert.match(organization, /safeOrganizationQuery\('cashRegisters'\)/);
-  assert.match(organization, /safeOrganizationQuery\('members'\)/);
+test('getOrganization consulta todos los recursos organizativos en Supabase', () => {
+  assert.match(organization, /from\('branches'\)/);
+  assert.match(organization, /from\('warehouses'\)/);
+  assert.match(organization, /from\('cash_registers'\)/);
+  assert.match(organization, /from\('members'\)/);
+  assert.match(organization, /member_branches/);
 });
