@@ -29,8 +29,8 @@ test('las anulaciones bloquean ventas pagadas y revierten crédito pendiente', (
 test('las notas de crédito limitan monto y actualizan cartera', () => {
   assert.match(notesApi, /CREDIT_NOTE_EXCEEDS_TOTAL/);
   assert.match(notesApi, /assertBranchAccess/);
-  assert.match(notesApi, /creditMovements/);
-  assert.match(notesApi, /status: 'applied'/);
+  assert.match(notesApi, /create_credit_note/);
+  assert.match(notesApi, /writeImmutableAudit/);
 });
 
 test('la interfaz ofrece las tres acciones comerciales', () => {
