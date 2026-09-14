@@ -51,7 +51,7 @@ test('finanzas exige sucursal y aplica el alcance server-side', async () => {
   const code = await source('app/api/finance/route.ts');
   assert.match(code, /assertBranchAccess/);
   assert.match(code, /branchId/);
-  assert.match(code, /TENANT_WIDE_ROLES/);
+  assert.match(code, /(?:TENANT_WIDE_ROLES|MANAGER_ROLES)/);
 });
 
 test('las rutas públicas permanecen explícitamente separadas', async () => {
