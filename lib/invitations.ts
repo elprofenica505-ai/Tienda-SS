@@ -34,7 +34,8 @@ export function hashInvitationToken(token: string): string {
 }
 
 export function invitationUrl(token: string): string {
-  const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '';
+  const base = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || vercelUrl || 'http://localhost:3000').replace(/\/$/, '');
   return `${base}/accept-invitation?token=${encodeURIComponent(token)}`;
 }
 

@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       if (update.error) throw new Error(update.error.message);
       const delivery = await sendInvitationEmail(current.data.email, tenantName, current.data.role, invitationUrl(token));
       await writeInvitationAudit(context.tenantId, 'invitation.resent', { ...context, invitationId, email: current.data.email, metadata: { delivery, role: current.data.role } });
-      return NextResponse.json({ ok: true, invitationId, expiresAt, delivery });
+      return NextResponse.json({ ok: true, invitationId, expiresAt, delivery, ...(delivery === 'sent' ? {} : { warning: 'El correo no pudo enviarse. Comparte el enlace de invitación por un canal seguro.', invitationUrl: invitationUrl(token) }) });
     }
 
     const email = normalizeInvitationEmail(body.email);
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     if (created.error) throw new Error(created.error.message);
     const delivery = await sendInvitationEmail(email, tenantName, role, invitationUrl(token));
     await writeInvitationAudit(context.tenantId, 'invitation.created', { ...context, invitationId: created.data.id, email, metadata: { role, delivery } });
-    return NextResponse.json({ ok: true, invitation: { id: created.data.id, email, role, status: 'pending', expiresAt, delivery }, ...(process.env.NODE_ENV !== 'production' ? { invitationUrl: invitationUrl(token) } : {}) }, { status: 201 });
+    return NextResponse.json({ ok: true, invitation: { id: created.data.id, email, role, status: 'pending', expiresAt, delivery }, ...(delivery === 'sent' ? {} : { warning: 'El correo no pudo enviarse. Comparte el enlace de invitación por un canal seguro.', invitationUrl: invitationUrl(token) }) }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
 

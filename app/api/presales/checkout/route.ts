@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
     if (presaleResult.error) throw new Error(presaleResult.error.message);
     if (!presaleResult.data) throw new Error('PRESALE_NOT_FOUND');
     const presale = presaleResult.data;
+    if (presale.branch_id && presale.branch_id !== branchId) throw new Error('BRANCH_NOT_FOUND');
     if (presale.status === 'paid') return NextResponse.json({ ok: true, saleId: presale.sale_id, total: Number(presale.total || 0), alreadyPaid: true });
     if (presale.status !== 'sent_to_cashier') throw new Error('PRESALE_NOT_READY');
     const rawItems = Array.isArray(presale.items) ? presale.items as Array<Record<string, unknown>> : [];
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest) {
     if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
-    const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
+    const requestedWarehouseId = text(body.warehouseId, 128);
+    const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).match(requestedWarehouseId ? { id: requestedWarehouseId } : {}).order('name').limit(1).maybeSingle();
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
     const warehouseId = warehouse.data.id;

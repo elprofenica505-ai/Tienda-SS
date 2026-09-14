@@ -22,12 +22,25 @@ export async function GET(request: NextRequest) {
     if (rawCursor) { try { const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string }; if (cursor.name && cursor.id) productQuery = productQuery.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`); } catch { return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 }); } }
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const [movementsResult, productsResult] = await Promise.all([
-      supabase.from('inventory_movements').select('*').eq('tenant_id', context.tenantId).gte('created_at', cutoff).order('created_at', { ascending: false }).limit(DEFAULT_PAGE_SIZE),
+      supabase.from('inventory_movements').select('id,product_id,warehouse_id,movement_type,quantity,unit_cost,reference_type,reference_id,performed_by,metadata,created_at,warehouses!inner(branch_id)').eq('tenant_id', context.tenantId).gte('created_at', cutoff).order('created_at', { ascending: false }).limit(DEFAULT_PAGE_SIZE),
       productsRequested ? productQuery : Promise.resolve({ data: [], error: null } as any),
     ]);
     if (movementsResult.error) throw new Error(movementsResult.error.message);
     if (productsResult.error) throw new Error(productsResult.error.message);
-    const movements = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String(row.branch_id || '')));
+    const movements = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String((row as any).warehouses?.branch_id || ''))).map((row: any) => ({
+      id: row.id,
+      productId: row.product_id,
+      warehouseId: row.warehouse_id,
+      type: row.movement_type,
+      quantity: Number(row.quantity || 0),
+      delta: Number(row.quantity || 0),
+      reason: row.metadata?.reason || row.metadata?.notes || row.reference_type || 'Movimiento de inventario',
+      referenceType: row.reference_type,
+      referenceId: row.reference_id,
+      unitCost: Number(row.unit_cost || 0),
+      performedBy: row.performed_by,
+      createdAt: row.created_at,
+    }));
     const productPage = (productsResult.data || []).slice(0, pageSize);
     const productIds = productPage.map((row: any) => row.id);
     const stocks = productIds.length ? await supabase.from('inventory_stocks').select('product_id, quantity, reorder_point, warehouse_id').eq('tenant_id', context.tenantId).in('product_id', productIds) : { data: [], error: null };
