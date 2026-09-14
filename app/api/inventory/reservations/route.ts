@@ -1,21 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
-import { inventoryNumber, stockAfterDelta, stockKey } from '@/lib/inventory-cost';
 
 export const runtime = 'nodejs';
-function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
-function quantity(value: unknown) { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0; }
 
-async function warehouseFor(tenant: FirebaseFirestore.DocumentReference, context: Parameters<typeof assertBranchAccess>[0], warehouseId: string) {
-  const snapshot = await tenant.collection('warehouses').doc(warehouseId).get();
-  if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('WAREHOUSE_NOT_FOUND');
-  const branchId = text(snapshot.data()?.branchId, 128);
-  if (!branchId) throw new Error('WAREHOUSE_BRANCH_REQUIRED');
-  assertBranchAccess(context, branchId);
-  return { id: warehouseId, branchId, ...snapshot.data() };
+function text(value: unknown, max = 160) {
+  return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+function quantity(value: unknown) {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function rpcError(error: unknown) {
+  return error instanceof Error ? error.message : String(error || '');
+}
+
+async function resolveId(table: 'branches' | 'warehouses' | 'products', tenantId: string, value: string) {
+  const supabase = getSupabaseServer();
+  if (isUuid(value)) {
+    const direct = await supabase.from(table).select('id, legacy_firestore_id, tenant_id, branch_id, active, item_type').eq('tenant_id', tenantId).eq('id', value).maybeSingle();
+    if (direct.error) throw new Error(direct.error.message);
+    if (direct.data) return direct.data as Record<string, any>;
+  }
+  const legacy = await supabase.from(table).select('id, legacy_firestore_id, tenant_id, branch_id, active, item_type').eq('tenant_id', tenantId).eq('legacy_firestore_id', value).maybeSingle();
+  if (legacy.error) throw new Error(legacy.error.message);
+  return legacy.data as Record<string, any> | null;
+}
+
+function responseFor(error: unknown) {
+  const message = rpcError(error);
+  if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'Uno de los productos no existe o está archivado.' }, { status: 404 });
+  if (message.includes('INSUFFICIENT_WAREHOUSE_STOCK')) return NextResponse.json({ error: 'No hay stock suficiente para completar la reserva.' }, { status: 409 });
+  if (message.includes('RESERVATION_EMPTY')) return NextResponse.json({ error: 'No se puede reservar únicamente servicios.' }, { status: 400 });
+  if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
+  if (message.includes('RESERVATION_NOT_FOUND')) return NextResponse.json({ error: 'La reserva no existe.' }, { status: 404 });
+  if (message.includes('RESERVATION_CLOSED')) return NextResponse.json({ error: 'La reserva ya fue cerrada.' }, { status: 409 });
+  if (message.includes('RESERVATION_STOCK_INCONSISTENT') || message.includes('STOCK_ROW_NOT_FOUND')) return NextResponse.json({ error: 'No se pudo liberar la reserva por inconsistencia de stock.' }, { status: 409 });
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
 }
 
 export async function POST(request: NextRequest) {
@@ -23,58 +52,45 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'edit');
     const body = await request.json();
     const branchId = text(body.branchId, 128) || request.headers.get('x-branch-id')?.trim() || context.branchIds[0] || '';
-    const warehouseId = text(body.warehouseId, 128) || 'warehouse-main';
+    const warehouseId = text(body.warehouseId, 128) || '';
     if (!branchId) return NextResponse.json({ error: 'La sucursal es obligatoria para reservar inventario.' }, { status: 400 });
+    if (!warehouseId) return NextResponse.json({ error: 'El almacén es obligatorio para reservar inventario.' }, { status: 400 });
     assertBranchAccess(context, branchId);
+    const branch = await resolveId('branches', context.tenantId, branchId);
+    const warehouse = await resolveId('warehouses', context.tenantId, warehouseId);
+    if (!branch) return NextResponse.json({ error: 'La sucursal no existe en este tenant.' }, { status: 404 });
+    if (!warehouse || warehouse.active === false) return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
+    if (String(warehouse.branch_id) !== String(branch.id)) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal indicada.' }, { status: 400 });
+
     const rawItems = Array.isArray(body.items) ? body.items : [];
-    const items = new Map<string, number>();
+    const requested = new Map<string, number>();
     for (const item of rawItems) {
       const productId = text(item?.productId, 120);
-      const requested = quantity(item?.quantity);
-      if (productId && requested) items.set(productId, (items.get(productId) || 0) + requested);
+      const amount = quantity(item?.quantity);
+      if (productId && amount) requested.set(productId, (requested.get(productId) || 0) + amount);
     }
-    if (!items.size) return NextResponse.json({ error: 'La reserva debe contener productos y cantidades válidas.' }, { status: 400 });
-    const db = getAdminDb();
-    const tenant = db.collection('tenants').doc(context.tenantId);
-    const warehouse = await warehouseFor(tenant, context, warehouseId);
-    if (warehouse.branchId !== branchId) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal indicada.' }, { status: 400 });
-    const reservationRef = tenant.collection('stockReservations').doc();
-    const productRefs = Array.from(items.keys()).map((id) => tenant.collection('products').doc(id));
-    const stockRefs = Array.from(items.keys()).map((id) => tenant.collection('inventoryStocks').doc(stockKey(warehouseId, id)));
-    const result = await db.runTransaction(async (transaction) => {
-      const snapshots = await transaction.getAll(...productRefs);
-      const stocks = await transaction.getAll(...stockRefs);
-      const stockById = new Map(stocks.map((snapshot) => [snapshot.id, snapshot]));
-      const reservationItems: Array<{ productId: string; quantity: number }> = [];
-      snapshots.forEach((snapshot, index) => {
-        const productId = productRefs[index].id;
-        const requested = items.get(productId) || 0;
-        if (!snapshot.exists || snapshot.data()?.active === false) throw new Error('PRODUCT_NOT_FOUND');
-        const data = snapshot.data() || {};
-        if (data.itemType === 'service') return;
-        const stock = stockById.get(stockRefs[index].id);
-        const currentStock = stock?.exists ? inventoryNumber(stock.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(data.stock) : 0;
-        const newStock = stockAfterDelta(currentStock, -requested);
-        transaction.set(stockRefs[index], { warehouseId, branchId, productId, quantity: newStock, averageCost: inventoryNumber(stock?.data()?.averageCost || data.averageCost), updatedAt: new Date(), updatedBy: context.uid }, { merge: true });
-        if (warehouseId === 'warehouse-main') transaction.update(productRefs[index], { stock: newStock, updatedAt: new Date(), updatedBy: context.uid });
-        transaction.set(tenant.collection('inventoryMovements').doc(), { warehouseId, branchId, productId, type: 'reserve', quantity: requested, delta: -requested, previousStock: currentStock, newStock, reason: `Reserva ${reservationRef.id}`, reservationId: reservationRef.id, createdBy: context.uid, createdAt: new Date() });
-        reservationItems.push({ productId, quantity: requested });
-      });
-      if (!reservationItems.length) throw new Error('RESERVATION_EMPTY');
-      const now = new Date();
-      transaction.create(reservationRef, { branchId, warehouseId, items: reservationItems, status: 'active', reason: text(body.reason, 300) || 'Reserva de stock', createdBy: context.uid, createdAt: now, expiresAt: new Date(now.getTime() + 30 * 60 * 1000) });
-      return { reservationId: reservationRef.id, branchId, warehouseId, items: reservationItems, status: 'active' };
+    if (!requested.size) return NextResponse.json({ error: 'La reserva debe contener productos y cantidades válidas.' }, { status: 400 });
+    const items: Array<{ productId: string; quantity: number }> = [];
+    for (const [productId, amount] of Array.from(requested.entries())) {
+      const product = await resolveId('products', context.tenantId, productId);
+      if (!product || product.active === false) throw new Error('PRODUCT_NOT_FOUND');
+      items.push({ productId: String(product.id), quantity: amount });
+    }
+
+    const result = await getSupabaseServer().rpc('reserve_inventory', {
+      target_tenant_id: context.tenantId,
+      target_branch_id: branch.id,
+      target_warehouse_id: warehouse.id,
+      target_user_id: context.uid,
+      target_items: items,
+      target_reason: text(body.reason, 300) || 'Reserva de stock',
     });
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.stock_reserved', entity: 'stockReservation', entityId: result.reservationId, after: result, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory/reservations' }, result: 'success' });
-    return NextResponse.json({ ok: true, ...result }, { status: 201 });
+    if (result.error) throw new Error(result.error.message);
+    const payload = result.data as Record<string, unknown>;
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.stock_reserved', entity: 'inventory_reservation', entityId: String(payload.reservationId), after: payload, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory/reservations' }, result: 'success' });
+    return NextResponse.json({ ok: true, ...payload }, { status: 201 });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    if (message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos no existe o está archivado.' }, { status: 404 });
-    if (message === 'INSUFFICIENT_WAREHOUSE_STOCK') return NextResponse.json({ error: 'No hay stock suficiente para completar la reserva.' }, { status: 409 });
-    if (message === 'RESERVATION_EMPTY') return NextResponse.json({ error: 'No se puede reservar únicamente servicios.' }, { status: 400 });
-    if (message === 'WAREHOUSE_NOT_FOUND') return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
-    if (message === 'WAREHOUSE_BRANCH_REQUIRED') return NextResponse.json({ error: 'El almacén no tiene una sucursal válida.' }, { status: 409 });
-    const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
+    return responseFor(error);
   }
 }
 
@@ -83,42 +99,22 @@ export async function DELETE(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'edit');
     const reservationId = text(new URL(request.url).searchParams.get('id'), 120);
     if (!reservationId) return NextResponse.json({ error: 'La reserva es obligatoria.' }, { status: 400 });
-    const db = getAdminDb();
-    const tenant = db.collection('tenants').doc(context.tenantId);
-    const reservationRef = tenant.collection('stockReservations').doc(reservationId);
-    const result = await db.runTransaction(async (transaction) => {
-      const reservationSnapshot = await transaction.get(reservationRef);
-      if (!reservationSnapshot.exists) throw new Error('RESERVATION_NOT_FOUND');
-      const reservation = reservationSnapshot.data() || {};
-      if (reservation.status !== 'active') throw new Error('RESERVATION_CLOSED');
-      const branchId = text(reservation.branchId, 128);
-      const warehouseId = text(reservation.warehouseId, 128) || 'warehouse-main';
-      assertBranchAccess(context, branchId);
-      const items = Array.isArray(reservation.items) ? reservation.items as Array<Record<string, unknown>> : [];
-      const productRefs = items.map((item) => tenant.collection('products').doc(text(item.productId, 120)));
-      const stockRefs = items.map((item) => tenant.collection('inventoryStocks').doc(stockKey(warehouseId, text(item.productId, 120))));
-      const [productSnapshots, stockSnapshots] = await Promise.all([transaction.getAll(...productRefs), transaction.getAll(...stockRefs)]);
-      stockSnapshots.forEach((stockSnapshot, index) => {
-        const requested = quantity(items[index]?.quantity);
-        if (requested <= 0) return;
-        const product = productSnapshots[index];
-        const currentStock = stockSnapshot.exists ? inventoryNumber(stockSnapshot.data()?.quantity) : warehouseId === 'warehouse-main' ? inventoryNumber(product?.data()?.stock) : 0;
-        const newStock = stockAfterDelta(currentStock, requested);
-        transaction.set(stockRefs[index], { warehouseId, branchId, productId: productRefs[index].id, quantity: newStock, averageCost: inventoryNumber(stockSnapshot.data()?.averageCost || product?.data()?.averageCost), updatedAt: new Date(), updatedBy: context.uid }, { merge: true });
-        if (warehouseId === 'warehouse-main' && product?.exists) transaction.update(productRefs[index], { stock: newStock, updatedAt: new Date(), updatedBy: context.uid });
-        transaction.set(tenant.collection('inventoryMovements').doc(), { warehouseId, branchId, productId: productRefs[index].id, type: 'release', quantity: requested, delta: requested, previousStock: currentStock, newStock, reason: `Liberación ${reservationId}`, reservationId, createdBy: context.uid, createdAt: new Date() });
-      });
-      const now = new Date();
-      transaction.update(reservationRef, { status: 'released', releasedBy: context.uid, releasedAt: now, updatedAt: now });
-      return { reservationId, branchId, warehouseId, status: 'released' };
+    const reservation = await getSupabaseServer().from('inventory_reservations').select('branch_id').eq('tenant_id', context.tenantId).eq('id', reservationId).maybeSingle();
+    if (reservation.error) throw new Error(reservation.error.message);
+    if (!reservation.data) throw new Error('RESERVATION_NOT_FOUND');
+    const branch = await resolveId('branches', context.tenantId, String(reservation.data.branch_id));
+    if (!branch) throw new Error('RESERVATION_NOT_FOUND');
+    assertBranchAccess(context, String(branch.legacy_firestore_id || branch.id));
+    const result = await getSupabaseServer().rpc('release_inventory_reservation', {
+      target_tenant_id: context.tenantId,
+      target_reservation_id: reservationId,
+      target_user_id: context.uid,
     });
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.stock_reservation_released', entity: 'stockReservation', entityId: reservationId, after: result, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'DELETE', path: '/api/inventory/reservations' }, result: 'success' });
-    return NextResponse.json({ ok: true, ...result });
+    if (result.error) throw new Error(result.error.message);
+    const payload = result.data as Record<string, unknown>;
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.stock_reservation_released', entity: 'inventory_reservation', entityId: reservationId, after: payload, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'DELETE', path: '/api/inventory/reservations' }, result: 'success' });
+    return NextResponse.json({ ok: true, ...payload });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '';
-    if (message === 'RESERVATION_NOT_FOUND') return NextResponse.json({ error: 'La reserva no existe.' }, { status: 404 });
-    if (message === 'RESERVATION_CLOSED') return NextResponse.json({ error: 'La reserva ya fue cerrada.' }, { status: 409 });
-    if (message === 'INSUFFICIENT_WAREHOUSE_STOCK') return NextResponse.json({ error: 'No se pudo liberar la reserva por inconsistencia de stock.' }, { status: 409 });
-    const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
+    return responseFor(error);
   }
 }
