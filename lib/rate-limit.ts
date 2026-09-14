@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 
 export type RateLimitEntry = {
   count: number;
@@ -104,7 +104,7 @@ export function consumeRateLimit(key: string, limit: number, windowMs: number, n
   return consumeLocalBuckets([['composite', key, limit]], windowMs, now);
 }
 
-/** Firestore-backed multi-bucket limiter. All scope counters are checked and incremented atomically. */
+/** Supabase-backed multi-bucket limiter. All scope counters are checked and incremented atomically. */
 export async function consumeDistributedRateLimits(
   dimensions: RateLimitDimensions,
   limits: RateLimitLimits,
@@ -117,38 +117,9 @@ export async function consumeDistributedRateLimits(
   }
   if (entries.length === 0) return { allowed: true, remaining: 0, retryAfterSeconds: Math.ceil(windowMs / 1000) };
 
-  const db = getAdminDb();
-  const refs = entries.map(([, key]) => db.collection('systemRateLimits').doc(encodeURIComponent(key)));
-  return db.runTransaction(async (transaction) => {
-    const snapshots = [];
-    for (const ref of refs) snapshots.push(await transaction.get(ref));
-    const states = snapshots.map((snapshot, index) => {
-      const data = snapshot.exists ? snapshot.data() as Partial<RateLimitEntry> : undefined;
-      const [scope, , limit] = entries[index];
-      return { scope, limit, current: data };
-    });
-    const blocked = states.find(({ current, limit }) => current && typeof current.resetAt === 'number' && current.resetAt > now && Number(current.count || 0) >= limit);
-    if (blocked) {
-      return {
-        allowed: false,
-        remaining: 0,
-        retryAfterSeconds: Math.max(1, Math.ceil(((blocked.current?.resetAt || now + windowMs) - now) / 1000)),
-        blockedBy: blocked.scope,
-      } satisfies RateLimitResult;
-    }
-
-    let remaining = Number.POSITIVE_INFINITY;
-    let retryAfterSeconds = Math.ceil(windowMs / 1000);
-    states.forEach(({ current, limit }, index) => {
-      const active = typeof current?.resetAt === 'number' && current.resetAt > now;
-      const resetAt = active ? Number(current?.resetAt) : now + windowMs;
-      const nextCount = active ? Number(current?.count || 0) + 1 : 1;
-      transaction.set(refs[index], { count: nextCount, resetAt, updatedAt: now }, { merge: true });
-      remaining = Math.min(remaining, Math.max(0, limit - nextCount));
-      retryAfterSeconds = Math.max(retryAfterSeconds, Math.max(1, Math.ceil((resetAt - now) / 1000)));
-    });
-    return { allowed: true, remaining: Number.isFinite(remaining) ? remaining : 0, retryAfterSeconds } satisfies RateLimitResult;
-  });
+  const rpc = await getSupabaseServer().rpc('consume_rate_limit_buckets', { target_entries: entries.map(([scope, key, limit]) => ({ scope, key, limit })), target_window_ms: windowMs, target_now_ms: now });
+  if (rpc.error) throw new Error(`SUPABASE_RATE_LIMIT_FAILED: ${rpc.error.message}`);
+  return rpc.data as RateLimitResult;
 }
 
 export async function consumeDistributedRateLimit(dimensions: RateLimitDimensions, limit: number, windowMs: number, now = Date.now()): Promise<RateLimitResult> {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 import { beginPhoneMfaEnrollment, completePhoneMfaEnrollment, getMfaErrorCode, hasEnrolledMfa, type MfaEnrollment } from '@/lib/mfa';
 
@@ -9,14 +9,10 @@ const ADMIN_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 function mfaErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message === 'PHONE_FORMAT') return 'Usa el teléfono en formato internacional, por ejemplo +50588888888.';
   switch (getMfaErrorCode(error)) {
-    case 'auth/invalid-phone-number': return 'El número de teléfono no es válido. Usa el formato +códigoPaís+número.';
-    case 'auth/captcha-check-failed': return 'No se pudo validar reCAPTCHA. Permite cookies y vuelve a intentarlo.';
-    case 'auth/quota-exceeded': return 'Firebase agotó temporalmente la cuota de SMS. Espera y vuelve a intentarlo más tarde.';
-    case 'auth/too-many-requests': return 'Firebase limitó temporalmente los SMS por demasiados intentos. Espera antes de solicitar otro código.';
-    case 'auth/operation-not-allowed': return 'El proveedor Teléfono no está habilitado en Firebase Authentication.';
-    case 'auth/requires-recent-login': return 'Cierra sesión e inicia sesión nuevamente antes de activar MFA.';
-    case 'auth/second-factor-already-in-use': return 'Ese número ya está registrado como segundo factor en otra cuenta.';
-    default: return `No se pudo iniciar la inscripción MFA. Revisa Firebase Authentication, el proveedor Teléfono y los dominios autorizados. Código: ${getMfaErrorCode(error) || 'desconocido'}`;
+    case 'invalid_phone': return 'El número de teléfono no es válido. Usa el formato +códigoPaís+número.';
+    case 'too_many_requests': return 'El proveedor limitó temporalmente los SMS por demasiados intentos. Espera antes de solicitar otro código.';
+    case 'factor_already_verified': return 'Ese factor ya está registrado en esta cuenta.';
+    default: return `No se pudo iniciar la inscripción MFA. Verifica que el factor teléfono esté habilitado en Supabase Auth. Código: ${getMfaErrorCode(error) || 'desconocido'}`;
   }
 }
 
@@ -25,14 +21,14 @@ function SecurityContent() {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [enrollment, setEnrollment] = useState<MfaEnrollment | null>(null);
+  const [enrolled, setEnrolled] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (loading) return <main className="workspace-page"><section className="workspace-main"><p>Cargando configuración de seguridad…</p></section></main>;
   if (!authUser || !member || !ADMIN_ROLES.has(member.role)) return <main className="workspace-page"><section className="workspace-main"><h1>Acceso restringido</h1><p>Solo los administradores pueden gestionar la autenticación multifactor.</p></section></main>;
 
-  // Temporary type bridge while the MFA implementation is replaced by Supabase MFA.
-  const enrolled = hasEnrolledMfa(authUser as never);
+  useEffect(() => { let active = true; void hasEnrolledMfa(authUser as never).then((value) => { if (active) setEnrolled(value); }); return () => { active = false; }; }, [authUser]);
 
   async function startEnrollment() {
     setBusy(true); setMessage('');
@@ -49,7 +45,7 @@ function SecurityContent() {
     setBusy(true); setMessage('');
     try {
       await completePhoneMfaEnrollment(enrollment, code);
-      setEnrollment(null); setCode(''); setMessage('MFA activado correctamente. En el próximo acceso se solicitará el segundo factor.');
+      setEnrollment(null); setCode(''); setEnrolled(true); setMessage('MFA activado correctamente. En el próximo acceso se solicitará el segundo factor.');
     } catch (error) {
       setMessage(error instanceof Error && error.message === 'CODE_FORMAT' ? 'El código debe tener seis dígitos.' : mfaErrorMessage(error));
     } finally { setBusy(false); }

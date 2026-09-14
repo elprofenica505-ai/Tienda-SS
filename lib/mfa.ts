@@ -1,74 +1,11 @@
-import {
-  getMultiFactorResolver,
-  multiFactor,
-  PhoneAuthProvider,
-  PhoneMultiFactorGenerator,
-  RecaptchaVerifier,
-  type MultiFactorResolver,
-  type User,
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
-
-export type MfaEnrollment = {
-  verificationId: string;
-  verifier: RecaptchaVerifier;
-};
-
-export type MfaChallenge = {
-  resolver: MultiFactorResolver;
-  verificationId: string;
-  verifier: RecaptchaVerifier;
-};
-
-export function getMfaErrorCode(error: unknown): string {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return '';
-  return typeof error.code === 'string' ? error.code : '';
-}
-
-export function hasEnrolledMfa(user: User): boolean {
-  return multiFactor(user).enrolledFactors.length > 0;
-}
-
-export async function beginPhoneMfaEnrollment(phoneNumber: string, containerId: string): Promise<MfaEnrollment> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('AUTH_REQUIRED');
-  const value = phoneNumber.trim();
-  if (!/^\+[1-9]\d{7,14}$/.test(value)) throw new Error('PHONE_FORMAT');
-  const verifier = new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
-  const session = await multiFactor(user).getSession();
-  const provider = new PhoneAuthProvider(auth);
-  const verificationId = await provider.verifyPhoneNumber({ phoneNumber: value, session }, verifier);
-  return { verificationId, verifier };
-}
-
-export async function completePhoneMfaEnrollment(enrollment: MfaEnrollment, code: string, displayName = 'Teléfono administrativo'): Promise<void> {
-  const user = auth.currentUser;
-  if (!user) throw new Error('AUTH_REQUIRED');
-  if (!/^\d{6}$/.test(code.trim())) throw new Error('CODE_FORMAT');
-  const credential = PhoneAuthProvider.credential(enrollment.verificationId, code.trim());
-  const assertion = PhoneMultiFactorGenerator.assertion(credential);
-  await multiFactor(user).enroll(assertion, displayName.trim().slice(0, 80) || 'Teléfono administrativo');
-  await user.getIdToken(true);
-  enrollment.verifier.clear();
-}
-
-export async function beginMfaSignIn(error: unknown, containerId: string): Promise<MfaChallenge> {
-  const resolver = getMfaResolver(error);
-  if (!resolver || resolver.hints.length === 0) throw new Error('MFA_UNAVAILABLE');
-  const verifier = new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
-  const hint = resolver.hints[0];
-  const provider = new PhoneAuthProvider(auth);
-  const verificationId = await provider.verifyPhoneNumber({ multiFactorHint: hint, session: resolver.session }, verifier);
-  return { resolver, verificationId, verifier };
-}
-
-export function getMfaResolver(error: unknown): MultiFactorResolver | null {
-  if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'auth/multi-factor-auth-required') return null;
-  return getMultiFactorResolver(auth, error as Parameters<typeof getMultiFactorResolver>[1]);
-}
-
-export async function completeMfaSignIn(resolver: MultiFactorResolver, verificationId: string, code: string): Promise<void> {
-  if (!/^\d{6}$/.test(code.trim())) throw new Error('CODE_FORMAT');
-  const credential = PhoneAuthProvider.credential(verificationId, code.trim());
-  await resolver.resolveSignIn(PhoneMultiFactorGenerator.assertion(credential));
-}
+import type { User } from '@supabase/supabase-js';
+import { getSupabaseBrowser } from '@/lib/supabase/client';
+export type MfaEnrollment = { factorId: string; challengeId: string; phoneNumber: string };
+export type MfaChallenge = { factorId: string; challengeId: string };
+export function getMfaErrorCode(error: unknown): string { if (error instanceof Error) return error.message; if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') return error.code; return ''; }
+export async function hasEnrolledMfa(_user: User): Promise<boolean> { const result = await getSupabaseBrowser().auth.mfa.listFactors(); if (result.error) return false; return (result.data.all || []).some((factor) => factor.status === 'verified'); }
+export async function beginPhoneMfaEnrollment(phoneNumber: string, _containerId: string): Promise<MfaEnrollment> { const value = phoneNumber.trim(); if (!/^\+[1-9]\d{7,14}$/.test(value)) throw new Error('PHONE_FORMAT'); const enrolled = await getSupabaseBrowser().auth.mfa.enroll({ factorType: 'phone', friendlyName: `Teléfono ${value}`, phone: value } as never); if (enrolled.error || !enrolled.data) throw new Error(enrolled.error?.message || 'MFA_ENROLL_FAILED'); const challenge = await getSupabaseBrowser().auth.mfa.challenge({ factorId: enrolled.data.id }); if (challenge.error || !challenge.data) throw new Error(challenge.error?.message || 'MFA_CHALLENGE_FAILED'); return { factorId: enrolled.data.id, challengeId: challenge.data.id, phoneNumber: value }; }
+export async function completePhoneMfaEnrollment(enrollment: MfaEnrollment, code: string): Promise<void> { if (!/^\d{6}$/.test(code.trim())) throw new Error('CODE_FORMAT'); const result = await getSupabaseBrowser().auth.mfa.verify({ factorId: enrollment.factorId, challengeId: enrollment.challengeId, code: code.trim() }); if (result.error) throw new Error(result.error.message); }
+export async function beginMfaSignIn(_error: unknown, _containerId: string): Promise<MfaChallenge> { throw new Error('MFA_CHALLENGE_REQUIRED'); }
+export function getMfaResolver(_error: unknown): null { return null; }
+export async function completeMfaSignIn(_resolver: unknown, _verificationId: string, _code: string): Promise<void> { throw new Error('MFA_CHALLENGE_REQUIRED'); }
