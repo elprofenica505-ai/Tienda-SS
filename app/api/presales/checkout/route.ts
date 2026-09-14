@@ -21,6 +21,7 @@ function errorResponse(error: unknown) {
     INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar el cobro.', 409],
     CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409],
     INVALID_SALE_TOTAL: ['El total de la venta debe ser mayor que cero.', 400],
+    CASH_RECEIVED_TOO_LOW: ['El efectivo recibido es menor que el total del ticket.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
   };
   for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] });
@@ -50,6 +51,10 @@ export async function POST(request: NextRequest) {
     const itemsMap = new Map<string, number>();
     rawItems.forEach((item: Record<string, unknown>) => { const id = text(item.productId, 128); const quantity = Number(item.quantity); if (id && Number.isInteger(quantity) && quantity > 0) itemsMap.set(id, (itemsMap.get(id) || 0) + quantity); });
     if (!itemsMap.size) throw new Error('PRESALE_EMPTY');
+    const presaleTotal = money(presale.total);
+    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : 0;
+    if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
+    const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
     const supabase = getSupabaseServer();
     const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
@@ -78,13 +83,18 @@ export async function POST(request: NextRequest) {
       target_payment_method: paymentMethod,
       target_discount: money(body.discount),
       target_idempotency_key: `presale:${presaleId}`,
-      target_metadata: { presaleId, ticketCode: text(presale.ticketCode, 80), cashReceived: money(body.cashReceived) },
+      target_metadata: { presaleId, ticketCode: text(presale.ticketCode, 80), cashReceived, changeAmount, sellerUid: text(presale.vendedorUid, 128), sellerEmail: text(presale.vendedorEmail, 160) },
       target_items: items,
     });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
+    const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
+    const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
+    const issuer = { legalName: fiscalConfig.data?.legal_name || undefined, taxId: fiscalConfig.data?.tax_id || undefined, address: typeof fiscalMetadata.address === 'string' ? fiscalMetadata.address : undefined, phone: typeof fiscalMetadata.phone === 'string' ? fiscalMetadata.phone : undefined, email: typeof fiscalMetadata.email === 'string' ? fiscalMetadata.email : undefined, logoDataUrl: typeof fiscalMetadata.logoDataUrl === 'string' ? fiscalMetadata.logoDataUrl : undefined };
+    const sellerProfile = presale.vendedorUid ? await supabase.from('profiles').select('display_name,email').eq('auth_user_id', presale.vendedorUid).maybeSingle() : { data: null };
+    const seller = { name: sellerProfile.data?.display_name || presale.vendedorEmail || presale.vendedorUid || 'Vendedor', email: sellerProfile.data?.email || presale.vendedorEmail || undefined };
     await presaleRef.update({ status: 'paid', saleId: data.saleId, paidBy: context.uid, paidAt: new Date(), updatedAt: new Date() });
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
-    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticketCode, paymentMethod, alreadyPaid: false }, { status: 201 });
+    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticketCode, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }

@@ -47,7 +47,8 @@ export async function POST(request: NextRequest) {
     const items = rawItems.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: typeof item.quantity === 'number' && Number.isInteger(item.quantity) ? item.quantity : 0, unitPrice: money(item.unitPrice) })).filter((item: { productId: string; quantity: number }) => item.productId && item.quantity > 0);
     if (!items.length || items.length > 50) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 productos.' }, { status: 400 });
     const taxAmount = money(body.taxAmount ?? body.tax);
-    const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160) };
+    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || 0) : 0;
+    const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160), cashReceived };
     let cashSessionId = paymentMethod === 'credit' ? null : text(body.cashSessionId, 128);
     if (paymentMethod !== 'credit' && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
