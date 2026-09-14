@@ -50,9 +50,18 @@ export async function POST(request: NextRequest) {
     const movementType = body.movementType === 'receive' || body.movementType === 'remove' || body.movementType === 'set' ? body.movementType : '';
     const reason = text(body.reason) || 'Ajuste manual';
     const quantity = positiveNumber(body.quantity);
-    const warehouseId = text(body.warehouseId, 120);
-    if (!productId || !movementType || quantity <= 0 || !warehouseId) return NextResponse.json({ error: 'Producto, almacén, tipo y cantidad son obligatorios.' }, { status: 400 });
-    const result = await getSupabaseServer().rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: movementType, target_quantity: quantity, target_reason: reason, target_user_id: context.uid });
+    const supabase = getSupabaseServer();
+    let warehouseId = text(body.warehouseId, 120);
+    if (!productId || !movementType || quantity <= 0) return NextResponse.json({ error: 'Producto, tipo y cantidad son obligatorios.' }, { status: 400 });
+    if (!warehouseId) {
+      const branchId = text(request.headers.get('x-branch-id'), 120) || context.branchIds[0] || '';
+      if (!branchId) throw new Error('WAREHOUSE_NOT_FOUND');
+      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('created_at').limit(1).maybeSingle();
+      if (warehouse.error) throw new Error(warehouse.error.message);
+      warehouseId = warehouse.data?.id || '';
+    }
+    if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+    const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: movementType, target_quantity: quantity, target_reason: reason, target_user_id: context.uid });
     if (result.error) throw new Error(result.error.message);
     const row = Array.isArray(result.data) ? result.data[0] : result.data;
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'inventory.adjusted', entity: 'product', entityId: productId, before: { stock: row?.previous_quantity }, after: { stock: row?.new_quantity, movementType, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory' }, result: 'success' });

@@ -14,7 +14,7 @@ type MovementForm = { productId: string; movementType: 'receive' | 'remove' | 's
 
 function InventoryContent() {
   const router = useRouter();
-  const { authUser, tenant, member, loading: tenantLoading } = useTenant();
+  const { authUser, tenant, member, activeBranchId, loading: tenantLoading } = useTenant();
   const [products, setProducts] = useState<Product[]>([]);
   const [lowStock, setLowStock] = useState<Product[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
@@ -37,7 +37,7 @@ function InventoryContent() {
       if (includeProducts) params.set('products', 'true');
       if (cursor) params.set('cursor', cursor);
       const query = params.toString();
-      const response = await fetch(`/api/inventory${query ? `?${query}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' });
+      const response = await fetch(`/api/inventory${query ? `?${query}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, cache: 'no-store' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo cargar el inventario.');
       if (includeProducts && cursor) setProducts((current) => [...current, ...(data.products || [])]);
@@ -50,7 +50,7 @@ function InventoryContent() {
       setMovements(data.movements || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando inventario.'); }
     finally { setLoading(false); setLoadingMore(false); }
-  }, [authUser, tenant]);
+  }, [authUser, tenant, activeBranchId]);
 
   async function openProducts() {
     setProductsOpen(true);
@@ -68,7 +68,7 @@ function InventoryContent() {
     if (!authUser || !tenant) return;
     setSaving(true); setMessage('');
     try {
-      const response = await fetch('/api/inventory', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ ...form, quantity: Number(form.quantity) }) });
+      const response = await fetch('/api/inventory', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, body: JSON.stringify({ ...form, quantity: Number(form.quantity) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo registrar el movimiento.');
       setMessage(`Inventario actualizado: ${data.next} unidades.`); setShowMovement(false); setForm({ productId: '', movementType: 'receive', quantity: '', reason: '' }); await loadInventory(productsOpen);
