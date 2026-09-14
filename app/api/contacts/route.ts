@@ -1,31 +1,155 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
-import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
+import { getSupabaseServer } from '@/lib/supabase/server';
+import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
-const manageRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'vendedor', 'cajero'];
-const supplierRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
-function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
-function typeOf(value: unknown): 'customer' | 'supplier' { return value === 'supplier' ? 'supplier' : 'customer'; }
-function collectionFor(type: 'customer' | 'supplier') { return type === 'supplier' ? 'suppliers' : 'customers'; }
-function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
+
+type ContactType = 'customer' | 'supplier';
+
+function text(value: unknown, max = 180) {
+  return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+function typeOf(value: unknown): ContactType {
+  return value === 'supplier' ? 'supplier' : 'customer';
+}
+
+function tableFor(type: ContactType) {
+  return type === 'supplier' ? 'suppliers' : 'customers';
+}
+
+function money(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(Math.max(0, value) * 100) / 100
+    : 0;
+}
+
+function mapContact(row: Record<string, any>, type: ContactType) {
+  const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email || '',
+    phone: row.phone || '',
+    taxId: row.document_id || '',
+    address: typeof metadata.address === 'string' ? metadata.address : '',
+    notes: typeof metadata.notes === 'string' ? metadata.notes : '',
+    active: row.active !== false,
+    ...(type === 'customer' ? {
+      creditLimit: Number(row.credit_limit || 0),
+      creditBalance: Number(metadata.creditBalance || 0),
+    } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function errorResponse(error: unknown) {
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 export async function GET(request: NextRequest) {
-  try { const context = await requireTenantPermission(request, 'contacts', 'view'); const type = typeOf(new URL(request.url).searchParams.get('type')); const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true'; const snapshot = await getAdminDb().collection('tenants').doc(context.tenantId).collection(collectionFor(type)).orderBy('name').get(); const contacts = snapshot.docs.filter((item) => includeArchived || item.data().active !== false).map((item) => ({ id: item.id, ...item.data() })); return NextResponse.json({ ok: true, tenantId: context.tenantId, type, contacts }, { headers: { 'Cache-Control': 'no-store' } }); }
-  catch (error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+  try {
+    const context = await requireTenantPermission(request, 'contacts', 'view');
+    const url = new URL(request.url);
+    const type = typeOf(url.searchParams.get('type'));
+    const includeArchived = url.searchParams.get('includeArchived') === 'true';
+    let query = getSupabaseServer()
+      .from(tableFor(type))
+      .select('*')
+      .eq('tenant_id', context.tenantId)
+      .order('name', { ascending: true });
+    if (!includeArchived) query = query.eq('active', true);
+    const result = await query;
+    if (result.error) throw new Error(result.error.message);
+    const contacts = (result.data || []).map((row) => mapContact(row as Record<string, any>, type));
+    return NextResponse.json({ ok: true, tenantId: context.tenantId, type, contacts }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) {
+    return errorResponse(error);
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json(); const type = typeOf(body.type); const context = await requireTenantPermission(request, 'contacts', 'create'); const name = text(body.name); const email = text(body.email, 160).toLowerCase(); const phone = text(body.phone, 40); const taxId = text(body.taxId, 60); const address = text(body.address, 240);
-    if (name.length < 2) return NextResponse.json({ error: 'El nombre es obligatorio.' }, { status: 400 }); if (email && !/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'El correo no es válido.' }, { status: 400 });
-    const collection = getAdminDb().collection('tenants').doc(context.tenantId).collection(collectionFor(type)); const duplicate = await collection.where('name', '==', name).limit(1).get(); if (!duplicate.empty) return NextResponse.json({ error: `Ya existe ${type === 'supplier' ? 'un proveedor' : 'un cliente'} con ese nombre.` }, { status: 409 });
-    const ref = collection.doc(); const isCustomer = type === 'customer'; const creditLimit = isCustomer ? money(body.creditLimit) : 0; const contact = { name, email, phone, taxId, address, notes: text(body.notes, 500), active: true, ...(isCustomer ? { creditLimit, creditBalance: 0 } : {}), createdBy: context.uid, createdAt: new Date(), updatedAt: new Date() }; await ref.set(contact); return NextResponse.json({ ok: true, item: { id: ref.id, ...contact } }, { status: 201 });
-  } catch (error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+    const body = await request.json();
+    const type = typeOf(body.type);
+    const context = await requireTenantPermission(request, 'contacts', 'create');
+    const name = text(body.name);
+    const email = text(body.email, 160).toLowerCase();
+    const phone = text(body.phone, 40);
+    const taxId = text(body.taxId, 60);
+    const address = text(body.address, 240);
+    const notes = text(body.notes, 500);
+    if (name.length < 2) return NextResponse.json({ error: 'El nombre es obligatorio.' }, { status: 400 });
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'El correo no es válido.' }, { status: 400 });
+
+    const supabase = getSupabaseServer();
+    const duplicate = await supabase.from(tableFor(type)).select('id').eq('tenant_id', context.tenantId).eq('name', name).limit(1);
+    if (duplicate.error) throw new Error(duplicate.error.message);
+    if ((duplicate.data || []).length) return NextResponse.json({ error: `Ya existe ${type === 'supplier' ? 'un proveedor' : 'un cliente'} con ese nombre.` }, { status: 409 });
+
+    const metadata = { address, notes, ...(type === 'customer' ? { creditBalance: 0 } : {}) };
+    const payload = {
+      tenant_id: context.tenantId,
+      name,
+      email: email || null,
+      phone: phone || null,
+      document_id: taxId || null,
+      active: true,
+      metadata,
+      ...(type === 'customer' ? { credit_limit: money(body.creditLimit) } : {}),
+    };
+    const result = await supabase.from(tableFor(type)).insert(payload).select('*').single();
+    if (result.error) throw new Error(result.error.message);
+    return NextResponse.json({ ok: true, item: mapContact(result.data as Record<string, any>, type) }, { status: 201 });
+  } catch (error: unknown) {
+    return errorResponse(error);
+  }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
-    const body = await request.json(); const type = typeOf(body.type); const context = await requireTenantPermission(request, 'contacts', 'edit'); const id = text(body.id, 120); if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 }); const ref = getAdminDb().collection('tenants').doc(context.tenantId).collection(collectionFor(type)).doc(id); const current = await ref.get(); if (!current.exists) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 }); const changes: Record<string, unknown> = { updatedAt: new Date(), updatedBy: context.uid }; if (typeof body.active === 'boolean') changes.active = body.active; for (const field of ['name', 'email', 'phone', 'taxId', 'address', 'notes']) if (typeof body[field] === 'string') changes[field] = text(body[field], field === 'notes' ? 500 : field === 'address' ? 240 : field === 'email' ? 160 : field === 'phone' ? 40 : 180); if (type === 'customer' && typeof body.creditLimit === 'number') { const creditLimit = money(body.creditLimit); const creditBalance = money(current.data()?.creditBalance); if (creditLimit < creditBalance) return NextResponse.json({ error: 'El límite de crédito no puede ser menor que el saldo utilizado.' }, { status: 409 }); changes.creditLimit = creditLimit; } if (typeof changes.email === 'string') changes.email = (changes.email as string).toLowerCase(); if (typeof changes.name === 'string' && (changes.name as string).length < 2) return NextResponse.json({ error: 'El nombre es obligatorio.' }, { status: 400 }); await ref.update(changes); return NextResponse.json({ ok: true, id, changes });
-  } catch (error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+    const body = await request.json();
+    const type = typeOf(body.type);
+    const context = await requireTenantPermission(request, 'contacts', 'edit');
+    const id = text(body.id, 120);
+    if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 });
+
+    const supabase = getSupabaseServer();
+    const current = await supabase.from(tableFor(type)).select('*').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    if (current.error) throw new Error(current.error.message);
+    if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
+    const currentRow = current.data as Record<string, any>;
+    const currentMetadata = currentRow.metadata && typeof currentRow.metadata === 'object' ? currentRow.metadata : {};
+    const changes: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (typeof body.active === 'boolean') changes.active = body.active;
+    if (typeof body.name === 'string') {
+      const name = text(body.name);
+      if (name.length < 2) return NextResponse.json({ error: 'El nombre es obligatorio.' }, { status: 400 });
+      changes.name = name;
+    }
+    if (typeof body.email === 'string') {
+      const email = text(body.email, 160).toLowerCase();
+      if (email && !/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'El correo no es válido.' }, { status: 400 });
+      changes.email = email || null;
+    }
+    if (typeof body.phone === 'string') changes.phone = text(body.phone, 40) || null;
+    if (typeof body.taxId === 'string') changes.document_id = text(body.taxId, 60) || null;
+    const metadata = { ...currentMetadata } as Record<string, unknown>;
+    if (typeof body.address === 'string') metadata.address = text(body.address, 240);
+    if (typeof body.notes === 'string') metadata.notes = text(body.notes, 500);
+    changes.metadata = metadata;
+    if (type === 'customer' && typeof body.creditLimit === 'number') {
+      const creditLimit = money(body.creditLimit);
+      const creditBalance = money(metadata.creditBalance);
+      if (creditLimit < creditBalance) return NextResponse.json({ error: 'El límite de crédito no puede ser menor que el saldo utilizado.' }, { status: 409 });
+      changes.credit_limit = creditLimit;
+    }
+    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('*').single();
+    if (result.error) throw new Error(result.error.message);
+    return NextResponse.json({ ok: true, id, changes: mapContact(result.data as Record<string, any>, type) });
+  } catch (error: unknown) {
+    return errorResponse(error);
+  }
 }
