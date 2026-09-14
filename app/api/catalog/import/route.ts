@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/firebaseAdmin';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { parseCsv, csvNumber } from '@/lib/csv';
 import { writeImmutableAudit } from '@/lib/audit';
 
@@ -28,28 +27,17 @@ export async function POST(request: NextRequest) {
       seen.add(sku);
       return { name, sku, itemType, categoryId: (row.categoryid || '').slice(0, 80), price: Math.max(0, csvNumber(row.price)), stock: itemType === 'service' ? 0 : Math.max(0, Math.floor(csvNumber(row.stock))), minStock: Math.max(0, Math.floor(csvNumber(row.minstock, 5))) };
     });
-    const db = getAdminDb();
-    const tenantRef = db.collection('tenants').doc(context.tenantId);
-    const [tenantSnapshot, activeSnapshot] = await Promise.all([
-      tenantRef.get(),
-      tenantRef.collection('products').where('active', '==', true).count().get(),
-    ]);
-    const skuValues = Array.from(seen);
-    const duplicateSnapshots = await Promise.all(Array.from({ length: Math.ceil(skuValues.length / 30) }, (_, index) => tenantRef.collection('products').where('sku', 'in', skuValues.slice(index * 30, index * 30 + 30)).get()));
-    const existing = new Set(duplicateSnapshots.flatMap((snapshot) => snapshot.docs.map((doc) => String(doc.data().sku || '').toUpperCase())));
-    const duplicate = rows.find((row) => existing.has(row.sku));
-    if (duplicate) return NextResponse.json({ error: `Ya existe un producto con SKU ${duplicate.sku}.` }, { status: 409 });
-    assertPlanCapacity(tenantSnapshot.data()?.plan, 'products', activeSnapshot.data().count, rows.length);
-    const now = new Date();
-    const batch = db.batch();
-    const refs = rows.map(() => tenantRef.collection('products').doc());
-    rows.forEach((row, index) => batch.set(refs[index], { ...row, active: true, createdBy: context.uid, createdAt: now, updatedAt: now }));
-    await batch.commit();
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'catalog.imported', entity: 'product', entityId: 'batch', after: { count: rows.length, format: 'csv' }, request: { method: 'POST', path: '/api/catalog/import', requestId: request.headers.get('x-correlation-id') || undefined }, result: 'success' });
-    return NextResponse.json({ ok: true, imported: rows.length, ids: refs.map((ref) => ref.id) }, { status: 201 });
+    const result = await getSupabaseServer().rpc('import_catalog_products', { target_tenant_id: context.tenantId, target_user_id: context.uid, target_rows: rows });
+    if (result.error) throw new Error(result.error.message);
+    const data = result.data as { ids?: string[]; count?: number };
+    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'catalog.imported', entity: 'product', entityId: 'batch', after: { count: data.count || rows.length, format: 'csv' }, request: { method: 'POST', path: '/api/catalog/import', requestId: request.headers.get('x-correlation-id') || undefined }, result: 'success' });
+    return NextResponse.json({ ok: true, imported: data.count || rows.length, ids: data.ids || [] }, { status: 201 });
   } catch (error: unknown) {
-    if (error instanceof Error && /^Fila /.test(error.message)) return NextResponse.json({ error: error.message }, { status: 400 });
-    const response = tenantErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
+    const message = error instanceof Error ? error.message : '';
+    if (/^Fila /.test(message)) return NextResponse.json({ error: message }, { status: 400 });
+    if (message.startsWith('DUPLICATE_SKU:')) return NextResponse.json({ error: `Ya existe un producto con SKU ${message.slice(13)}.` }, { status: 409 });
+    if (message === 'CATALOG_EMPTY') return NextResponse.json({ error: 'El CSV no contiene productos para importar.' }, { status: 400 });
+    if (message === 'CATALOG_TOO_LARGE') return NextResponse.json({ error: 'El archivo supera el máximo de 500 productos.' }, { status: 400 });
+    const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status });
   }
 }
