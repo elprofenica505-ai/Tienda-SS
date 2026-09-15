@@ -5,7 +5,7 @@ import { logEvent } from '@/lib/observability';
 
 export const runtime = 'nodejs';
 
-// Pre-login protection is deliberately independent from Firebase Auth so an
+// Pre-login protection is deliberately independent from the auth provider so an
 // attacker cannot rotate credentials or consume provider capacity unchecked.
 const ENABLE_LOGIN_ATTEMPT_RATE_LIMIT = true;
 
