@@ -6,11 +6,13 @@ import { EmptyState } from '@/components/workspace/EmptyState';
 import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { getClientCached, invalidateClientCache } from '@/lib/client-query-cache';
 
 type Product = { id: string; name: string; sku?: string; itemType: string; stock: number; reserved: number; available: number; minStock: number; price: number };
 type Movement = { id: string; productId: string; productName: string; productSku?: string; type: string; quantity: number; delta: number; reason: string; performedByName: string; performedByEmail?: string; createdAt?: string };
 
 type MovementForm = { productId: string; movementType: 'receive' | 'remove' | 'set'; quantity: string; reason: string };
+type InventoryResponse = { products?: Product[]; lowStock?: Product[]; movements?: Movement[]; summary?: { products: number; totalUnits: number; lowStock: number }; productsPage?: { nextCursor?: string | null } };
 
 function InventoryContent() {
   const router = useRouter();
@@ -37,9 +39,14 @@ function InventoryContent() {
       if (includeProducts) params.set('products', 'true');
       if (cursor) params.set('cursor', cursor);
       const query = params.toString();
-      const response = await fetch(`/api/inventory${query ? `?${query}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'No se pudo cargar el inventario.');
+      const cachePrefix = `inventory:${authUser.id}:${tenant.id}:${activeBranchId || 'all'}:`;
+      const cacheKey = `${cachePrefix}${includeProducts ? 'products' : 'summary'}:${cursor || 'first'}`;
+      const data = await getClientCached<InventoryResponse>(cacheKey, async () => {
+        const response = await fetch(`/api/inventory${query ? `?${query}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el inventario.');
+        return payload as InventoryResponse;
+      }, includeProducts ? 15_000 : 10_000);
       if (includeProducts && cursor) setProducts((current) => [...current, ...(data.products || [])]);
       else if (includeProducts) setProducts(data.products || []);
       if (includeProducts) {
@@ -71,6 +78,8 @@ function InventoryContent() {
       const response = await fetch('/api/inventory', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, body: JSON.stringify({ ...form, quantity: Number(form.quantity) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo registrar el movimiento.');
+      invalidateClientCache(`inventory:${authUser.id}:${tenant.id}:${activeBranchId || 'all'}:`);
+      invalidateClientCache(`catalog:${authUser.id}:${tenant.id}:`);
       setMessage(`Inventario actualizado: ${data.next} unidades.`); setShowMovement(false); setForm({ productId: '', movementType: 'receive', quantity: '', reason: '' }); await loadInventory(productsOpen);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error registrando movimiento.'); }
     finally { setSaving(false); }

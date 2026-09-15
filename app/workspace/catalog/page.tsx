@@ -7,10 +7,12 @@ import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 import { UpgradePrompt } from '@/components/workspace/UpgradePrompt';
 import { formatMoney } from '@/lib/currency';
+import { getClientCached, invalidateClientCache } from '@/lib/client-query-cache';
 
 type Category = { id: string; name: string; color?: string; active: boolean };
 type Product = { id: string; name: string; sku?: string; itemType: string; categoryId?: string; price: number; cost?: number; stock: number; active: boolean };
 type Editing = { type: 'category' | 'product'; id: string; name: string; sku: string; price: string; cost: string; stock: string; categoryId: string; active: boolean };
+type CatalogResponse = { categories?: Category[]; products?: Product[]; pagination?: { nextCursor?: string | null } };
 
 function CatalogContent() {
   const router = useRouter();
@@ -36,9 +38,14 @@ function CatalogContent() {
       const params = new URLSearchParams();
       if (showArchived) params.set('includeArchived', 'true');
       if (cursor) params.set('cursor', cursor);
-      const response = await fetch(`/api/catalog${params.toString() ? `?${params.toString()}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'No se pudo cargar el catálogo.');
+      const cursorKey = cursor || 'first';
+      const cachePrefix = `catalog:${authUser.id}:${tenant.id}:`;
+      const data = await getClientCached<CatalogResponse>(`${cachePrefix}${showArchived ? 'archived' : 'active'}:${cursorKey}`, async () => {
+        const response = await fetch(`/api/catalog${params.toString() ? `?${params.toString()}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el catálogo.');
+        return payload as CatalogResponse;
+      }, 60_000);
       setCategories(data.categories || []); setProducts((current) => append ? [...current, ...(data.products || [])] : (data.products || []));
       setNextCursor(data.pagination?.nextCursor || null);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando el catálogo.'); }
@@ -54,6 +61,8 @@ function CatalogContent() {
       const response = await fetch('/api/catalog', { method: body.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo guardar el cambio.');
+      invalidateClientCache(`catalog:${authUser.id}:${tenant.id}:`);
+      invalidateClientCache(`inventory:${authUser.id}:${tenant.id}:`);
       setMessage(success); setShowForm(false); setEditing(null); await loadCatalog();
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo guardar el cambio.'); }
     finally { setSaving(false); }
