@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'view');
     const branchId = text(request.headers.get('x-branch-id'), 128);
     const supabase = getSupabaseServer();
-    let query = supabase.from('purchases').select('*, purchase_items(*)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(100);
+    let query = supabase.from('purchases').select('id,tenant_id,branch_id,warehouse_id,supplier_id,invoice_number,status,subtotal,tax,total,created_by,metadata,created_at,updated_at,purchase_items(id,tenant_id,purchase_id,product_id,quantity,unit_cost,line_total)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(100);
     if (branchId && !['owner', 'admin', 'gerente', 'jefe'].includes(context.role)) {
       if (!context.branchIds.includes(branchId)) return NextResponse.json({ error: 'La sucursal no está autorizada para este usuario.' }, { status: 403 });
       query = query.eq('branch_id', branchId);

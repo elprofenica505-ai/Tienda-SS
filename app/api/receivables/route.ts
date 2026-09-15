@@ -16,13 +16,13 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'receivables', 'view');
     const branchId = text(request.headers.get('x-branch-id'), 128);
     if (branchId) assertBranchAccess(context, branchId);
-    let query = getSupabaseServer().from('receivables').select('*, customers(name), sales(id,invoice_number,branch_id,total,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE + 1);
+    let query = getSupabaseServer().from('receivables').select('id,tenant_id,customer_id,sale_id,original_amount,outstanding_amount,status,due_date,created_at,updated_at,customers(name),sales(id,invoice_number,branch_id,total,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE + 1);
     if (branchId) query = query.eq('sales.branch_id', branchId);
     else if (!MANAGER_ROLES.has(context.role)) query = query.in('sales.branch_id', context.branchIds.slice(0, 100));
     const result = await query;
     if (result.error) throw new Error(result.error.message);
     const rows = (result.data || []).slice(0, PAGE_SIZE);
-    const paymentsResult = await getSupabaseServer().from('receivable_payments').select('*, receivables!inner(sale_id,tenant_id)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE);
+    const paymentsResult = await getSupabaseServer().from('receivable_payments').select('id,tenant_id,receivable_id,amount,payment_method,received_by,created_at,receivables!inner(sale_id,tenant_id)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(PAGE_SIZE);
     if (paymentsResult.error) throw new Error(paymentsResult.error.message);
     const sales = rows.map((row: any) => ({ id: row.sales?.id || row.sale_id, saleId: row.sale_id, customerId: row.customer_id, customerName: row.customers?.name || 'Cliente sin identificar', total: Number(row.original_amount || 0), paidAmount: Number(row.original_amount || 0) - Number(row.outstanding_amount || 0), balanceDue: Number(row.outstanding_amount || 0), paymentStatus: row.status, dueAt: row.due_date, overdue: Number(row.outstanding_amount || 0) > 0 && row.due_date && new Date(row.due_date) < new Date(), branchId: row.sales?.branch_id, invoiceNumber: row.sales?.invoice_number, createdAt: row.created_at }));
     const customers = Array.from(sales.reduce((map, sale) => { const key = sale.customerId; const current = map.get(key) || { customerId: key, customerName: sale.customerName, sales: 0, total: 0, paid: 0, balance: 0 }; current.sales += 1; current.total += sale.total; current.paid += sale.paidAmount; current.balance += sale.balanceDue; map.set(key, current); return map; }, new Map<string, any>()).values()).sort((a: any, b: any) => b.balance - a.balance);

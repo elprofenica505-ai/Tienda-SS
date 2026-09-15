@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const context = await requireTenantPermission(request, 'sales', 'view');
     const branchId = text(request.headers.get('x-branch-id'), 128);
     if (branchId) assertBranchAccess(context, branchId);
-    let query = getSupabaseServer().from('sales').select('*, sale_items(*), sale_payments(*)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(50);
+    let query = getSupabaseServer().from('sales').select('id,tenant_id,branch_id,cash_register_id,customer_id,invoice_number,status,subtotal,tax,discount,total,sold_by,metadata,created_at,updated_at,sale_items(id,tenant_id,sale_id,product_id,warehouse_id,quantity,unit_price,tax,discount,line_total),sale_payments(id,tenant_id,sale_id,payment_method,amount,reference,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(50);
     if (branchId) query = query.eq('branch_id', branchId);
     else if (!MANAGER_ROLES.has(context.role)) query = query.in('branch_id', context.branchIds.slice(0, 100));
     const result = await query;
