@@ -9,6 +9,11 @@ const resourceTables: Record<OrganizationResource, string> = {
   warehouses: 'warehouses',
   cashRegisters: 'cash_registers',
 };
+const resourceSelect: Record<OrganizationResource, string> = {
+  branches: 'id,legacy_firestore_id,tenant_id,code,name,timezone,active,created_at,updated_at',
+  warehouses: 'id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at',
+  cashRegisters: 'id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at',
+};
 
 function fail(error: { message?: string } | null, fallback = 'SUPABASE_REQUEST_FAILED'): never {
   throw new Error(error?.message || fallback);
@@ -100,10 +105,10 @@ export async function findMembership(tenantId: string, authUserId: string) {
   const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return null;
-  const tenant = await supabase.from('tenants').select('*').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
+  const tenant = await supabase.from('tenants').select('id,legacy_firestore_id,status,subscription_status').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
   if (tenant.error) fail(tenant.error);
   if (!tenant.data || tenant.data.status !== 'active') return null;
-  const member = await supabase.from('members').select('*').eq('tenant_id', tenant.data.id).eq('profile_id', profile.data.id).eq('status', 'active').maybeSingle();
+  const member = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('profile_id', profile.data.id).eq('status', 'active').maybeSingle();
   if (member.error) fail(member.error);
   if (!member.data) return null;
   const assignments = await supabase.from('member_branches').select('branch_id, branches(legacy_firestore_id)').eq('tenant_id', tenant.data.id).eq('member_id', member.data.id);
@@ -143,7 +148,7 @@ export async function findResource(tenantId: string, resource: OrganizationResou
   const tenant = await supabase.from('tenants').select('id').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).single();
   if (tenant.error) fail(tenant.error);
   const table = resourceTables[resource];
-  const result = await supabase.from(table).select('*').eq('tenant_id', tenant.data.id).or(`id.eq.${id},legacy_firestore_id.eq.${id}`).maybeSingle();
+  const result = await supabase.from(table).select(resourceSelect[resource]).eq('tenant_id', tenant.data.id).or(`id.eq.${id},legacy_firestore_id.eq.${id}`).maybeSingle();
   if (result.error) fail(result.error);
   return result.data as OrganizationRow | null;
 }
@@ -162,18 +167,18 @@ export async function createOrganizationResource(tenantId: string, resource: Org
   const tenant = await supabase.from('tenants').select('id').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).single();
   if (tenant.error) fail(tenant.error);
   const payload = { ...data, tenant_id: tenant.data.id };
-  const result = await supabase.from(resourceTables[resource]).insert(payload).select('*').single();
+  const result = await supabase.from(resourceTables[resource]).insert(payload).select(resourceSelect[resource]).single();
   if (result.error) fail(result.error);
-  return mapOrganizationRow(resource, result.data as OrganizationRow);
+  return mapOrganizationRow(resource, result.data as unknown as OrganizationRow);
 }
 
 export async function updateOrganizationResource(tenantId: string, resource: OrganizationResource, id: string, changes: Record<string, unknown>) {
   const current = await findResource(tenantId, resource, id);
   if (!current) return null;
   const supabase = getSupabaseServer();
-  const result = await supabase.from(resourceTables[resource]).update(changes).eq('id', current.id).eq('tenant_id', current.tenant_id).select('*').single();
+  const result = await supabase.from(resourceTables[resource]).update(changes).eq('id', current.id).eq('tenant_id', current.tenant_id).select(resourceSelect[resource]).single();
   if (result.error) fail(result.error);
-  return { before: current, after: result.data as OrganizationRow, item: mapOrganizationRow(resource, result.data as OrganizationRow) };
+  return { before: current, after: result.data as unknown as OrganizationRow, item: mapOrganizationRow(resource, result.data as unknown as OrganizationRow) };
 }
 
 export async function upsertMemberBranches(tenantId: string, authUserId: string, branchIds: string[]) {

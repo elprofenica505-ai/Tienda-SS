@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
   try {
     const { requireSupabaseTenantPermission } = await import('@/lib/supabase/tenant-access');
     const context = await requireSupabaseTenantPermission(request, 'dashboard', 'view');
-    const tenant = await getSupabaseServer().from('tenants').select('*').eq('id', context.tenantId).maybeSingle();
+    const tenant = await getSupabaseServer().from('tenants').select('id,legacy_firestore_id,slug,name,status,timezone,currency,plan,subscription_status,stripe_customer_id,last_payment_failure_at,last_stripe_event_created,onboarding_completed,created_at,updated_at').eq('id', context.tenantId).maybeSingle();
     if (tenant.error) throw new Error(tenant.error.message);
     return NextResponse.json({ ok: true, tenant: tenant.data, member: context });
   } catch (error: unknown) {

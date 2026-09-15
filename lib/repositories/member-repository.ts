@@ -4,7 +4,7 @@ import { supabaseAuthUserToProfileId } from '@/lib/repositories/organization-rep
 function fail(error: { message?: string } | null): never { throw new Error(error?.message || 'SUPABASE_REQUEST_FAILED'); }
 
 async function tenantRow(tenantId: string) {
-  const result = await getSupabaseServer().from('tenants').select('*').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).single();
+  const result = await getSupabaseServer().from('tenants').select('id,legacy_firestore_id').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).single();
   if (result.error) fail(result.error);
   return result.data;
 }

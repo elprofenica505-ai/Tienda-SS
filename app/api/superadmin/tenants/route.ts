@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 function text(value: unknown, max = 120) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 async function audit(uid: string, tenantId: string, action: string, details: Record<string, unknown>) { const result = await getSupabaseServer().from('platform_audit').insert({ actor_uid: uid, tenant_id: tenantId, action, details }); if (result.error) throw new Error(result.error.message); }
 export async function GET(request: NextRequest) {
-  try { await requireSuperadmin(request); const result = await getSupabaseServer().from('tenants').select('*').order('created_at', { ascending: false }).limit(200); if (result.error) throw new Error(result.error.message); return NextResponse.json({ ok: true, tenants: result.data || [] }); }
+  try { await requireSuperadmin(request); const result = await getSupabaseServer().from('tenants').select('id,legacy_firestore_id,slug,name,status,platform_status,timezone,currency,plan,subscription_status,stripe_customer_id,stripe_subscription_id,plan_managed_by,plan_changed_at,plan_changed_by,created_at,updated_at').order('created_at', { ascending: false }).limit(200); if (result.error) throw new Error(result.error.message); return NextResponse.json({ ok: true, tenants: result.data || [] }); }
   catch (error: unknown) { const response = superadminErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 }
 export async function PATCH(request: NextRequest) {
