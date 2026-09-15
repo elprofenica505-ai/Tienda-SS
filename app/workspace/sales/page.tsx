@@ -6,11 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 import { formatMoney } from '@/lib/currency';
+import { getClientCached, invalidateClientCache } from '@/lib/client-query-cache';
 
 type Product = { id: string; name: string; sku?: string; itemType: string; stock: number; price: number; categoryId?: string };
 type Customer = { id: string; name: string; email?: string; phone?: string; active: boolean };
 type CartLine = Product & { quantity: number };
 type Sale = { id: string; saleNumber?: string; invoiceNumber?: string; total: number; paymentMethod: string; customerName?: string; customerId?: string; createdAt?: unknown };
+type SalesCatalogResponse = { products?: Product[] };
+type SalesResponse = { sales?: Sale[] };
+type CustomersResponse = { contacts?: Customer[] };
 
 function SalesContent() {
   const router = useRouter();
@@ -34,15 +38,9 @@ function SalesContent() {
     try {
       const token = await authUser.getIdToken();
       const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) };
-      const [catalogResponse, salesResponse, customersResponse] = await Promise.all([
-        fetch('/api/catalog', { headers, cache: 'no-store' }),
-        fetch('/api/sales', { headers, cache: 'no-store' }),
-        fetch('/api/contacts?type=customer', { headers, cache: 'no-store' })
-      ]);
-      const catalog = await catalogResponse.json(); const salesData = await salesResponse.json(); const customersData = await customersResponse.json();
-      if (!catalogResponse.ok) throw new Error(catalog.error || 'No se pudo cargar el catálogo.');
-      if (!salesResponse.ok) throw new Error(salesData.error || 'No se pudo cargar ventas.');
-      if (!customersResponse.ok) throw new Error(customersData.error || 'No se pudieron cargar clientes.');
+      const catalog = await getClientCached<SalesCatalogResponse>(`catalog:${authUser.id}:${tenant.id}:active:first`, async () => { const response = await fetch('/api/catalog', { headers, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el catálogo.'); return payload as SalesCatalogResponse; }, 60_000);
+      const salesData = await getClientCached<SalesResponse>(`sales:${authUser.id}:${tenant.id}:${activeBranchId || 'all'}:first`, async () => { const response = await fetch('/api/sales', { headers, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo cargar ventas.'); return payload as SalesResponse; }, 10_000);
+      const customersData = await getClientCached<CustomersResponse>(`contacts:${authUser.id}:${tenant.id}:customer:active`, async () => { const response = await fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar clientes.'); return payload as CustomersResponse; }, 60_000);
       setProducts(catalog.products || []); setSales(salesData.sales || []); setCustomers(customersData.contacts || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo cargar el punto de venta.'); }
     finally { setLoading(false); }
@@ -56,7 +54,7 @@ function SalesContent() {
   const total = Math.max(0, subtotal - Math.max(0, Number(discount || 0)));
   function add(product: Product) { setCart((current) => { const found = current.find((item) => item.id === product.id); if (found) return current.map((item) => item.id === product.id ? { ...item, quantity: Math.min(item.quantity + 1, product.itemType === 'service' ? 999 : product.stock) } : item); return [...current, { ...product, quantity: 1 }]; }); }
   function changeQuantity(id: string, delta: number) { setCart((current) => current.flatMap((item) => { if (item.id !== id) return [item]; const max = item.itemType === 'service' ? 999 : item.stock; const quantity = Math.min(max, item.quantity + delta); return quantity > 0 ? [{ ...item, quantity }] : []; })); }
-  async function checkout() { const activeWarehouseId = organization?.warehouses.find((item) => item.branchId === activeBranchId && item.active)?.id || organization?.warehouses.find((item) => item.active)?.id; if (!authUser || !tenant || !cart.length || !activeBranchId || !activeWarehouseId) { setMessage('Configura un almacén activo para esta sucursal antes de vender.'); return; } setSaving(true); setMessage(''); try { const response = await fetch('/api/sales', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId }, body: JSON.stringify({ items: cart.map((item) => ({ productId: item.id, quantity: item.quantity, unitPrice: item.price })), paymentMethod, cashReceived: paymentMethod === 'cash' ? Number(cashReceived || 0) : undefined, customerId: customerId || null, discount: Number(discount || 0), branchId: activeBranchId, warehouseId: activeWarehouseId }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo completar la venta.'); setMessage(`Venta ${data.saleId} registrada por ${money(Number(data.total))}.`); setCart([]); setCustomerId(''); setCustomerQuery(''); setDiscount(''); setCashReceived(''); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo completar la venta.'); } finally { setSaving(false); } }
+  async function checkout() { const activeWarehouseId = organization?.warehouses.find((item) => item.branchId === activeBranchId && item.active)?.id || organization?.warehouses.find((item) => item.active)?.id; if (!authUser || !tenant || !cart.length || !activeBranchId || !activeWarehouseId) { setMessage('Configura un almacén activo para esta sucursal antes de vender.'); return; } setSaving(true); setMessage(''); try { const response = await fetch('/api/sales', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId }, body: JSON.stringify({ items: cart.map((item) => ({ productId: item.id, quantity: item.quantity, unitPrice: item.price })), paymentMethod, cashReceived: paymentMethod === 'cash' ? Number(cashReceived || 0) : undefined, customerId: customerId || null, discount: Number(discount || 0), branchId: activeBranchId, warehouseId: activeWarehouseId }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo completar la venta.'); invalidateClientCache(`sales:${authUser.id}:${tenant.id}:`); invalidateClientCache(`catalog:${authUser.id}:${tenant.id}:`); invalidateClientCache(`inventory:${authUser.id}:${tenant.id}:`); setMessage(`Venta ${data.saleId} registrada por ${money(Number(data.total))}.`); setCart([]); setCustomerId(''); setCustomerQuery(''); setDiscount(''); setCashReceived(''); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo completar la venta.'); } finally { setSaving(false); } }
 
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando punto de venta...</div>;
   if (!authUser || !tenant || !member) { router.replace('/'); return null; }

@@ -5,9 +5,11 @@ import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { getClientCached, invalidateClientCache } from '@/lib/client-query-cache';
 
 type Contact = { id: string; name: string; email?: string; phone?: string; taxId?: string; address?: string; notes?: string; creditLimit?: number; creditBalance?: number; active: boolean };
 type Editing = Contact & { type: 'customer' | 'supplier' };
+type ContactsResponse = { contacts?: Contact[] };
 
 function ContactsContent() {
   const router = useRouter();
@@ -26,7 +28,7 @@ function ContactsContent() {
   const load = useCallback(async () => {
     if (!authUser || !tenant) return;
     setLoading(true);
-    try { const response = await fetch(`/api/contacts?type=${tab}${showArchived ? '&includeArchived=true' : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los contactos.'); setContacts(data.contacts || []); }
+    try { const cachePrefix = `contacts:${authUser.id}:${tenant.id}:${tab}:`; const data = await getClientCached<ContactsResponse>(`${cachePrefix}${showArchived ? 'archived' : 'active'}`, async () => { const response = await fetch(`/api/contacts?type=${tab}${showArchived ? '&includeArchived=true' : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar los contactos.'); return payload as ContactsResponse; }, 60_000); setContacts(data.contacts || []); }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando contactos.'); }
     finally { setLoading(false); }
   }, [authUser, tenant, tab, showArchived]);
@@ -34,8 +36,8 @@ function ContactsContent() {
 
   function openNew() { setEditing(null); setForm({ name: '', email: '', phone: '', taxId: '', address: '', notes: '', creditLimit: '0' }); setShowForm(true); }
   function openEdit(item: Contact) { setShowForm(false); setEditing({ ...item, type: tab }); }
-  async function save(event: FormEvent) { event.preventDefault(); if (!authUser || !tenant) return; setSaving(true); setMessage(''); try { const body = editing ? { type: tab, id: editing.id, ...form, creditLimit: Number(form.creditLimit || 0) } : { type: tab, ...form, creditLimit: Number(form.creditLimit || 0) }; const response = await fetch('/api/contacts', { method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify(body) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo guardar.'); setMessage(editing ? 'Cambios guardados.' : `${tab === 'customer' ? 'Cliente' : 'Proveedor'} creado.`); setShowForm(false); setEditing(null); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo guardar.'); } finally { setSaving(false); } }
-  async function toggle(item: Contact) { if (!authUser || !tenant) return; setSaving(true); try { const response = await fetch('/api/contacts', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ type: tab, id: item.id, active: !item.active }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cambiar el estado.'); setMessage(item.active ? 'Registro archivado.' : 'Registro reactivado.'); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo cambiar el estado.'); } finally { setSaving(false); } }
+  async function save(event: FormEvent) { event.preventDefault(); if (!authUser || !tenant) return; setSaving(true); setMessage(''); try { const body = editing ? { type: tab, id: editing.id, ...form, creditLimit: Number(form.creditLimit || 0) } : { type: tab, ...form, creditLimit: Number(form.creditLimit || 0) }; const response = await fetch('/api/contacts', { method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify(body) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo guardar.'); invalidateClientCache(`contacts:${authUser.id}:${tenant.id}:${tab}:`); setMessage(editing ? 'Cambios guardados.' : `${tab === 'customer' ? 'Cliente' : 'Proveedor'} creado.`); setShowForm(false); setEditing(null); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo guardar.'); } finally { setSaving(false); } }
+  async function toggle(item: Contact) { if (!authUser || !tenant) return; setSaving(true); try { const response = await fetch('/api/contacts', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ type: tab, id: item.id, active: !item.active }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cambiar el estado.'); invalidateClientCache(`contacts:${authUser.id}:${tenant.id}:${tab}:`); setMessage(item.active ? 'Registro archivado.' : 'Registro reactivado.'); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo cambiar el estado.'); } finally { setSaving(false); } }
 
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando {tab === 'customer' ? 'clientes' : 'proveedores'}...</div>;
   if (!authUser || !tenant || !member) { router.replace('/'); return null; }

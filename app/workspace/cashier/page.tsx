@@ -6,6 +6,7 @@ import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import { useRouter } from 'next/navigation';
 import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
 import { formatMoney } from '@/lib/currency';
+import { getClientCached } from '@/lib/client-query-cache';
 
 type ReceiptItem = { name: string; sku?: string; quantity: number; unitPrice: number; total: number };
 type PendingPreSale = { id: string; ticketCode: string; total: number; status: string; vendedorEmail?: string; vendedorUid?: string; items?: ReceiptItem[] };
@@ -29,10 +30,11 @@ function CashierContent() {
   const load = useCallback(async () => {
     if (!authUser || !tenant || !activeBranchId) return;
     const headers = { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId };
-    const [sessionResponse, customerResponse, presalesResponse] = await Promise.all([fetch('/api/cash-sessions', { headers, cache: 'no-store' }), fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }), fetch('/api/presales', { headers, cache: 'no-store' })]);
-    const sessionData = await sessionResponse.json(); const customerData = await customerResponse.json(); const presalesData = await presalesResponse.json();
+    const customerDataPromise = getClientCached<{ contacts?: Array<{ id: string; name: string; active: boolean }> }>(`contacts:${authUser.id}:${tenant.id}:customer:active`, async () => { const response = await fetch('/api/contacts?type=customer', { headers, cache: 'no-store' }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar clientes.'); return payload; }, 60_000);
+    const [sessionResponse, customerData, presalesResponse] = await Promise.all([fetch('/api/cash-sessions', { headers, cache: 'no-store' }), customerDataPromise, fetch('/api/presales', { headers, cache: 'no-store' })]);
+    const sessionData = await sessionResponse.json(); const presalesData = await presalesResponse.json();
     if (!sessionResponse.ok) throw new Error(sessionData.error || 'No se pudo cargar la caja.');
-    setSession(sessionData.active); setSessions(sessionData.sessions || []); if (customerResponse.ok) setCustomers(customerData.contacts || []); if (presalesResponse.ok) setPendingPresales((presalesData.presales || []).filter((item: PendingPreSale) => item.status === 'sent_to_cashier'));
+    setSession(sessionData.active); setSessions(sessionData.sessions || []); setCustomers(customerData.contacts || []); if (presalesResponse.ok) setPendingPresales((presalesData.presales || []).filter((item: PendingPreSale) => item.status === 'sent_to_cashier'));
     if (!registerId && organization?.cashRegisters.find((item) => item.branchId === activeBranchId)?.id) setRegisterId(organization.cashRegisters.find((item) => item.branchId === activeBranchId)!.id);
   }, [authUser, tenant, activeBranchId, organization, registerId]);
   useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : 'No se pudo cargar la caja.')); }, [load]);
