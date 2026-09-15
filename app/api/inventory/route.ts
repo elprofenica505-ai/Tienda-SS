@@ -7,7 +7,7 @@ import { writeImmutableAudit } from '@/lib/audit';
 export const runtime = 'nodejs';
 function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function positiveNumber(value: unknown) { return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0; }
-type InventoryProduct = { id: string; name: string; sku: string; itemType: string; stock: number; minStock: number; active: boolean };
+type InventoryProduct = { id: string; name: string; sku: string; itemType: string; stock: number; reserved: number; available: number; minStock: number; active: boolean };
 function responseFor(error: unknown) { const message = error instanceof Error ? error.message : ''; if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 }); if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o está inactivo.' }, { status: 404 }); if (message.includes('INSUFFICIENT_STOCK')) return NextResponse.json({ error: 'El movimiento dejaría el inventario en negativo.' }, { status: 409 }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
@@ -58,11 +58,11 @@ export async function GET(request: NextRequest) {
     }));
     const productPage = (productsResult.data || []).slice(0, pageSize);
     const productIds = productPage.map((row: any) => row.id);
-    const stocks = productIds.length ? await supabase.from('inventory_stocks').select('product_id, quantity, reorder_point, warehouse_id').eq('tenant_id', context.tenantId).in('product_id', productIds) : { data: [], error: null };
+    const stocks = productIds.length ? await supabase.from('inventory_stocks').select('product_id, quantity, reserved_quantity, reorder_point, warehouse_id').eq('tenant_id', context.tenantId).in('product_id', productIds) : { data: [], error: null };
     if (stocks.error) throw new Error(stocks.error.message);
-    const stockByProduct = new Map<string, number>();
-    for (const stock of stocks.data || []) stockByProduct.set(stock.product_id, (stockByProduct.get(stock.product_id) || 0) + Number(stock.quantity || 0));
-    const products: InventoryProduct[] = productPage.map((row: any) => ({ id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, stock: stockByProduct.get(row.id) || 0, minStock: Number(row.min_stock || 0), active: row.active }));
+    const stockByProduct = new Map<string, { quantity: number; reserved: number }>();
+    for (const stock of stocks.data || []) { const current = stockByProduct.get(stock.product_id) || { quantity: 0, reserved: 0 }; current.quantity += Number(stock.quantity || 0); current.reserved += Number(stock.reserved_quantity || 0); stockByProduct.set(stock.product_id, current); }
+    const products: InventoryProduct[] = productPage.map((row: any) => { const stock = stockByProduct.get(row.id) || { quantity: 0, reserved: 0 }; return { id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, stock: stock.quantity, reserved: stock.reserved, available: Math.max(0, stock.quantity - stock.reserved), minStock: Number(row.min_stock || 0), active: row.active }; });
     const lowStock = products.filter((item) => item.itemType !== 'service' && item.stock <= item.minStock);
     const next = (productsResult.data || []).length > pageSize ? productPage[productPage.length - 1] : null;
     const nextCursor = next ? Buffer.from(JSON.stringify({ name: next.name, id: next.id }), 'utf8').toString('base64url') : undefined;

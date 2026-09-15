@@ -64,7 +64,7 @@ test('el dashboard no se cae si preventas responde con error', () => {
 });
 
  test('las transiciones de preventa quedan acotadas al tenant y al vendedor', () => {
-  assert.match(presalesApi, /\.from\('presales'\)\.select\('id,status,seller_uid,total,branch_id'\)/);
+  assert.match(presalesApi, /\.from\('presales'\)\.select\('id,status,seller_uid,total,branch_id,reservation_id'\)/);
   assert.match(presalesApi, /context\.role === 'vendedor' && currentResult\.data\.seller_uid !== context\.uid/);
   assert.match(presalesApi, /\.from\('presales'\)\.update\(\{ status: action/);
 });

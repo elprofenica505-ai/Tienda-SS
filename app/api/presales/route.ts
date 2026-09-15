@@ -63,8 +63,24 @@ export async function POST(request: NextRequest) {
     const total = lines.reduce((sum, line) => sum + line.total, 0);
     const branchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80) || context.branchIds[0] || null;
     if (branchId && !context.branchIds.includes(branchId)) return NextResponse.json({ error: 'No tienes acceso a esa sucursal.' }, { status: 403 });
-    const inserted = await supabase.from('presales').insert({ tenant_id: context.tenantId, branch_id: branchId || null, ticket_code: ticketCode(), items: lines, total, seller_uid: context.uid, seller_email: context.email || null, seller_role: context.role, status: action, evidence_refs: evidenceRefs }).select('id,ticket_code,status,total').single();
+    let warehouseId = '';
+    let reservationId: string | null = null;
+    if (action === 'sent_to_cashier') {
+      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
+      if (warehouse.error) throw new Error(warehouse.error.message);
+      warehouseId = warehouse.data?.id || '';
+      if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+    }
+    const inserted = await supabase.from('presales').insert({ tenant_id: context.tenantId, branch_id: branchId || null, warehouse_id: warehouseId || null, ticket_code: ticketCode(), items: lines, total, seller_uid: context.uid, seller_email: context.email || null, seller_role: context.role, status: action === 'sent_to_cashier' ? 'draft' : action, evidence_refs: evidenceRefs }).select('id,ticket_code,status,total').single();
     if (inserted.error) throw new Error(inserted.error.message);
+    if (action === 'sent_to_cashier') {
+      const reservation = await supabase.rpc('reserve_inventory', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: lines.map((line) => ({ productId: line.productId, quantity: line.quantity })), target_reason: `Preventa ${inserted.data.ticket_code}` });
+      if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
+      reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
+      const sent = await supabase.from('presales').update({ status: 'sent_to_cashier', reservation_id: reservationId || null, warehouse_id: warehouseId, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', inserted.data.id).select('id,ticket_code,status,total').single();
+      if (sent.error) throw new Error(sent.error.message);
+      inserted.data = sent.data;
+    }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
     return NextResponse.json({ ok: true, presaleId: inserted.data.id, ticketCode: inserted.data.ticket_code, status: inserted.data.status, total: inserted.data.total }, { status: 201 });
   } catch (error: unknown) {
@@ -80,7 +96,7 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json(); const id = text(body.presaleId, 120); const action: 'sent_to_cashier' | 'cancelled' | '' = body.action === 'send' ? 'sent_to_cashier' : body.action === 'cancel' ? 'cancelled' : '';
     if (!id || !action) return NextResponse.json({ error: 'Preventa y acción son obligatorias.' }, { status: 400 });
     const supabase = getSupabaseServer();
-    const currentResult = await supabase.from('presales').select('id,status,seller_uid,total,branch_id').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const currentResult = await supabase.from('presales').select('id,status,seller_uid,total,branch_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (currentResult.error) throw new Error(currentResult.error.message);
     if (!currentResult.data) return NextResponse.json({ error: 'La preventa no existe.' }, { status: 404 });
     const requestedBranchId = text(request.headers.get('x-branch-id'), 80);
@@ -89,6 +105,10 @@ export async function PATCH(request: NextRequest) {
     if (context.role !== 'vendedor' && currentResult.data.branch_id) assertBranchAccess(context, currentResult.data.branch_id);
     if ((action === 'sent_to_cashier' && currentResult.data.status !== 'draft') || (action === 'cancelled' && currentResult.data.status !== 'sent_to_cashier')) return NextResponse.json({ error: 'La preventa ya no puede cambiar de estado.' }, { status: 409 });
     if (context.role === 'vendedor' && currentResult.data.seller_uid !== context.uid) return NextResponse.json({ error: 'Solo puedes actualizar tus propias preventas.' }, { status: 403 });
+    if (action === 'cancelled' && currentResult.data.reservation_id) {
+      const released = await supabase.rpc('release_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: currentResult.data.reservation_id, target_user_id: context.uid });
+      if (released.error) throw new Error(released.error.message);
+    }
     const updated = await supabase.from('presales').update({ status: action, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', id).select('id,status').single();
     if (updated.error) throw new Error(updated.error.message);
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: `presale.${action}`, entity: 'presale', entityId: id, before: { status: currentResult.data.status }, after: { status: action }, result: 'success' });

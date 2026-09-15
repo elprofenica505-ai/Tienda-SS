@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     assertBranchAccess(context, branchId);
 
     const supabase = getSupabaseServer();
-    const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
+    const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
     if (presaleResult.error) throw new Error(presaleResult.error.message);
     if (!presaleResult.data) throw new Error('PRESALE_NOT_FOUND');
     const presale = presaleResult.data;
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
-    const requestedWarehouseId = text(body.warehouseId, 128);
+    const requestedWarehouseId = text(body.warehouseId, 128) || text(presale.warehouse_id, 128);
     const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).match(requestedWarehouseId ? { id: requestedWarehouseId } : {}).order('name').limit(1).maybeSingle();
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
@@ -88,6 +88,10 @@ export async function POST(request: NextRequest) {
     });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
+    if (presale.reservation_id) {
+      const consumed = await supabase.rpc('consume_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: presale.reservation_id, target_user_id: context.uid });
+      if (consumed.error) throw new Error(consumed.error.message);
+    }
     const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
     const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
     const issuer = { legalName: fiscalConfig.data?.legal_name || undefined, taxId: fiscalConfig.data?.tax_id || undefined, address: typeof fiscalMetadata.address === 'string' ? fiscalMetadata.address : undefined, phone: typeof fiscalMetadata.phone === 'string' ? fiscalMetadata.phone : undefined, email: typeof fiscalMetadata.email === 'string' ? fiscalMetadata.email : undefined, logoDataUrl: typeof fiscalMetadata.logoDataUrl === 'string' ? fiscalMetadata.logoDataUrl : undefined };
