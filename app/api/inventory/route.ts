@@ -27,9 +27,22 @@ export async function GET(request: NextRequest) {
     ]);
     if (movementsResult.error) throw new Error(movementsResult.error.message);
     if (productsResult.error) throw new Error(productsResult.error.message);
-    const movements = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String((row as any).warehouses?.branch_id || ''))).map((row: any) => ({
+    const movementRows = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String((row as any).warehouses?.branch_id || '')));
+    const movementProductIds = Array.from(new Set(movementRows.map((row: any) => String(row.product_id))));
+    const movementActorIds = Array.from(new Set(movementRows.map((row: any) => String(row.performed_by || '')).filter(Boolean)));
+    const [movementProducts, movementActors] = await Promise.all([
+      movementProductIds.length ? supabase.from('products').select('id,name,sku').eq('tenant_id', context.tenantId).in('id', movementProductIds) : Promise.resolve({ data: [], error: null } as any),
+      movementActorIds.length ? supabase.from('profiles').select('auth_user_id,display_name,email').in('auth_user_id', movementActorIds) : Promise.resolve({ data: [], error: null } as any),
+    ]);
+    if (movementProducts.error) throw new Error(movementProducts.error.message);
+    if (movementActors.error) throw new Error(movementActors.error.message);
+    const productById = new Map<string, { name?: string; sku?: string }>((movementProducts.data || []).map((item: any) => [String(item.id), item] as [string, { name?: string; sku?: string }]));
+    const actorById = new Map<string, { display_name?: string; email?: string }>((movementActors.data || []).map((item: any) => [String(item.auth_user_id), item] as [string, { display_name?: string; email?: string }]));
+    const movements = movementRows.map((row: any) => ({
       id: row.id,
       productId: row.product_id,
+      productName: productById.get(String(row.product_id))?.name || 'Producto archivado',
+      productSku: productById.get(String(row.product_id))?.sku || '',
       warehouseId: row.warehouse_id,
       type: row.movement_type,
       quantity: Number(row.quantity || 0),
@@ -39,6 +52,8 @@ export async function GET(request: NextRequest) {
       referenceId: row.reference_id,
       unitCost: Number(row.unit_cost || 0),
       performedBy: row.performed_by,
+      performedByName: actorById.get(String(row.performed_by))?.display_name || actorById.get(String(row.performed_by))?.email || row.performed_by || 'Sistema',
+      performedByEmail: actorById.get(String(row.performed_by))?.email || '',
       createdAt: row.created_at,
     }));
     const productPage = (productsResult.data || []).slice(0, pageSize);

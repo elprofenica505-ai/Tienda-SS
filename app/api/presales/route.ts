@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
+import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -79,9 +80,13 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json(); const id = text(body.presaleId, 120); const action: 'sent_to_cashier' | 'cancelled' | '' = body.action === 'send' ? 'sent_to_cashier' : body.action === 'cancel' ? 'cancelled' : '';
     if (!id || !action) return NextResponse.json({ error: 'Preventa y acción son obligatorias.' }, { status: 400 });
     const supabase = getSupabaseServer();
-    const currentResult = await supabase.from('presales').select('id,status,seller_uid,total').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const currentResult = await supabase.from('presales').select('id,status,seller_uid,total,branch_id').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (currentResult.error) throw new Error(currentResult.error.message);
     if (!currentResult.data) return NextResponse.json({ error: 'La preventa no existe.' }, { status: 404 });
+    const requestedBranchId = text(request.headers.get('x-branch-id'), 80);
+    if (requestedBranchId) assertBranchAccess(context, requestedBranchId);
+    if (currentResult.data.branch_id && requestedBranchId && currentResult.data.branch_id !== requestedBranchId) return NextResponse.json({ error: 'La preventa pertenece a otra sucursal.' }, { status: 403 });
+    if (context.role !== 'vendedor' && currentResult.data.branch_id) assertBranchAccess(context, currentResult.data.branch_id);
     if ((action === 'sent_to_cashier' && currentResult.data.status !== 'draft') || (action === 'cancelled' && currentResult.data.status !== 'sent_to_cashier')) return NextResponse.json({ error: 'La preventa ya no puede cambiar de estado.' }, { status: 409 });
     if (context.role === 'vendedor' && currentResult.data.seller_uid !== context.uid) return NextResponse.json({ error: 'Solo puedes actualizar tus propias preventas.' }, { status: 403 });
     const updated = await supabase.from('presales').update({ status: action, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', id).select('id,status').single();

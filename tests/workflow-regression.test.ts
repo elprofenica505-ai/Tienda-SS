@@ -25,7 +25,7 @@ test('el historial de inventario entrega el contrato que consume la UI', async (
   assert.match(api, /delta: Number\(row\.quantity/);
   assert.match(api, /metadata\?\.reason/);
   assert.match(api, /warehouses!inner\(branch_id\)/);
-  assert.match(ui, /movement\.productId/);
+  assert.match(ui, /movement\.productName/);
   assert.match(ui, /movement\.delta/);
   assert.match(ui, /movement\.reason/);
 });
