@@ -97,10 +97,13 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       const selected = data.tenants?.find((item: { tenant: Tenant }) => item.tenant.id === data.activeTenantId) || data.tenants?.[0];
       if (!selected) throw new Error('No tienes una empresa activa.');
       window.localStorage.setItem(STORAGE_KEY, selected.tenant.id);
-      const organizationResponse = await fetch('/api/organization', { headers: { ...headers, 'x-tenant-id': selected.tenant.id }, cache: 'no-store' });
-      const organizationData = await organizationResponse.json();
-      if (!organizationResponse.ok) throw new Error(organizationData.error || 'No se pudo cargar la organización.');
-      const nextOrganization = organizationData.organization as TenantOrganization;
+      let nextOrganization = data.organization as TenantOrganization | undefined;
+      if (!nextOrganization) {
+        const organizationResponse = await fetch('/api/organization', { headers: { ...headers, 'x-tenant-id': selected.tenant.id }, cache: 'no-store' });
+        const organizationData = await organizationResponse.json();
+        if (!organizationResponse.ok) throw new Error(organizationData.error || 'No se pudo cargar la organización.');
+        nextOrganization = organizationData.organization as TenantOrganization;
+      }
       const assigned = Array.isArray(selected.member.branchIds) ? selected.member.branchIds : [];
       const visibleBranches = ADMIN_ROLES.has(selected.member.role) ? nextOrganization.branches : nextOrganization.branches.filter((branch) => assigned.includes(branch.id));
       const normalizedOrganization = { ...nextOrganization, branches: visibleBranches };

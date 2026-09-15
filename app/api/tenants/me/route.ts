@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeCurrency, DEFAULT_TENANT_LOCALE, DEFAULT_TENANT_SYMBOL } from '@/lib/currency';
-import { findTenantsForAuthUserId } from '@/lib/repositories/organization-repository';
+import { filterOrganizationMembers } from '@/lib/organization';
+import { findTenantsForAuthUserId, getOrganization } from '@/lib/repositories/organization-repository';
 import { updateTenant } from '@/lib/repositories/tenant-repository';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
 import { getSupabaseServer } from '@/lib/supabase/server';
-import { tenantErrorResponse } from '@/lib/tenant';
+import { tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,21 @@ export async function GET(request: NextRequest) {
     const activeTenantId = requestedTenantId && available.some((item) => item.tenant.id === requestedTenantId)
       ? requestedTenantId
       : available[0].tenant.id;
+    const selected = available.find((item) => item.tenant.id === activeTenantId) || available[0];
+    const assignedBranches = Array.isArray(selected.member.branchIds) ? selected.member.branchIds : [];
+    const organization = await getOrganization(activeTenantId);
+    const selectedRole = String(selected.member.role) as TenantRole;
+    const adminRole = ['owner', 'admin', 'gerente', 'jefe'].includes(selectedRole);
+    const visibleBranches = adminRole
+      ? organization.branches
+      : organization.branches.filter((branch) => assignedBranches.includes(String(branch.id)));
+    const branchSet = new Set(visibleBranches.map((branch) => String(branch.id)));
+    const visibleOrganization = {
+      branches: visibleBranches,
+      warehouses: organization.warehouses.filter((item) => branchSet.has(String(item.branchId))),
+      cashRegisters: organization.cashRegisters.filter((item) => branchSet.has(String(item.branchId))),
+      members: filterOrganizationMembers(organization.members, selectedRole, assignedBranches),
+    };
     return NextResponse.json({
       ok: true,
       activeTenantId,
@@ -42,6 +58,7 @@ export async function GET(request: NextRequest) {
         },
         member: item.member,
       })),
+      organization: visibleOrganization,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     console.error('tenant_me_supabase_failed', { message: error instanceof Error ? error.message : 'unknown' });
