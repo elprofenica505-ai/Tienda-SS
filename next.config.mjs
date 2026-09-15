@@ -2,6 +2,9 @@
 const nextConfig = {
   poweredByHeader: false,
   compress: true,
+  images: {
+    formats: ['image/avif', 'image/webp'],
+  },
   async headers() {
     return [
       {
@@ -19,6 +22,10 @@ const nextConfig = {
       {
         source: '/icon.svg',
         headers: [{ key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' }],
+      },
+      {
+        source: '/(.*\\.(?:avif|gif|ico|jpe?g|png|svg|webp|woff2?))',
+        headers: [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }],
       },
     ];
   },
