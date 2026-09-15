@@ -20,7 +20,31 @@ export async function GET(request: NextRequest) {
     else if (!MANAGER_ROLES.has(context.role)) query = query.in('branch_id', context.branchIds.slice(0, 100));
     const result = await query;
     if (result.error) throw new Error(result.error.message);
-    const sales = (result.data || []).map((row: any) => ({ id: row.id, invoiceNumber: row.invoice_number, branchId: row.branch_id, customerId: row.customer_id, status: row.status, subtotal: Number(row.subtotal || 0), tax: Number(row.tax || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), soldBy: row.sold_by, paymentMethod: row.metadata?.paymentMethod || row.sale_payments?.[0]?.payment_method, createdAt: row.created_at, updatedAt: row.updated_at, items: row.sale_items || [], payments: row.sale_payments || [] }));
+    const rows = result.data || [];
+    const saleIds = rows.map((row: any) => String(row.id));
+    const productIds = Array.from(new Set(rows.flatMap((row: any) => (row.sale_items || []).map((item: any) => String(item.product_id)))));
+    const [productsResult, returnsResult] = await Promise.all([
+      productIds.length ? getSupabaseServer().from('products').select('id,name,sku').eq('tenant_id', context.tenantId).in('id', productIds) : Promise.resolve({ data: [], error: null } as any),
+      saleIds.length ? getSupabaseServer().from('sale_return_items').select('sale_id,product_id,quantity').eq('tenant_id', context.tenantId).in('sale_id', saleIds) : Promise.resolve({ data: [], error: null } as any),
+    ]);
+    if (productsResult.error) throw new Error(productsResult.error.message);
+    if (returnsResult.error) throw new Error(returnsResult.error.message);
+    const productById = new Map<string, { name?: string; sku?: string }>((productsResult.data || []).map((item: any) => [String(item.id), item] as [string, { name?: string; sku?: string }]));
+    const returnedBySale = new Map<string, Record<string, number>>();
+    for (const item of returnsResult.data || []) {
+      const saleMap = returnedBySale.get(String(item.sale_id)) || {};
+      saleMap[String(item.product_id)] = (saleMap[String(item.product_id)] || 0) + Number(item.quantity || 0);
+      returnedBySale.set(String(item.sale_id), saleMap);
+    }
+    const sales = rows.map((row: any) => {
+      const payments = row.sale_payments || [];
+      const returnedQuantities = returnedBySale.get(String(row.id)) || {};
+      const items = (row.sale_items || []).map((item: any) => {
+        const product = productById.get(String(item.product_id));
+        return { productId: item.product_id, name: product?.name || 'Producto archivado', sku: product?.sku || '', quantity: Number(item.quantity || 0), unitPrice: Number(item.unit_price || 0), total: Number(item.line_total || item.quantity * item.unit_price || 0) };
+      });
+      return { id: row.id, saleNumber: row.invoice_number || row.id, invoiceNumber: row.invoice_number, branchId: row.branch_id, customerId: row.customer_id, customerName: row.metadata?.customerName || '', status: row.status, subtotal: Number(row.subtotal || 0), tax: Number(row.tax || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paidAmount: payments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0), balanceDue: Number(row.metadata?.balanceDue || 0), soldBy: row.sold_by, paymentMethod: row.metadata?.paymentMethod || payments[0]?.payment_method, createdAt: row.created_at, updatedAt: row.updated_at, items, returnedQuantities, payments };
+    });
     return NextResponse.json({ ok: true, sales }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { return failure(error); }
 }

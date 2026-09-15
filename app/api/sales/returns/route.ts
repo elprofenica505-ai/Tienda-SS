@@ -19,7 +19,14 @@ export async function POST(request: NextRequest) {
     assertBranchAccess(context, sale.data.branch_id);
     const refundMethod = text(body.refundMethod, 30) || 'cash';
     const items = Array.isArray(body.items) ? body.items.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: item.quantity })).filter((item: { productId: string; quantity: unknown }) => item.productId) : [];
-    const result = await getSupabaseServer().rpc('create_sale_return', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: text(body.cashSessionId, 128) || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items });
+    const supabase = getSupabaseServer();
+    let cashSessionId = text(body.cashSessionId, 128) || '';
+    if (refundMethod !== 'credit' && !cashSessionId) {
+      const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', sale.data.branch_id).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
+      if (session.error) throw new Error(session.error.message);
+      cashSessionId = session.data?.id || '';
+    }
+    const result = await supabase.rpc('create_sale_return', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: cashSessionId || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.returned', entity: 'sale', entityId: saleId, after: data, result: 'success' });
