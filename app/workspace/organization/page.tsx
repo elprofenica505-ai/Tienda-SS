@@ -32,7 +32,7 @@ function OrganizationContent() {
       const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo crear el registro.');
       setMessage(`${resource === 'branches' ? 'Sucursal' : resource === 'warehouses' ? 'Almacén' : 'Caja'} creado correctamente.`);
       setForm({ name: '', code: '', branchId: '', timezone: 'America/Managua' });
-      await refresh();
+      await refresh({ force: true });
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo crear el registro.'); }
     finally { setSaving(false); }
   }
@@ -43,7 +43,7 @@ function OrganizationContent() {
     try {
       const response = await fetch('/api/organization', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ uid, branchIds }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo asignar la sucursal.');
-      setMessage('Asignación de sucursal actualizada.'); await refresh();
+      setMessage('Asignación de sucursal actualizada.'); await refresh({ force: true });
     } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo asignar la sucursal.'); }
     finally { setSaving(false); }
   }
