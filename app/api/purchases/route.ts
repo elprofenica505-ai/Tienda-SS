@@ -29,11 +29,28 @@ export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'inventory', 'create');
     const body = await request.json();
-    const branchId = text(body.branchId, 128);
+    const action = text(body.action, 30) || 'receive';
+    const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128);
     const warehouseId = text(body.warehouseId, 128);
     const supplierName = text(body.supplierName, 180);
-    const evidenceRef = text(body.evidenceRef, 500);
     const rawItems = Array.isArray(body.items) ? body.items : [];
+    if (action === 'receive_partial') {
+      const purchaseId = text(body.purchaseId, 128);
+      const receiptItems = Array.isArray(body.items) ? body.items : [];
+      const purchase = await getSupabaseServer().from('purchases').select('branch_id').eq('tenant_id', context.tenantId).eq('id', purchaseId).maybeSingle();
+      if (purchase.error || !purchase.data) return NextResponse.json({ error: 'La orden de compra no existe.' }, { status: 404 });
+      if (!['owner', 'admin', 'gerente', 'jefe'].includes(context.role) && !context.branchIds.includes(purchase.data.branch_id)) return NextResponse.json({ error: 'La sucursal no está autorizada para este usuario.' }, { status: 403 });
+      const received = await getSupabaseServer().rpc('receive_purchase_partial', { target_tenant_id: context.tenantId, target_purchase_id: purchaseId, target_user_id: context.uid, target_items: receiptItems });
+      if (received.error) throw new Error(received.error.message);
+      return NextResponse.json({ ok: true, ...(received.data || {}) }, { status: 200 });
+    }
+    if (action === 'order') {
+      const supplierId = text(body.supplierId, 128);
+      const ordered = await getSupabaseServer().rpc('create_purchase_order', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_supplier_id: supplierId, target_user_id: context.uid, target_items: rawItems, target_status: text(body.status, 20) === 'draft' ? 'draft' : 'ordered' });
+      if (ordered.error) throw new Error(ordered.error.message);
+      return NextResponse.json({ ok: true, ...(ordered.data || {}) }, { status: 201 });
+    }
+    const evidenceRef = text(body.evidenceRef, 500);
     if (!branchId || !warehouseId) return NextResponse.json({ error: 'La sucursal y el almacén son obligatorios.' }, { status: 400 });
     if (!rawItems.length || rawItems.length > 50) return NextResponse.json({ error: 'La compra debe contener entre 1 y 50 productos.' }, { status: 400 });
     if (!['owner', 'admin', 'gerente', 'jefe'].includes(context.role) && !context.branchIds.includes(branchId)) return NextResponse.json({ error: 'La sucursal no está autorizada para este usuario.' }, { status: 403 });

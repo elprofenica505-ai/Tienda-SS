@@ -41,7 +41,14 @@ export async function POST(request: NextRequest) {
     const sale = await getSupabaseServer().from('sales').select('branch_id').eq('id', saleId).eq('tenant_id', context.tenantId).single();
     if (sale.error || !sale.data) return NextResponse.json({ error: 'La venta a crédito no existe.' }, { status: 404 });
     assertBranchAccess(context, sale.data.branch_id);
-    const result = await getSupabaseServer().rpc('record_receivable_payment', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_payment_method: method, target_amount: payment, target_notes: text(body.notes, 300), target_cash_session_id: text(body.cashSessionId, 128) || null });
+    const supabase = getSupabaseServer();
+    let cashSessionId = text(body.cashSessionId, 128);
+    if (method === 'cash' && !cashSessionId) {
+      const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', sale.data.branch_id).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
+      if (session.error) throw new Error(session.error.message);
+      cashSessionId = session.data?.id || '';
+    }
+    const result = await supabase.rpc('record_receivable_payment', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_payment_method: method, target_amount: payment, target_notes: text(body.notes, 300), target_cash_session_id: cashSessionId || null });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, after: data, result: 'success' });
