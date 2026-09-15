@@ -320,3 +320,77 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .receipt-issuer{border-bottom:1px solid var(--line);border-top:1px solid var(--line);display:grid;gap:4px;margin:16px 0;padding:12px 0}.receipt-issuer span,.receipt-thanks{color:var(--muted);font-size:12px}.receipt-items{display:grid;gap:7px;margin:16px 0}.receipt-items>div,.pending-presale{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:12px;justify-content:space-between;padding:9px 0}.receipt-items b{margin-left:auto}.receipt-brand{align-items:center;display:flex;gap:8px;margin-bottom:14px}.receipt-brand .brand-mark-icon{background:var(--dark);border-radius:6px;color:var(--lime);display:inline-flex;height:24px;justify-content:center;width:24px}.ticket-barcode{margin:18px auto;text-align:center}.ticket-barcode>div{align-items:stretch;display:flex;height:48px;justify-content:center;overflow:hidden}.ticket-barcode i{background:transparent;display:block;margin-right:1px;width:2px}.ticket-barcode i.barcode-bar{background:#111}.ticket-barcode small{letter-spacing:2px}.pending-presales{display:grid}.pending-presale>div{display:grid;gap:4px}.pending-presale small{color:var(--muted)}.ticket-code-prominent{font-size:16px;letter-spacing:1px}.ticket-actions{display:flex;flex-wrap:wrap;gap:10px}@media print{body *{visibility:hidden}.receipt-printable,.receipt-printable *{visibility:visible}.receipt-printable{background:#fff;border:0;box-shadow:none;left:0;margin:0;position:absolute;top:0;width:80mm}.no-print{display:none!important}.receipt-printable h2{font-size:18px}.receipt-printable p,.receipt-printable span,.receipt-printable b{font-size:11px}}
 
 .fiscal-logo-field{align-items:center;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;margin-top:18px;padding-top:18px}.fiscal-logo-field>div:first-child{flex:1;min-width:220px}.fiscal-logo-field p{color:var(--muted);font-size:12px;margin:5px 0}.fiscal-logo-preview,.receipt-company-logo{border:1px solid var(--line);border-radius:8px;object-fit:contain}.fiscal-logo-preview{height:72px;width:120px}.receipt-company-logo{height:42px;max-width:130px}.fiscal-logo-empty{align-items:center;background:var(--soft);border:1px dashed #b8c6b5;border-radius:8px;color:var(--muted);display:flex;font-size:11px;height:72px;justify-content:center;width:120px}.receipt-brand small{color:var(--muted);font-size:10px;margin-left:auto}@media print{.receipt-company-logo{max-height:42px}}
+
+
+/* Mobile workspace navigation: keep the first viewport focused on the module content. */
+.workspace-sidebar-header { display: block; }
+.workspace-navigation { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.workspace-mobile-toggle { display: none; }
+@media (max-width: 720px) {
+  .workspace-sidebar {
+    align-items: stretch;
+    padding: 12px 14px;
+    position: relative;
+    width: 100%;
+    z-index: 20;
+  }
+  .workspace-sidebar-header {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+  }
+  .workspace-sidebar .onboarding-brand {
+    justify-content: flex-start;
+    margin: 0;
+  }
+  .workspace-sidebar .onboarding-brand b { display: block; }
+  .workspace-mobile-toggle {
+    align-items: center;
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(201,247,125,.22);
+    border-radius: 10px;
+    color: var(--cx-accent);
+    display: inline-flex;
+    font-size: 11px;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px 12px;
+    width: auto;
+  }
+  .workspace-mobile-toggle > span:first-child { font-size: 20px; line-height: 1; }
+  .workspace-company {
+    align-items: center;
+    display: flex;
+    margin: 10px 0 0;
+    padding: 9px 10px;
+  }
+  .workspace-company div { display: grid; }
+  .workspace-company i { display: block; margin-left: auto; }
+  .workspace-navigation { display: none; }
+  .workspace-sidebar.mobile-open .workspace-navigation {
+    display: block;
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    padding-top: 10px;
+  }
+  .workspace-sidebar nav { gap: 4px; margin-top: 0; }
+  .workspace-sidebar a,
+  .workspace-sidebar button {
+    flex-direction: row;
+    justify-content: flex-start;
+    min-height: 42px;
+    padding: 9px 11px;
+    text-align: left;
+  }
+  .workspace-sidebar a span,
+  .workspace-sidebar button span {
+    display: block;
+    font-size: 12px;
+    max-width: none;
+    overflow: visible;
+    white-space: normal;
+  }
+  .workspace-sidebar a .workspace-nav-icon,
+  .workspace-sidebar button .workspace-nav-icon { flex: 0 0 24px; font-size: 18px; text-align: center; }
+  .workspace-sidebar-bottom { margin-top: 12px; padding-top: 12px; }
+}
