@@ -25,6 +25,7 @@ export type TenantOrganization = {
   branches: TenantBranch[];
   warehouses: Array<{ id: string; branchId: string; name: string; code: string; active: boolean; type?: string }>;
   cashRegisters: Array<{ id: string; branchId: string; name: string; code: string; active: boolean }>;
+  members: Array<{ uid: string; name?: string; email?: string; role?: string; branchIds?: string[]; status?: string }>;
 };
 
 type TenantContextValue = {
