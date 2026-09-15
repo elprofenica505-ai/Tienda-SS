@@ -394,3 +394,21 @@ button:disabled { cursor: not-allowed; opacity: .65; }
   .workspace-sidebar button .workspace-nav-icon { flex: 0 0 24px; font-size: 18px; text-align: center; }
   .workspace-sidebar-bottom { margin-top: 12px; padding-top: 12px; }
 }
+
+
+/* Shared narrow-screen safeguards for all workspace modules. */
+@media (max-width: 720px) {
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .workspace-main, .workspace-main > * { max-width: 100%; min-width: 0; }
+  .workspace-header, .catalog-header, .inventory-header, .sales-header, .contacts-header, .members-header { align-items: flex-start; flex-wrap: wrap; }
+  .catalog-header .button, .inventory-header .button, .sales-header .button, .contacts-header .button, .members-header .button { max-width: 100%; width: 100%; }
+  .catalog-toolbar, .contacts-toolbar, .members-toolbar { flex-wrap: wrap; }
+  .catalog-toolbar .catalog-tabs, .contacts-toolbar .catalog-tabs { margin-right: 0; max-width: 100%; overflow-x: auto; }
+  .contacts-search, .inventory-search, .sales-toolbar input, .fiscal-form-grid input, .fiscal-form-grid textarea, .fiscal-mode-row select { max-width: 100%; width: 100%; }
+  .form-two { grid-template-columns: 1fr !important; }
+  .welcome-banner, .empty-state-actions { align-items: stretch; flex-direction: column; }
+  .welcome-banner .button, .empty-state-actions .button { width: 100%; }
+  .section-card, .catalog-modal { max-width: 100%; overflow-wrap: anywhere; }
+  .fiscal-logo-field > div:first-child { min-width: 0; }
+  .payment-options { grid-template-columns: repeat(2, 1fr); }
+}
