@@ -73,13 +73,16 @@ export function supabaseAuthUserToProfileId(authUserId: string): string {
 
 export async function findTenantsForAuthUserId(authUserId: string) {
   const supabase = getSupabaseServer();
-  const profile = await supabase.from('profiles').select('*').eq('auth_user_id', authUserId).maybeSingle();
+  const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return [];
-  const memberships = await supabase.from('members').select('*, tenants(*)').eq('profile_id', profile.data.id).eq('status', 'active');
+  const memberships = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,tenants(id,legacy_firestore_id,slug,name,status,timezone,currency,created_at,updated_at)').eq('profile_id', profile.data.id).eq('status', 'active');
   if (memberships.error) fail(memberships.error);
-  return (memberships.data || []).filter((row) => row.tenants && row.tenants.status === 'active').map((row) => ({
-    tenant: mapTenant(row.tenants as OrganizationRow),
+  return (memberships.data || []).filter((row) => {
+    const tenant = row.tenants as unknown as OrganizationRow | null;
+    return tenant && tenant.status === 'active';
+  }).map((row) => ({
+    tenant: mapTenant(row.tenants as unknown as OrganizationRow),
     member: mapMember(row as OrganizationRow, profile.data as OrganizationRow, []),
   }));
 }
@@ -87,14 +90,14 @@ export async function findTenantsForAuthUserId(authUserId: string) {
 export async function ensureProfile(authUserId: string, email?: string, displayName?: string) {
   const supabase = getSupabaseServer();
   const payload = { id: authUserId, auth_user_id: authUserId, email: email || null, display_name: displayName || email || null };
-  const result = await supabase.from('profiles').upsert(payload, { onConflict: 'auth_user_id' }).select('*').single();
+  const result = await supabase.from('profiles').upsert(payload, { onConflict: 'auth_user_id' }).select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').single();
   if (result.error) fail(result.error);
   return result.data as OrganizationRow;
 }
 
 export async function findMembership(tenantId: string, authUserId: string) {
   const supabase = getSupabaseServer();
-  const profile = await supabase.from('profiles').select('*').eq('auth_user_id', authUserId).maybeSingle();
+  const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return null;
   const tenant = await supabase.from('tenants').select('*').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
@@ -118,10 +121,10 @@ export async function getOrganization(tenantId: string) {
   if (tenant.error) fail(tenant.error);
   if (!tenant.data) throw new Error('TENANT_NOT_FOUND');
   const [branches, warehouses, cashRegisters, members] = await Promise.all([
-    supabase.from('branches').select('*').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
-    supabase.from('warehouses').select('*').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
-    supabase.from('cash_registers').select('*').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
-    supabase.from('members').select('*, profiles(*), member_branches(branch_id, branches(legacy_firestore_id))').eq('tenant_id', tenant.data.id).order('created_at'),
+    supabase.from('branches').select('id,legacy_firestore_id,tenant_id,code,name,timezone,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
+    supabase.from('warehouses').select('id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
+    supabase.from('cash_registers').select('id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
+    supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,profiles(id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at),member_branches(branch_id,branches(legacy_firestore_id))').eq('tenant_id', tenant.data.id).order('created_at'),
   ]);
   for (const result of [branches, warehouses, cashRegisters, members]) if (result.error) fail(result.error);
   return {
@@ -129,7 +132,7 @@ export async function getOrganization(tenantId: string) {
     warehouses: (warehouses.data || []).map((row) => mapOrganizationRow('warehouses', row as OrganizationRow)),
     cashRegisters: (cashRegisters.data || []).map((row) => mapOrganizationRow('cashRegisters', row as OrganizationRow)),
     members: (members.data || []).map((row) => {
-      const raw = row as OrganizationRow & { profiles?: OrganizationRow; member_branches?: Array<{ branch_id: string; branches?: OrganizationRow }> };
+      const raw = row as unknown as OrganizationRow & { profiles?: OrganizationRow; member_branches?: Array<{ branch_id: string; branches?: OrganizationRow }> };
       return mapMember(raw, raw.profiles, (raw.member_branches || []).map((item) => String(item.branches?.legacy_firestore_id || item.branch_id)));
     }),
   };

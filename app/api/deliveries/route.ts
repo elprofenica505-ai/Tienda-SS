@@ -33,7 +33,7 @@ function mapDelivery(row: Record<string, any>) {
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
-    let query = getSupabaseServer().from('deliveries').select('*').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(25);
+    let query = getSupabaseServer().from('deliveries').select('id,tenant_id,sale_id,branch_id,customer_id,customer_name,address,driver_id,status,created_by,created_at,updated_at,delivered_at').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(25);
     if (context.role === 'chofer') query = query.eq('driver_id', context.uid);
     else if (!ADMIN_ROLES.has(context.role)) query = query.in('branch_id', await accessibleBranchIds(context.tenantId, context.branchIds));
     const result = await query;

@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const productsRequested = params.get('products') === 'true';
     const pageSize = parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE);
     const rawCursor = parseCursor(params.get('cursor'));
-    let productQuery = supabase.from('products').select('*').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
+    let productQuery = supabase.from('products').select('id,name,sku,item_type,min_stock,active').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
     if (rawCursor) { try { const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string }; if (cursor.name && cursor.id) productQuery = productQuery.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`); } catch { return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 }); } }
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const [movementsResult, productsResult] = await Promise.all([

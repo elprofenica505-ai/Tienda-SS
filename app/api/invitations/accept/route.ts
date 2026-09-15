@@ -10,7 +10,7 @@ function text(value: unknown, max = 160) { return typeof value === 'string' ? va
 function bearer(request: NextRequest): string { const header = request.headers.get('authorization') || ''; return header.startsWith('Bearer ') ? header.slice(7).trim() : ''; }
 
 async function findInvitation(token: string) {
-  const result = await getSupabaseServer().from('tenant_invitations').select('*').eq('token_hash', hashInvitationToken(token)).maybeSingle();
+  const result = await getSupabaseServer().from('tenant_invitations').select('id,tenant_id,email,role,status,expires_at').eq('token_hash', hashInvitationToken(token)).maybeSingle();
   if (result.error) throw new Error(result.error.message);
   return result.data;
 }

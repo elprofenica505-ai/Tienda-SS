@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     const includeArchived = url.searchParams.get('includeArchived') === 'true';
     let query = getSupabaseServer()
       .from(tableFor(type))
-      .select('*')
+      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at')
       .eq('tenant_id', context.tenantId)
       .order('name', { ascending: true });
     if (!includeArchived) query = query.eq('active', true);
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
       metadata,
       ...(type === 'customer' ? { credit_limit: money(body.creditLimit) } : {}),
     };
-    const result = await supabase.from(tableFor(type)).insert(payload).select('*').single();
+    const result = await supabase.from(tableFor(type)).insert(payload).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, item: mapContact(result.data as Record<string, any>, type) }, { status: 201 });
   } catch (error: unknown) {
@@ -117,7 +117,7 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 });
 
     const supabase = getSupabaseServer();
-    const current = await supabase.from(tableFor(type)).select('*').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const current = await supabase.from(tableFor(type)).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
     const currentRow = current.data as Record<string, any>;
@@ -146,7 +146,7 @@ export async function PATCH(request: NextRequest) {
       if (creditLimit < creditBalance) return NextResponse.json({ error: 'El límite de crédito no puede ser menor que el saldo utilizado.' }, { status: 409 });
       changes.credit_limit = creditLimit;
     }
-    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('*').single();
+    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, id, changes: mapContact(result.data as Record<string, any>, type) });
   } catch (error: unknown) {

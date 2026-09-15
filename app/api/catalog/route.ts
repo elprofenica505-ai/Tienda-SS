@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const includeArchived = params.get('includeArchived') === 'true';
     const pageSize = Math.min(25, parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE));
     const rawCursor = parseCursor(params.get('cursor'));
-    let query = supabase.from('products').select('*').eq('tenant_id', context.tenantId).order('name').order('id').limit(pageSize + 1);
+    let query = supabase.from('products').select('id,tenant_id,category_id,sku,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at').eq('tenant_id', context.tenantId).order('name').order('id').limit(pageSize + 1);
     if (!includeArchived) query = query.eq('active', true);
     if (rawCursor) {
       try {
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       } catch { return NextResponse.json({ error: 'Cursor de catálogo inválido.' }, { status: 400 }); }
     }
     const [categoriesResult, productsResult] = await Promise.all([
-      supabase.from('categories').select('*').eq('tenant_id', context.tenantId).order('name').limit(MAX_CATEGORY_PAGE_SIZE),
+      supabase.from('categories').select('id,tenant_id,name,color,active,created_at,updated_at').eq('tenant_id', context.tenantId).order('name').limit(MAX_CATEGORY_PAGE_SIZE),
       query,
     ]);
     if (categoriesResult.error) throw new Error(categoriesResult.error.message);
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       const duplicate = await supabase.from('categories').select('id').eq('tenant_id', context.tenantId).ilike('name', name).maybeSingle();
       if (duplicate.error) throw new Error(duplicate.error.message);
       if (duplicate.data) return NextResponse.json({ error: 'Ya existe una categoría con ese nombre.' }, { status: 409 });
-      const result = await supabase.from('categories').insert({ tenant_id: context.tenantId, name, color: cleanText(body.color, 20) || '#c7f57b', active: true, created_by: context.uid }).select('*').single();
+      const result = await supabase.from('categories').insert({ tenant_id: context.tenantId, name, color: cleanText(body.color, 20) || '#c7f57b', active: true, created_by: context.uid }).select('id,tenant_id,name,color,active,created_at,updated_at').single();
       if (result.error) throw new Error(result.error.message);
       return NextResponse.json({ ok: true, item: mapCategory(result.data) }, { status: 201 });
     }
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     try { assertPlanCapacity(tenant.data.plan, 'products', active.count || 0, 1); } catch (error) { return responseFor(error); }
     const categoryId = cleanText(body.categoryId, 80) || null;
     const initialStock = itemType === 'service' ? 0 : Math.max(0, Math.floor(cleanNumber(body.stock)));
-    const result = await supabase.from('products').insert({ tenant_id: context.tenantId, category_id: categoryId, sku: sku || `SERV-${Date.now()}`, name, item_type: itemType, price: Math.max(0, cleanNumber(body.price)), cost: productRoles.slice(0, 4).includes(context.role) ? Math.max(0, cleanNumber(body.cost)) : 0, min_stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)), unit: cleanText(body.unit, 20) || 'unidad', active: true, created_by: context.uid }).select('*').single();
+    const result = await supabase.from('products').insert({ tenant_id: context.tenantId, category_id: categoryId, sku: sku || `SERV-${Date.now()}`, name, item_type: itemType, price: Math.max(0, cleanNumber(body.price)), cost: productRoles.slice(0, 4).includes(context.role) ? Math.max(0, cleanNumber(body.cost)) : 0, min_stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)), unit: cleanText(body.unit, 20) || 'unidad', active: true, created_by: context.uid }).select('id,tenant_id,category_id,sku,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     if (itemType === 'physical') {
       const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('active', true).order('created_at').limit(1).maybeSingle();
@@ -104,14 +104,14 @@ export async function PATCH(request: NextRequest) {
     if (!type || !id) return NextResponse.json({ error: 'Tipo o identificador inválido.' }, { status: 400 });
     const supabase = getSupabaseServer();
     const table = type === 'category' ? 'categories' : 'products';
-    const current = await supabase.from(table).select('*').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const current = await supabase.from(table).select(type === 'product' ? 'id,tenant_id,category_id,sku,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
     const changes: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: context.uid };
     if (typeof body.active === 'boolean') changes.active = body.active;
     if (type === 'category') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.color === 'string') changes.color = cleanText(body.color, 20); }
     if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.cost === 'number') changes.cost = Math.max(0, body.cost); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
-    const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('*').single();
+    const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select(type === 'product' ? 'id,tenant_id,category_id,sku,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').single();
     if (updated.error) throw new Error(updated.error.message);
     return NextResponse.json({ ok: true, id, changes, item: type === 'product' ? mapProduct(updated.data, 0) : mapCategory(updated.data) });
   } catch (error: unknown) { return responseFor(error); }

@@ -26,7 +26,7 @@ function serializeInvitation(row: Record<string, any>) {
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'members', 'view');
-    const result = await getSupabaseServer().from('tenant_invitations').select('*').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(100);
+    const result = await getSupabaseServer().from('tenant_invitations').select('id,tenant_id,email,role,status,expires_at,accepted_at,revoked_at,last_sent_at,resend_count,created_at,updated_at').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(100);
     if (result.error) throw new Error(result.error.message);
     const now = Date.now();
     const invitations = (result.data || []).map((row) => {
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     if (action === 'resend') {
       if (!invitationId) return NextResponse.json({ error: 'La invitación es obligatoria.' }, { status: 400 });
-      const current = await supabase.from('tenant_invitations').select('*').eq('tenant_id', context.tenantId).eq('id', invitationId).maybeSingle();
+      const current = await supabase.from('tenant_invitations').select('id,tenant_id,email,role,status,expires_at,last_sent_at,resend_count,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', invitationId).maybeSingle();
       if (current.error) throw new Error(current.error.message);
       if (!current.data) return NextResponse.json({ error: 'La invitación no existe.' }, { status: 404 });
       if (current.data.status !== 'pending') return NextResponse.json({ error: 'Solo se pueden reenviar invitaciones pendientes.' }, { status: 409 });
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
 
     const token = createInvitationToken();
     const expiresAt = invitationExpiry().toISOString();
-    const created = await supabase.from('tenant_invitations').insert({ tenant_id: context.tenantId, email, role, status: 'pending', token_hash: hashInvitationToken(token), expires_at: expiresAt, created_by: context.uid, last_sent_at: new Date().toISOString(), resend_count: 0 }).select('*').single();
+    const created = await supabase.from('tenant_invitations').insert({ tenant_id: context.tenantId, email, role, status: 'pending', token_hash: hashInvitationToken(token), expires_at: expiresAt, created_by: context.uid, last_sent_at: new Date().toISOString(), resend_count: 0 }).select('id,tenant_id,email,role,status,expires_at,created_at,updated_at').single();
     if (created.error) throw new Error(created.error.message);
     const delivery = await sendInvitationEmail(email, tenantName, role, invitationUrl(token));
     await writeInvitationAudit(context.tenantId, 'invitation.created', { ...context, invitationId: created.data.id, email, metadata: { role, delivery } });
@@ -104,7 +104,7 @@ export async function DELETE(request: NextRequest) {
     const invitationId = text(body.invitationId, 160);
     if (!invitationId) return NextResponse.json({ error: 'La invitación es obligatoria.' }, { status: 400 });
     const supabase = getSupabaseServer();
-    const current = await supabase.from('tenant_invitations').select('*').eq('tenant_id', context.tenantId).eq('id', invitationId).maybeSingle();
+    const current = await supabase.from('tenant_invitations').select('id,tenant_id,email,role,status,expires_at,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', invitationId).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'La invitación no existe.' }, { status: 404 });
     if (current.data.status !== 'pending') return NextResponse.json({ error: 'Solo se pueden revocar invitaciones pendientes.' }, { status: 409 });

@@ -16,7 +16,7 @@ async function contextFor(request: NextRequest, action: 'view' | 'create' | 'edi
 export async function GET(request: NextRequest) {
   try {
     const { context, branchId } = await contextFor(request, 'view');
-    const result = await getSupabaseServer().from('cash_sessions').select('*').eq('tenant_id', context.tenantId).eq('branch_id', branchId).order('opened_at', { ascending: false }).limit(30);
+    const result = await getSupabaseServer().from('cash_sessions').select('id,branch_id,cash_register_id,status,metadata,opening_amount,opened_by,opened_at,closed_by,closed_at,updated_at').eq('tenant_id', context.tenantId).eq('branch_id', branchId).order('opened_at', { ascending: false }).limit(30);
     if (result.error) throw new Error(result.error.message);
     const sessions = (result.data || []).map(mapSession);
     const active = sessions.find((session: any) => session.status === 'open' || session.status === 'pending_review') || null;
