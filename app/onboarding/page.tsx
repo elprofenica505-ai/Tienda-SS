@@ -27,6 +27,7 @@ function OnboardingContent() {
   }, [loading, tenant?.onboardingCompleted, router]);
 
   if (loading) return <div className="onboarding-loading" role="status" aria-live="polite">Preparando tu espacio...</div>;
+  if (tenant?.onboardingCompleted) return <div className="onboarding-loading" role="status" aria-live="polite">Abriendo tu espacio...</div>;
   if (!authUser) { router.replace('/'); return null; }
   if (error || !tenant || !member) return <div className="onboarding-loading"><div className="onboarding-error" role="alert"><h1>No pudimos cargar tu espacio</h1><p>{error || 'Tu cuenta todavía no tiene una empresa activa.'}</p><button className="button" onClick={() => router.replace('/')}>Volver al inicio</button></div></div>;
 

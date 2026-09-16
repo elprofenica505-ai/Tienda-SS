@@ -99,6 +99,10 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       if (!response.ok) throw new Error(data.error || 'No se pudo cargar la empresa.');
       const selected = data.tenants?.find((item: { tenant: Tenant }) => item.tenant.id === data.activeTenantId) || data.tenants?.[0];
       if (!selected) throw new Error('No tienes una empresa activa.');
+      selected.tenant = {
+        ...selected.tenant,
+        onboardingCompleted: selected.tenant.onboardingCompleted === true || (selected.tenant as Tenant & { onboarding_completed?: boolean }).onboarding_completed === true,
+      };
       window.localStorage.setItem(STORAGE_KEY, selected.tenant.id);
       let nextOrganization = data.organization as TenantOrganization | undefined;
       if (!nextOrganization) {
