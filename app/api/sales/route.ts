@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     if (!items.length || items.length > 50) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 productos.' }, { status: 400 });
     const taxAmount = money(body.taxAmount ?? body.tax);
     const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || 0) : 0;
-    const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160), cashReceived };
+    const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160), notes: text(body.notes, 1000), cashReceived };
     const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
     let cashSessionId = !needsCashSession ? null : text(body.cashSessionId, 128);
     if (needsCashSession && !cashSessionId) {

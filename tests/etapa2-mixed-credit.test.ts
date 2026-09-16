@@ -10,6 +10,8 @@ const receivablesPage = readFileSync('app/workspace/receivables/page.tsx', 'utf8
 const presalesRoute = readFileSync('app/api/presales/route.ts', 'utf8');
 const salesRoute = readFileSync('app/api/sales/route.ts', 'utf8');
 const salesPage = readFileSync('app/workspace/sales/page.tsx', 'utf8');
+const presalesPage = readFileSync('app/workspace/presales/page.tsx', 'utf8');
+const orderMetadataMigration = readFileSync('supabase/migrations/20260916000003_sales_order_metadata.sql', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
@@ -47,4 +49,15 @@ test('POS no permite cobrar efectivo insuficiente y genera comprobante con vuelt
   assert.match(salesPage, /Comprobante generado/);
   assert.match(salesPage, /Imprimir \/ Guardar PDF/);
   assert.match(salesPage, /Number\(cashReceived \|\| 0\) < total/);
+});
+
+test('POS y preventa conservan datos operativos para la sucursal', () => {
+  assert.match(orderMetadataMigration, /alter table public\.presales add column if not exists metadata/);
+  assert.match(salesRoute, /notes: text\(body\.notes/);
+  assert.match(presalesRoute, /suggestedPayment/);
+  assert.match(presalesRoute, /documentType/);
+  assert.match(presalesPage, /Condición sugerida de pago/);
+  assert.match(presalesPage, /Imprimir ticket de preventa/);
+  assert.match(salesPage, /Tipo de comprobante/);
+  assert.match(salesPage, /Impuestos estimados/);
 });

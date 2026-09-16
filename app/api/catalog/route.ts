@@ -12,7 +12,7 @@ const MAX_CATEGORY_PAGE_SIZE = 100;
 function cleanText(value: unknown, max = 120) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function cleanNumber(value: unknown, fallback = 0) { return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
 function mapCategory(row: Record<string, any>) { return { id: row.id, name: row.name, color: row.color || '#c7f57b', active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
-function mapProduct(row: Record<string, any>, stock = 0) { return { id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, categoryId: row.category_id || '', price: Number(row.price || 0), cost: Number(row.cost || 0), stock, minStock: Number(row.min_stock || 0), unit: row.unit, active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function mapProduct(row: Record<string, any>, stock = 0) { const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}; return { id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, categoryId: row.category_id || '', price: Number(row.price || 0), taxRate: Number(row.tax_rate || 0), cost: Number(row.cost || 0), stock, minStock: Number(row.min_stock || 0), unit: row.unit, location: typeof metadata.location === 'string' ? metadata.location : '', barcode: typeof metadata.barcode === 'string' ? metadata.barcode : row.sku, active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function responseFor(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const includeArchived = params.get('includeArchived') === 'true';
     const pageSize = Math.min(25, parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE));
     const rawCursor = parseCursor(params.get('cursor'));
-    let query = supabase.from('products').select('id,tenant_id,category_id,sku,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at').eq('tenant_id', context.tenantId).order('name').order('id').limit(pageSize + 1);
+    let query = supabase.from('products').select('id,tenant_id,category_id,sku,name,item_type,price,tax_rate,cost,min_stock,unit,metadata,active,created_at,updated_at').eq('tenant_id', context.tenantId).order('name').order('id').limit(pageSize + 1);
     if (!includeArchived) query = query.eq('active', true);
     if (rawCursor) {
       try {
