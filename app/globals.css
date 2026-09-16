@@ -333,8 +333,13 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 @media (max-width: 720px) {
   .workspace-sidebar {
     align-items: stretch;
+    flex-basis: auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
     padding: 12px 14px;
     position: relative;
+    top: auto;
     width: 100%;
     z-index: 20;
   }
