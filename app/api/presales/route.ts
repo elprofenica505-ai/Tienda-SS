@@ -6,7 +6,7 @@ import { assertBranchAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
-const sellerRoles: TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'vendedor'];
+const sellerRoles: TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero'];
 const cashierRoles: TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'cajero'];
 type PreSaleLine = { productId: string; name: string; sku: string; quantity: number; unitPrice: number; total: number };
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'create');
-    if (!sellerRoles.includes(context.role)) return NextResponse.json({ error: 'Tu rol no puede crear preventas.' }, { status: 403 });
+    if (!sellerRoles.includes(context.role)) return NextResponse.json({ error: `Tu rol (${context.role}) no puede crear preventas. Solicita Ventas > Crear al administrador.` }, { status: 403 });
     const body = await request.json();
     const rawItems = Array.isArray(body.items) ? body.items : [];
     const action = body.action === 'send' ? 'sent_to_cashier' : 'draft';

@@ -7,6 +7,8 @@ const checkout = readFileSync('app/api/presales/checkout/route.ts', 'utf8');
 const receivables = readFileSync('app/api/receivables/route.ts', 'utf8');
 const contacts = readFileSync('app/workspace/contacts/page.tsx', 'utf8');
 const receivablesPage = readFileSync('app/workspace/receivables/page.tsx', 'utf8');
+const presalesRoute = readFileSync('app/api/presales/route.ts', 'utf8');
+const salesRoute = readFileSync('app/api/sales/route.ts', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
@@ -29,4 +31,11 @@ test('la UI móvil permite configurar crédito y registrar abono por cliente', (
   assert.match(contacts, /creditStatus/);
   assert.match(receivablesPage, /Cliente para abono FIFO/);
   assert.match(receivablesPage, /customerId/);
+});
+
+test('caja puede iniciar preventas y POS acepta pagos estructurados', () => {
+  assert.match(presalesRoute, /'cajero'/);
+  assert.match(presalesRoute, /Ventas > Crear/);
+  assert.match(salesRoute, /create_sale_with_payments/);
+  assert.match(salesRoute, /splitPayments/);
 });

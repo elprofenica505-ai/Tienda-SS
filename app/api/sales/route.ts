@@ -76,7 +76,8 @@ export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'create');
     const body = await request.json();
-    const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
+    const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
+    const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
     const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
     let warehouseId = text(body.warehouseId, 128);
     const customerId = text(body.customerId, 128) || null;
@@ -90,19 +91,24 @@ export async function POST(request: NextRequest) {
       warehouseId = warehouse.data?.id || '';
     }
     if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
-    if (paymentMethod === 'credit' && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente.' }, { status: 400 });
+    const splitCreditAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method === 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
+    const splitCashAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method !== 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
+    if ((paymentMethod === 'credit' || splitCreditAmount > 0) && !customerId) return NextResponse.json({ error: 'Las ventas a crédito requieren seleccionar un cliente.' }, { status: 400 });
     const items = rawItems.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: typeof item.quantity === 'number' && Number.isInteger(item.quantity) ? item.quantity : 0, unitPrice: money(item.unitPrice) })).filter((item: { productId: string; quantity: number }) => item.productId && item.quantity > 0);
     if (!items.length || items.length > 50) return NextResponse.json({ error: 'La venta debe contener entre 1 y 50 productos.' }, { status: 400 });
     const taxAmount = money(body.taxAmount ?? body.tax);
     const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || 0) : 0;
     const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160), cashReceived };
-    let cashSessionId = paymentMethod === 'credit' ? null : text(body.cashSessionId, 128);
-    if (paymentMethod !== 'credit' && !cashSessionId) {
+    const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
+    let cashSessionId = !needsCashSession ? null : text(body.cashSessionId, 128);
+    if (needsCashSession && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || null;
     }
-    const result = await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
+    const result = splitPayments.length
+      ? await supabase.rpc('create_sale_with_payments', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items, target_payments: splitPayments })
+      : await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
