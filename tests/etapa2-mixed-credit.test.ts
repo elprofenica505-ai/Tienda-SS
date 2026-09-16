@@ -9,6 +9,7 @@ const contacts = readFileSync('app/workspace/contacts/page.tsx', 'utf8');
 const receivablesPage = readFileSync('app/workspace/receivables/page.tsx', 'utf8');
 const presalesRoute = readFileSync('app/api/presales/route.ts', 'utf8');
 const salesRoute = readFileSync('app/api/sales/route.ts', 'utf8');
+const salesPage = readFileSync('app/workspace/sales/page.tsx', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
@@ -38,4 +39,12 @@ test('caja puede iniciar preventas y POS acepta pagos estructurados', () => {
   assert.match(presalesRoute, /Ventas > Crear/);
   assert.match(salesRoute, /create_sale_with_payments/);
   assert.match(salesRoute, /splitPayments/);
+});
+
+test('POS no permite cobrar efectivo insuficiente y genera comprobante con vuelto', () => {
+  assert.match(salesPage, /Faltan/);
+  assert.match(salesPage, /Vuelto/);
+  assert.match(salesPage, /Comprobante generado/);
+  assert.match(salesPage, /Imprimir \/ Guardar PDF/);
+  assert.match(salesPage, /Number\(cashReceived \|\| 0\) < total/);
 });
