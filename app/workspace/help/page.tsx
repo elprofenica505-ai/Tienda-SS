@@ -1,7 +1,7 @@
 'use client';
 
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
-import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant } from '@/components/tenant/TenantProvider';
 import { useRouter } from 'next/navigation';
 
 const articles = [
@@ -19,4 +19,5 @@ function HelpContent() {
   return <main className="workspace-page"><WorkspaceSidebar /><section className="workspace-main help-main"><button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button><header className="help-header"><div><div className="eyebrow">Centro de ayuda</div><h1>Aprende a operar {tenant?.name || 'tu empresa'}.</h1><p>Guía breve para resolver las tareas más importantes sin salir de tu espacio.</p></div><div className="help-badge" aria-hidden="true">?</div></header><div className="help-grid">{articles.map(([title, description], index) => <article className="help-card" key={title}><span className="help-card-number">0{index + 1}</span><h2>{title}</h2><p>{description}</p></article>)}</div><div className="help-footer"><strong>¿Necesitas volver a empezar?</strong><span>El onboarding siempre estará disponible desde el Resumen mientras tu empresa no esté completa.</span><button className="button" onClick={() => router.push('/workspace')}>Volver al resumen ↗</button></div></section></main>;
 }
 
-export default function HelpPage() { return <TenantProvider><HelpContent /></TenantProvider>; }
+export default function HelpPage() {
+  return <HelpContent />; }

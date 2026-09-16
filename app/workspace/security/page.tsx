@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant } from '@/components/tenant/TenantProvider';
 import { beginPhoneMfaEnrollment, completePhoneMfaEnrollment, getMfaErrorCode, hasEnrolledMfa, type MfaEnrollment } from '@/lib/mfa';
 
 const ADMIN_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
@@ -54,5 +54,5 @@ function SecurityContent() {
 }
 
 export default function SecurityPage() {
-  return <TenantProvider><SecurityContent /></TenantProvider>;
+  return <SecurityContent />;
 }

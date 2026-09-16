@@ -4,7 +4,7 @@ import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant } from '@/components/tenant/TenantProvider';
 
 type Notice = { id: string; type: string; title: string; message: string; read: boolean; createdAt?: unknown };
 function NotificationsContent() { const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant(); const [items, setItems] = useState<Notice[]>([]); const [loading, setLoading] = useState(true); const [message, setMessage] = useState('');
@@ -14,4 +14,5 @@ function NotificationsContent() { const router = useRouter(); const { authUser, 
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando alertas...</div>; if (!authUser || !tenant || !member) { router.replace('/'); return null; }
   const unread = items.filter((item) => !item.read).length; const icon: Record<string, string> = { payment_failed: '!', renewal_upcoming: '◷', subscription_updated: '✓' };
   return <main className="workspace-page"><WorkspaceSidebar /><section className="workspace-main notifications-main"><header className="notifications-header"><div><button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button><div className="eyebrow catalog-eyebrow">Tu espacio / Alertas</div><h1>Notificaciones</h1><p>Alertas importantes de la suscripción de <strong>{tenant.name}</strong>.</p></div></header>{message && <div className="catalog-message">{message}</div>}<div className="notifications-panel">{items.length === 0 ? <div className="catalog-empty"><div className="empty-spark">♢</div><h2>Todo está tranquilo</h2><p>Aquí aparecerán pagos fallidos, renovaciones próximas y cambios de suscripción.</p></div> : items.map((item) => <article className={`notice-card ${item.read ? 'read' : ''}`} key={item.id}><span className={`notice-icon ${item.type}`}>{icon[item.type] || 'i'}</span><div><h3>{item.title}</h3><p>{item.message}</p><small>{item.createdAt ? 'Alerta de facturación' : 'Nueva alerta'}</small></div>{!item.read && <button onClick={() => void markRead(item.id)}>Marcar leída</button>}</article>)}</div></section></main>; }
-export default function NotificationsPage() { return <TenantProvider><NotificationsContent /></TenantProvider>; }
+export default function NotificationsPage() {
+  return <NotificationsContent />; }

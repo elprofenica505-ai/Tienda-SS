@@ -81,14 +81,14 @@ export async function findTenantsForAuthUserId(authUserId: string) {
   const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return [];
-  const memberships = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,tenants(id,legacy_firestore_id,slug,name,status,timezone,currency,created_at,updated_at)').eq('profile_id', profile.data.id).eq('status', 'active');
+  const memberships = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,member_branches(branch_id,branches(legacy_firestore_id)),tenants(id,legacy_firestore_id,slug,name,status,timezone,currency,plan,onboarding_completed,created_at,updated_at)').eq('profile_id', profile.data.id).eq('status', 'active');
   if (memberships.error) fail(memberships.error);
   return (memberships.data || []).filter((row) => {
     const tenant = row.tenants as unknown as OrganizationRow | null;
     return tenant && tenant.status === 'active';
   }).map((row) => ({
     tenant: mapTenant(row.tenants as unknown as OrganizationRow),
-    member: mapMember(row as OrganizationRow, profile.data as OrganizationRow, []),
+    member: mapMember(row as OrganizationRow, profile.data as OrganizationRow, ((row.member_branches as unknown as Array<{ branch_id: string; branches?: OrganizationRow | OrganizationRow[] }> | undefined) || []).map((item) => { const branch = Array.isArray(item.branches) ? item.branches[0] : item.branches; return String(branch?.legacy_firestore_id || item.branch_id); })),
   }));
 }
 

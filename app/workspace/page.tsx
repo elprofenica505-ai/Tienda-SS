@@ -7,7 +7,7 @@ import { WorkspaceSkeleton } from '@/components/workspace/WorkspaceSkeleton';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant } from '@/components/tenant/TenantProvider';
 import { formatMoney } from '@/lib/currency';
 
 type Daily = { date: string; income: number; expenses: number; net: number };
@@ -101,5 +101,5 @@ function WorkspaceContent() {
 }
 
 export default function WorkspacePage() {
-  return <TenantProvider><WorkspaceContent /></TenantProvider>;
+  return <WorkspaceContent />;
 }

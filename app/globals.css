@@ -80,19 +80,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .workspace-banner { border-radius: 20px; }
 .empty-metrics>div, .workspace-empty, .product-card, .category-card, .member-card { border-radius: 14px; }
 
-/* Keep the icon and its label visible on touch screens instead of reducing the sidebar to dots. */
+/* Mobile uses a full-width disclosure drawer; it must not reserve desktop viewport height. */
 @media (max-width: 720px) {
-  .workspace-sidebar { align-items: stretch; padding: 14px 8px; width: 88px; }
-  .workspace-sidebar .onboarding-brand { justify-content: center; margin: 0 0 20px; }
-  .workspace-sidebar .onboarding-brand b, .workspace-company div, .workspace-company i { display: none; }
-  .workspace-company { justify-content: center; margin-bottom: 14px; padding: 10px 5px; }
-  .workspace-company>span { height: 38px; width: 38px; }
-  .workspace-sidebar nav { gap: 7px; }
-  .workspace-sidebar a, .workspace-sidebar button { flex-direction: column; gap: 3px; justify-content: center; min-height: 66px; padding: 8px 3px; text-align: center; }
-  .workspace-sidebar a:first-letter, .workspace-sidebar button:first-letter { font-size: 22px; }
-  .workspace-sidebar a span, .workspace-sidebar button span { display: block; font-size: 9px; font-weight: 700; line-height: 1.1; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .workspace-sidebar-bottom { margin-top: auto; padding-top: 12px; }
-  .workspace-main { padding: 24px 14px 36px; }
+  .workspace-page { display: block; }
+  .workspace-sidebar { align-items: stretch; height: auto; max-height: none; min-height: 0; padding: 12px 14px; position: relative; width: 100%; }
+  .workspace-sidebar .onboarding-brand { justify-content: flex-start; margin: 0; }
+  .workspace-mobile-toggle { display: inline-flex; }
+  .workspace-company { align-items: center; display: flex; margin: 10px 0 0; padding: 9px 10px; }
+  .workspace-company div { display: grid; }
+  .workspace-company i { display: block; margin-left: auto; }
+  .workspace-navigation { display: none; }
+  .workspace-sidebar.mobile-open .workspace-navigation { display: block; max-height: min(70vh, 560px); overflow-y: auto; padding-top: 10px; }
+  .workspace-sidebar nav { gap: 4px; margin-top: 0; }
+  .workspace-sidebar a, .workspace-sidebar button { flex-direction: row; justify-content: flex-start; min-height: 42px; padding: 9px 11px; text-align: left; }
+  .workspace-sidebar a span, .workspace-sidebar button span { display: block; font-size: 12px; max-width: none; overflow: visible; white-space: normal; }
+  .workspace-sidebar a .workspace-nav-icon, .workspace-sidebar button .workspace-nav-icon { flex: 0 0 24px; font-size: 18px; text-align: center; }
+  .workspace-sidebar-bottom { margin-top: 12px; padding-top: 12px; }
+  .workspace-main { padding: 24px 14px 36px; width: 100%; }
   .workspace-header { align-items: flex-start; }
   .workspace-header h1 { font-size: 22px; line-height: 1.1; }
   .workspace-banner { margin-top: 24px; padding: 25px 20px; }

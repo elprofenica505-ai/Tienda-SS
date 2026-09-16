@@ -4,7 +4,7 @@ import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { TenantProvider, useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant } from '@/components/tenant/TenantProvider';
 
 type Action = 'view' | 'create' | 'edit' | 'delete' | 'export';
 type Module = { key: string; label: string };
@@ -208,5 +208,5 @@ function PermissionsContent() {
 }
 
 export default function PermissionsPage() {
-  return <TenantProvider><PermissionsContent /></TenantProvider>;
+  return <PermissionsContent />;
 }

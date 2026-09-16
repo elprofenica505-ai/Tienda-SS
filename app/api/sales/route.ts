@@ -8,19 +8,40 @@ export const runtime = 'nodejs';
 const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * 100) / 100) : 0; }
+type SalesCursor = { createdAt: string; id: string };
+function decodeSalesCursor(raw: string): SalesCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Partial<SalesCursor>;
+    if (typeof parsed.createdAt !== 'string' || !parsed.createdAt || typeof parsed.id !== 'string' || !parsed.id) throw new Error('invalid');
+    if (Number.isNaN(Date.parse(parsed.createdAt))) throw new Error('invalid');
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  } catch { throw new Error('INVALID_SALES_CURSOR'); }
+}
+function encodeSalesCursor(cursor: SalesCursor) { return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url'); }
 function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
     const branchId = text(request.headers.get('x-branch-id'), 128);
+    const params = request.nextUrl.searchParams;
+    const rawLimit = Number(params.get('limit') || 50);
+    const pageSize = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.floor(rawLimit))) : 50;
+    const rawCursor = text(params.get('cursor'), 512);
     if (branchId) assertBranchAccess(context, branchId);
-    let query = getSupabaseServer().from('sales').select('id,tenant_id,branch_id,cash_register_id,customer_id,invoice_number,status,subtotal,tax,discount,total,sold_by,metadata,created_at,updated_at,sale_items(id,tenant_id,sale_id,product_id,warehouse_id,quantity,unit_price,tax,discount,line_total),sale_payments(id,tenant_id,sale_id,payment_method,amount,reference,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(50);
+    let query = getSupabaseServer().from('sales').select('id,tenant_id,branch_id,cash_register_id,customer_id,invoice_number,status,subtotal,tax,discount,total,sold_by,metadata,created_at,updated_at,sale_items(id,tenant_id,sale_id,product_id,warehouse_id,quantity,unit_price,tax,discount,line_total),sale_payments(id,tenant_id,sale_id,payment_method,amount,reference,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageSize + 1);
+    let cursor: SalesCursor | null = null;
+    if (rawCursor) {
+      try { cursor = decodeSalesCursor(rawCursor); } catch { return NextResponse.json({ error: 'Cursor de ventas inválido.' }, { status: 400 }); }
+      query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+    }
     if (branchId) query = query.eq('branch_id', branchId);
     else if (!MANAGER_ROLES.has(context.role)) query = query.in('branch_id', context.branchIds.slice(0, 100));
     const result = await query;
     if (result.error) throw new Error(result.error.message);
-    const rows = result.data || [];
+    const fetchedRows = result.data || [];
+    const hasMore = fetchedRows.length > pageSize;
+    const rows = fetchedRows.slice(0, pageSize);
     const saleIds = rows.map((row: any) => String(row.id));
     const productIds = Array.from(new Set(rows.flatMap((row: any) => (row.sale_items || []).map((item: any) => String(item.product_id)))));
     const [productsResult, returnsResult] = await Promise.all([
@@ -45,7 +66,9 @@ export async function GET(request: NextRequest) {
       });
       return { id: row.id, saleNumber: row.invoice_number || row.id, invoiceNumber: row.invoice_number, branchId: row.branch_id, customerId: row.customer_id, customerName: row.metadata?.customerName || '', status: row.status, subtotal: Number(row.subtotal || 0), tax: Number(row.tax || 0), discount: Number(row.discount || 0), total: Number(row.total || 0), paidAmount: payments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0), balanceDue: Number(row.metadata?.balanceDue || 0), soldBy: row.sold_by, paymentMethod: row.metadata?.paymentMethod || payments[0]?.payment_method, createdAt: row.created_at, updatedAt: row.updated_at, items, returnedQuantities, payments };
     });
-    return NextResponse.json({ ok: true, sales }, { headers: { 'Cache-Control': 'no-store' } });
+    const last = rows[rows.length - 1];
+    const nextCursor = hasMore && last ? encodeSalesCursor({ createdAt: last.created_at, id: last.id }) : null;
+    return NextResponse.json({ ok: true, sales, pagination: { pageSize, hasMore, nextCursor } }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { return failure(error); }
 }
 

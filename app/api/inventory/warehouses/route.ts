@@ -9,20 +9,32 @@ const MANAGERS = new Set(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function errorResponse(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
+async function resolveBranchDbId(tenantId: string, branchId: string) {
+  const supabase = getSupabaseServer();
+  const byId = await supabase.from('branches').select('id').eq('tenant_id', tenantId).eq('active', true).eq('id', branchId).maybeSingle();
+  if (byId.error) throw new Error(byId.error.message);
+  if (byId.data) return byId.data.id;
+  const byLegacyId = await supabase.from('branches').select('id').eq('tenant_id', tenantId).eq('active', true).eq('legacy_firestore_id', branchId).maybeSingle();
+  if (byLegacyId.error) throw new Error(byLegacyId.error.message);
+  if (!byLegacyId.data) throw new Error('BRANCH_NOT_FOUND');
+  return byLegacyId.data.id;
+}
+
 async function contextFor(request: NextRequest, action: 'view' | 'create' | 'edit') {
   const context = await requireTenantPermission(request, 'inventory', action);
   const branchId = text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
   if (!branchId) throw new Error('BRANCH_REQUIRED');
   assertBranchAccess(context, branchId);
-  return { context, branchId };
+  const dbBranchId = await resolveBranchDbId(context.tenantId, branchId);
+  return { context, branchId, dbBranchId };
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { context, branchId } = await contextFor(request, 'view');
+    const { context, dbBranchId } = await contextFor(request, 'view');
     const warehouseId = text(new URL(request.url).searchParams.get('warehouseId'), 128);
     const supabase = getSupabaseServer();
-    const warehousesResult = await supabase.from('warehouses').select('id,tenant_id,branch_id,code,name,active').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(100);
+    const warehousesResult = await supabase.from('warehouses').select('id,tenant_id,branch_id,code,name,active').eq('tenant_id', context.tenantId).eq('branch_id', dbBranchId).eq('active', true).order('name').limit(100);
     if (warehousesResult.error) throw new Error(warehousesResult.error.message);
     const warehouses = warehousesResult.data || [];
     if (warehouseId && !warehouses.some((row) => row.id === warehouseId)) return NextResponse.json({ error: 'El almacén no está autorizado para este usuario.' }, { status: 403 });
@@ -38,7 +50,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const action = text(body.action, 30);
     const permission = action === 'approve-count' ? 'edit' : 'create';
-    const { context, branchId } = await contextFor(request, permission);
+    const { context, dbBranchId } = await contextFor(request, permission);
     const supabase = getSupabaseServer();
     if (action === 'receive' || action === 'count') {
       const warehouseId = text(body.warehouseId, 128);
@@ -47,7 +59,7 @@ export async function POST(request: NextRequest) {
       const targetQuantity = typeof rawValue === 'number' && Number.isFinite(rawValue) && rawValue >= 0 ? Math.round(rawValue * 10000) / 10000 : -1;
       const reason = text(body.reason, 300) || (action === 'count' ? 'Conteo físico' : 'Recepción de inventario');
       if (!warehouseId || !productId || targetQuantity < 0 || (action === 'receive' && targetQuantity <= 0)) return NextResponse.json({ error: 'Almacén, producto y cantidad son obligatorios.' }, { status: 400 });
-      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('id', warehouseId).eq('branch_id', branchId).eq('active', true).maybeSingle();
+      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('id', warehouseId).eq('branch_id', dbBranchId).eq('active', true).maybeSingle();
       if (warehouse.error) throw new Error(warehouse.error.message);
       if (!warehouse.data) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal activa.' }, { status: 404 });
       const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: action === 'count' ? 'set' : 'receive', target_quantity: targetQuantity, target_reason: reason, target_user_id: context.uid });
