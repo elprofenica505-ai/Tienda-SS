@@ -9,7 +9,7 @@ const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 const PAGE_SIZE = 25;
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function amount(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, value) * 100) / 100 : 0; }
-function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { RECEIVABLE_NOT_FOUND: ['La venta a crédito no tiene saldo pendiente.', 404], PAYMENT_EXCEEDS_BALANCE: ['El pago no puede superar el saldo pendiente.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INVALID_RECEIVABLE_PAYMENT: ['Venta, monto y método de pago son obligatorios.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { RECEIVABLE_NOT_FOUND: ['La venta a crédito no tiene saldo pendiente.', 404], PAYMENT_EXCEEDS_BALANCE: ['El pago no puede superar el saldo pendiente.', 409], ALLOCATIONS_DO_NOT_MATCH_PAYMENT: ['La suma de aplicaciones debe coincidir con el pago.', 409], CUSTOMER_CREDIT_BLOCKED: ['El cliente no puede generar nueva deuda.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], CASH_SESSION_REQUIRED: ['Se requiere una sesión de caja abierta para pagos en efectivo.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INVALID_RECEIVABLE_PAYMENT: ['Cliente o venta, monto y método de pago son obligatorios.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,14 +34,37 @@ export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'receivables', 'create');
     const body = await request.json();
+    const customerId = text(body.customerId, 128);
     const saleId = text(body.saleId, 128);
     const payment = amount(body.amount);
-    const method = ['cash', 'card', 'transfer'].includes(body.paymentMethod) ? body.paymentMethod : '';
-    if (!saleId || payment <= 0 || !method) return NextResponse.json({ error: 'Venta, monto y método de pago son obligatorios.' }, { status: 400 });
+    const method = ['cash', 'card', 'transfer', 'other'].includes(body.paymentMethod) ? body.paymentMethod : '';
+    if ((!saleId && !customerId) || payment <= 0 || !method) return NextResponse.json({ error: 'Cliente o venta, monto y método de pago son obligatorios.' }, { status: 400 });
+    const supabase = getSupabaseServer();
+    if (customerId) {
+      let cashSessionId = text(body.cashSessionId, 128);
+      if (method === 'cash' && !cashSessionId) {
+        const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('status', 'open').in('branch_id', context.branchIds.slice(0, 100)).order('opened_at', { ascending: false }).limit(1).maybeSingle();
+        if (session.error) throw new Error(session.error.message);
+        cashSessionId = session.data?.id || '';
+      }
+      const result = await supabase.rpc('register_receivable_payment', {
+        target_tenant_id: context.tenantId,
+        target_customer_id: customerId,
+        target_amount: payment,
+        target_payment_method: method,
+        target_allocations: Array.isArray(body.allocations) ? body.allocations : [],
+        target_cash_session_id: cashSessionId || null,
+        target_user_id: context.uid,
+        target_note: text(body.notes, 300),
+      });
+      if (result.error) throw new Error(result.error.message);
+      const data = result.data || {};
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'customer', entityId: customerId, after: data, result: 'success' });
+      return NextResponse.json({ ok: true, ...data }, { status: 201 });
+    }
     const sale = await getSupabaseServer().from('sales').select('branch_id').eq('id', saleId).eq('tenant_id', context.tenantId).single();
     if (sale.error || !sale.data) return NextResponse.json({ error: 'La venta a crédito no existe.' }, { status: 404 });
     assertBranchAccess(context, sale.data.branch_id);
-    const supabase = getSupabaseServer();
     let cashSessionId = text(body.cashSessionId, 128);
     if (method === 'cash' && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', sale.data.branch_id).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();

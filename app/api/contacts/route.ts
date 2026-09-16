@@ -38,6 +38,12 @@ function mapContact(row: Record<string, any>, type: ContactType) {
     ...(type === 'customer' ? {
       creditLimit: Number(row.credit_limit || 0),
       creditBalance: Number(metadata.creditBalance || 0),
+      creditEnabled: row.credit_enabled === true,
+      termDays: Number(row.term_days || 30),
+      graceDays: Number(row.grace_days || 0),
+      creditStatus: row.credit_status || 'activo',
+      salesBlocked: row.sales_blocked === true,
+      salesBlockedReason: row.sales_blocked_reason || '',
     } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -57,7 +63,7 @@ export async function GET(request: NextRequest) {
     const includeArchived = url.searchParams.get('includeArchived') === 'true';
     let query = getSupabaseServer()
       .from(tableFor(type))
-      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at')
+      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at')
       .eq('tenant_id', context.tenantId)
       .order('name', { ascending: true });
     if (!includeArchived) query = query.eq('active', true);
@@ -98,9 +104,9 @@ export async function POST(request: NextRequest) {
       document_id: taxId || null,
       active: true,
       metadata,
-      ...(type === 'customer' ? { credit_limit: money(body.creditLimit) } : {}),
+      ...(type === 'customer' ? { credit_limit: money(body.creditLimit), credit_enabled: body.creditEnabled === true, term_days: Math.max(0, Math.floor(Number(body.termDays) || 30)), grace_days: Math.max(0, Math.floor(Number(body.graceDays) || 0)) } : {}),
     };
-    const result = await supabase.from(tableFor(type)).insert(payload).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').single();
+    const result = await supabase.from(tableFor(type)).insert(payload).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, item: mapContact(result.data as Record<string, any>, type) }, { status: 201 });
   } catch (error: unknown) {
@@ -117,7 +123,7 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 });
 
     const supabase = getSupabaseServer();
-    const current = await supabase.from(tableFor(type)).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const current = await supabase.from(tableFor(type)).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
     const currentRow = current.data as Record<string, any>;
@@ -146,7 +152,15 @@ export async function PATCH(request: NextRequest) {
       if (creditLimit < creditBalance) return NextResponse.json({ error: 'El límite de crédito no puede ser menor que el saldo utilizado.' }, { status: 409 });
       changes.credit_limit = creditLimit;
     }
-    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,created_at,updated_at').single();
+    if (type === 'customer') {
+      if (typeof body.creditEnabled === 'boolean') changes.credit_enabled = body.creditEnabled;
+      if (typeof body.termDays === 'number') changes.term_days = Math.max(0, Math.floor(body.termDays));
+      if (typeof body.graceDays === 'number') changes.grace_days = Math.max(0, Math.floor(body.graceDays));
+      if (typeof body.creditStatus === 'string' && ['activo', 'bloqueado', 'en_cobro', 'incobrable'].includes(body.creditStatus)) changes.credit_status = body.creditStatus;
+      if (typeof body.salesBlocked === 'boolean') changes.sales_blocked = body.salesBlocked;
+      if (typeof body.salesBlockedReason === 'string') changes.sales_blocked_reason = text(body.salesBlockedReason, 300) || null;
+    }
+    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, id, changes: mapContact(result.data as Record<string, any>, type) });
   } catch (error: unknown) {
