@@ -19,6 +19,9 @@ function errorResponse(error: unknown) {
     PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404],
     INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar el cobro.', 409],
     CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409],
+    CUSTOMER_CREDIT_BLOCKED: ['El cliente no puede generar nueva deuda.', 409],
+    INVALID_PAYMENT_SPLIT: ['La distribución de pagos no es válida.', 400],
+    PAYMENT_TOTAL_MISMATCH: ['La suma de los pagos debe coincidir con el total.', 409],
     INVALID_SALE_TOTAL: ['El total de la venta debe ser mayor que cero.', 400],
     CASH_RECEIVED_TOO_LOW: ['El efectivo recibido es menor que el total del ticket.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
@@ -33,7 +36,8 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'sales', 'create');
     const body = await request.json();
     const presaleId = text(body.presaleId, 128);
-    const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
+    const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
+    const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
     const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
     if (!presaleId || !paymentMethod) throw new Error('PRESALE_NOT_FOUND');
     if (!branchId) throw new Error('BRANCH_NOT_FOUND');
@@ -52,7 +56,8 @@ export async function POST(request: NextRequest) {
     rawItems.forEach((item: Record<string, unknown>) => { const id = text(item.productId, 128); const quantity = Number(item.quantity); if (id && Number.isInteger(quantity) && quantity > 0) itemsMap.set(id, (itemsMap.get(id) || 0) + quantity); });
     if (!itemsMap.size) throw new Error('PRESALE_EMPTY');
     const presaleTotal = money(Number(presale.total));
-    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : 0;
+    const splitCashAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method !== 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
+    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : splitCashAmount;
     if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
@@ -61,31 +66,23 @@ export async function POST(request: NextRequest) {
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
     const warehouseId = warehouse.data.id;
-    let cashSessionId: string | null = paymentMethod === 'credit' ? null : text(body.cashSessionId, 128);
-    if (paymentMethod !== 'credit' && !cashSessionId) {
+    const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
+    let cashSessionId: string | null = !needsCashSession ? null : text(body.cashSessionId, 128);
+    if (needsCashSession && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || null;
     }
-    if (paymentMethod !== 'credit' && !cashSessionId) throw new Error('CASH_SESSION_REQUIRED');
+    if (needsCashSession && !cashSessionId) throw new Error('CASH_SESSION_REQUIRED');
 
     const items = Array.from(itemsMap.entries()).map(([productId, quantity]) => {
       const source = rawItems.find((item: Record<string, unknown>) => text(item.productId, 128) === productId) || {};
       return { productId, quantity, unitPrice: money(source.unitPrice) };
     });
-    const result = await supabase.rpc('create_sale', {
-      target_tenant_id: context.tenantId,
-      target_branch_id: branchId,
-      target_warehouse_id: warehouseId,
-      target_cash_session_id: cashSessionId,
-      target_customer_id: text(body.customerId, 128) || null,
-      target_user_id: context.uid,
-      target_payment_method: paymentMethod,
-      target_discount: money(body.discount),
-      target_idempotency_key: `presale:${presaleId}`,
-      target_metadata: { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) },
-      target_items: items,
-    });
+    const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) };
+    const result = splitPayments.length
+      ? await supabase.rpc('create_sale_with_payments', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items, target_payments: splitPayments })
+      : await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     if (presale.reservation_id) {
