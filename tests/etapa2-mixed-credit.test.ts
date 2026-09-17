@@ -60,6 +60,14 @@ test('caja puede iniciar preventas y POS acepta pagos estructurados', () => {
 test('el pago simple sólo crea movimiento de caja para cash', () => {
   const saleMigration = readFileSync('supabase/migrations/20260913000003_fix_create_sale_variable_collisions.sql', 'utf8');
   assert.match(saleMigration, /if target_payment_method = 'cash' then[\s\S]*insert into public\.cash_movements/);
+  assert.match(saleMigration, /elsif target_payment_method = 'credit' then/);
+});
+
+test('tarjeta y transferencia no exigen caja, y una preventa reservada no descuenta stock dos veces', () => {
+  assert.match(salesRoute, /const needsCashSession = paymentMethod === 'cash'/);
+  assert.match(checkout, /const needsCashSession = paymentMethod === 'cash'/);
+  const saleMigration = readFileSync('supabase/migrations/20260913000003_fix_create_sale_variable_collisions.sql', 'utf8');
+  assert.match(saleMigration, /item_type <> 'service' and nullif\(target_metadata->>'presaleId'/);
 });
 
 test('POS no permite cobrar efectivo insuficiente y genera comprobante con vuelto', () => {

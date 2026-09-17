@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     const requestedWarehouseId = text(body.warehouseId, 128) || text(presale.warehouse_id, 128);
     const warehouseId = (await resolveTenantBranchAndWarehouse(context.tenantId, branchId, requestedWarehouseId)).warehouseId;
     if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
-    const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
+    const needsCashSession = paymentMethod === 'cash' || (paymentMethod === 'mixed' && splitCashAmount > 0);
     let cashSessionId: string | null = !needsCashSession ? null : text(body.cashSessionId, 128);
     if (needsCashSession && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();

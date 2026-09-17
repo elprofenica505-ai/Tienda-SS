@@ -101,7 +101,7 @@ begin
     raise exception 'CUSTOMER_NOT_FOUND';
   end if;
 
-  if target_payment_method in ('cash', 'card', 'transfer') then
+  if target_payment_method = 'cash' then
     if target_cash_session_id is null then
       raise exception 'CASH_SESSION_REQUIRED';
     end if;
@@ -173,7 +173,7 @@ begin
     sale_subtotal := sale_subtotal + sale_line_total;
     line_count := line_count + 1;
 
-    if product_row.item_type <> 'service' then
+    if product_row.item_type <> 'service' and nullif(target_metadata->>'presaleId', '') is null then
       select inventory_stock.*
         into stock_row
         from public.inventory_stocks as inventory_stock
@@ -270,7 +270,7 @@ begin
       target_user_id,
       jsonb_build_object('paymentMethod', target_payment_method)
     );
-  else
+  elsif target_payment_method = 'credit' then
     select coalesce(sum(receivable.outstanding_amount), 0),
            coalesce(max(customer.credit_limit), 0)
       into current_receivable, credit_limit

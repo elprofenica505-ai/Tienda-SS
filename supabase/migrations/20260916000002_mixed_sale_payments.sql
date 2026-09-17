@@ -66,7 +66,7 @@ begin
   sale_result := public.create_sale(
     target_tenant_id, target_branch_id, target_warehouse_id, target_cash_session_id,
     target_customer_id, target_user_id,
-    case when cash_amount + card_amount + transfer_amount > 0 then 'cash' else 'credit' end,
+    case when cash_amount > 0 then 'cash' when card_amount > 0 then 'card' else 'transfer' end,
     target_discount, target_idempotency_key,
     coalesce(target_metadata, '{}'::jsonb) || jsonb_build_object('paymentSplit', target_payments),
     target_items
@@ -78,8 +78,8 @@ begin
   paid_amount := cash_amount + card_amount + transfer_amount;
   if abs(paid_amount + credit_amount - sale_total) > 0.01 then raise exception 'PAYMENT_TOTAL_MISMATCH'; end if;
 
-  delete from public.sale_payments where tenant_id = target_tenant_id and sale_id = sale_id;
-  delete from public.cash_movements where tenant_id = target_tenant_id and cash_session_id = target_cash_session_id and reference_type = 'sale' and reference_id = sale_id;
+  delete from public.sale_payments as existing_payment where existing_payment.tenant_id = target_tenant_id and existing_payment.sale_id = sale_id;
+  delete from public.cash_movements as existing_movement where existing_movement.tenant_id = target_tenant_id and existing_movement.cash_session_id = target_cash_session_id and existing_movement.reference_type = 'sale' and existing_movement.reference_id = sale_id;
 
   if cash_amount > 0 then
     insert into public.sale_payments(tenant_id, sale_id, payment_method, amount, reference)

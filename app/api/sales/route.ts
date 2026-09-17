@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     const taxAmount = money(body.taxAmount ?? body.tax);
     const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || 0) : 0;
     const metadata = { taxAmount, documentType: text(body.documentType, 40), customerName: text(body.customerName, 160), customerRuc: text(body.customerRuc, 40), customerAddress: text(body.customerAddress, 300), currency: text(body.currency, 10) || 'NIO', paymentReference: text(body.paymentReference, 160), notes: text(body.notes, 1000), cashReceived };
-    const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
+    const needsCashSession = paymentMethod === 'cash' || (paymentMethod === 'mixed' && splitCashAmount > 0);
     let cashSessionId = !needsCashSession ? null : text(body.cashSessionId, 128);
     if (needsCashSession && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
