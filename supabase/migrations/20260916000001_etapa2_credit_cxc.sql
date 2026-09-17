@@ -142,4 +142,3 @@ from public.receivables r where r.status in ('open','partial','overdue') and r.o
 
 revoke all on public.receivables_aging from public, anon;
 grant select on public.receivables_aging to authenticated;
-cd /home/ubuntu/Tienda-SS && git status --short
