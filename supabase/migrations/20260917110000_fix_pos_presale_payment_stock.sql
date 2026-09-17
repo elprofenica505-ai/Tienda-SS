@@ -160,7 +160,7 @@ begin
     end if;
 
     sale_qty := nullif(item->>'quantity', '')::numeric;
-    if sale_quantity is null
+    if sale_qty is null
        or sale_qty <= 0
        or sale_qty <> trunc(sale_qty) then
       raise exception 'INVALID_SALE_QUANTITY';
@@ -200,7 +200,7 @@ begin
         target_product_id,
         target_warehouse_id,
         'sale',
-        -sale_quantity,
+        -sale_qty,
         product_row.cost,
         'sale',
         new_sale_id,
@@ -220,7 +220,7 @@ begin
       new_sale_id,
       target_product_id,
       target_warehouse_id,
-      sale_quantity,
+      sale_qty,
       sale_unit_price,
       sale_line_total
     );

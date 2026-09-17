@@ -41,6 +41,9 @@ export async function GET(request: NextRequest) {
         if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
         assertResolvedBranchAccess(context, branchId, resolved.branchId);
         query = query.eq('branch_id', resolved.branchId);
+      } else if (!['owner', 'admin', 'gerente', 'jefe'].includes(context.role)) {
+        if (!context.branchIds.length) return NextResponse.json({ ok: true, presales: [], nextCursor: null });
+        query = query.in('branch_id', context.branchIds);
       }
       if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
     }
