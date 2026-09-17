@@ -36,7 +36,12 @@ export async function GET(request: NextRequest) {
       }
     } else {
       if (context.role === 'vendedor') query = query.eq('seller_uid', context.uid);
-      if (branchId && context.branchIds.includes(branchId)) query = query.eq('branch_id', branchId);
+      if (branchId) {
+        const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, branchId);
+        if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
+        assertResolvedBranchAccess(context, branchId, resolved.branchId);
+        query = query.eq('branch_id', resolved.branchId);
+      }
       if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
     }
     const result = await query;
