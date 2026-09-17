@@ -40,8 +40,10 @@ test('la API mantiene el aislamiento por tenant, sucursal y política de ventas'
   assert.deepEqual(getApiPolicy('/api/presales', 'POST'), { module: 'sales', action: 'create' });
   assert.deepEqual(getApiPolicy('/api/presales/checkout', 'POST'), { module: 'sales', action: 'create' });
   assert.match(presalesApi, /\.eq\('tenant_id', context\.tenantId\)/);
-  assert.match(presalesApi, /context\.branchIds\.includes\(branchId\)/);
-  assert.match(checkoutApi, /assertBranchAccess\(context, branchId\)/);
+  assert.match(presalesApi, /resolveTenantBranchAndWarehouse/);
+  assert.match(presalesApi, /assertResolvedBranchAccess/);
+  assert.match(checkoutApi, /resolveTenantBranchAndWarehouse/);
+  assert.match(checkoutApi, /assertResolvedBranchAccess/);
 });
 
 test('la consulta de preventas usa orden descendente y cursor estable de Supabase', () => {

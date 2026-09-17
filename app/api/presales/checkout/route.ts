@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
+import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -38,10 +39,13 @@ export async function POST(request: NextRequest) {
     const presaleId = text(body.presaleId, 128);
     const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
     const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
-    const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
     if (!presaleId || !paymentMethod) throw new Error('PRESALE_NOT_FOUND');
-    if (!branchId) throw new Error('BRANCH_NOT_FOUND');
-    assertBranchAccess(context, branchId);
+    if (!requestedBranchId) throw new Error('BRANCH_NOT_FOUND');
+    const branchResolution = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId);
+    if (!branchResolution.branchId) throw new Error('BRANCH_NOT_FOUND');
+    assertResolvedBranchAccess(context, requestedBranchId, branchResolution.branchId);
+    const branchId = branchResolution.branchId;
 
     const supabase = getSupabaseServer();
     const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
@@ -62,10 +66,8 @@ export async function POST(request: NextRequest) {
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
     const requestedWarehouseId = text(body.warehouseId, 128) || text(presale.warehouse_id, 128);
-    const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).match(requestedWarehouseId ? { id: requestedWarehouseId } : {}).order('name').limit(1).maybeSingle();
-    if (warehouse.error) throw new Error(warehouse.error.message);
-    if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
-    const warehouseId = warehouse.data.id;
+    const warehouseId = (await resolveTenantBranchAndWarehouse(context.tenantId, branchId, requestedWarehouseId)).warehouseId;
+    if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     const needsCashSession = paymentMethod !== 'credit' && (paymentMethod !== 'mixed' || splitCashAmount > 0);
     let cashSessionId: string | null = !needsCashSession ? null : text(body.cashSessionId, 128);
     if (needsCashSession && !cashSessionId) {

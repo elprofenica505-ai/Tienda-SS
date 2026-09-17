@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
+import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -78,18 +79,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
     const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
-    const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
-    let warehouseId = text(body.warehouseId, 128);
+    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const requestedWarehouseId = text(body.warehouseId, 128);
     const customerId = text(body.customerId, 128) || null;
     const rawItems = Array.isArray(body.items) ? body.items : [];
-    if (!branchId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, método de pago y productos son obligatorios.' }, { status: 400 });
-    assertBranchAccess(context, branchId);
+    if (!requestedBranchId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, método de pago y productos son obligatorios.' }, { status: 400 });
     const supabase = getSupabaseServer();
-    if (!warehouseId) {
-      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
-      if (warehouse.error) throw new Error(warehouse.error.message);
-      warehouseId = warehouse.data?.id || '';
-    }
+    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId, requestedWarehouseId);
+    if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
+    assertResolvedBranchAccess(context, requestedBranchId, resolved.branchId);
+    const branchId = resolved.branchId;
+    const warehouseId = resolved.warehouseId;
     if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     const splitCreditAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method === 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
     const splitCashAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method !== 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);

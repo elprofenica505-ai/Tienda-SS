@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
+import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -62,14 +63,15 @@ export async function POST(request: NextRequest) {
     const lines: PreSaleLine[] = productIds.map((id) => { const data = productById.get(id)!; const quantity = unique.get(id) || 0; const unitPrice = money(Number(data.price)); return { productId: id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity }; });
     const total = lines.reduce((sum, line) => sum + line.total, 0);
     const metadata = { customerId: text(body.customerId, 120) || null, suggestedPayment: ['cash', 'card', 'transfer', 'credit'].includes(body.suggestedPayment) ? body.suggestedPayment : null, documentType: text(body.documentType, 40) || 'ticket', servicePoint: text(body.servicePoint, 120), notes: text(body.notes, 1000), itemNotes: typeof body.itemNotes === 'object' && body.itemNotes ? body.itemNotes : {} };
-    const branchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80) || context.branchIds[0] || null;
-    if (branchId && !context.branchIds.includes(branchId)) return NextResponse.json({ error: 'No tienes acceso a esa sucursal.' }, { status: 403 });
+    const requestedBranchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80) || context.branchIds[0] || '';
+    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId);
+    if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
+    assertResolvedBranchAccess(context, requestedBranchId, resolved.branchId);
+    const branchId = resolved.branchId;
     let warehouseId = '';
     let reservationId: string | null = null;
     if (action === 'sent_to_cashier') {
-      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('name').limit(1).maybeSingle();
-      if (warehouse.error) throw new Error(warehouse.error.message);
-      warehouseId = warehouse.data?.id || '';
+      warehouseId = resolved.warehouseId;
       if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     }
     const inserted = await supabase.from('presales').insert({ tenant_id: context.tenantId, branch_id: branchId || null, warehouse_id: warehouseId || null, ticket_code: ticketCode(), items: lines, total, seller_uid: context.uid, seller_email: context.email || null, seller_role: context.role, status: action === 'sent_to_cashier' ? 'draft' : action, evidence_refs: evidenceRefs, metadata }).select('id,ticket_code,status,total').single();

@@ -15,6 +15,8 @@ const orderMetadataMigration = readFileSync('supabase/migrations/20260916000003_
 const tenantAccess = readFileSync('lib/supabase/tenant-access.ts', 'utf8');
 const returnsRoute = readFileSync('app/api/sales/returns/route.ts', 'utf8');
 const tenantErrors = readFileSync('lib/tenant.ts', 'utf8');
+const organizationScope = readFileSync('lib/organization-scope.ts', 'utf8');
+const salesApi = readFileSync('app/api/sales/route.ts', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
@@ -80,4 +82,12 @@ test('errores de migración y restricciones no se presentan como 500 genérico',
   assert.match(tenantErrors, /DATABASE_MIGRATION_REQUIRED/);
   assert.match(tenantErrors, /DATABASE_PERMISSION_DENIED/);
   assert.match(tenantErrors, /DATA_CONSTRAINT/);
+});
+
+test('POS y preventa normalizan IDs legados de sucursal y almacén', () => {
+  assert.match(organizationScope, /legacy_firestore_id/);
+  assert.match(salesApi, /resolveTenantBranchAndWarehouse/);
+  assert.match(checkout, /resolveTenantBranchAndWarehouse/);
+  assert.match(presalesRoute, /resolveTenantBranchAndWarehouse/);
+  assert.match(tenantErrors, /BRANCH_OUT_OF_SCOPE/);
 });
