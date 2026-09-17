@@ -26,8 +26,9 @@ export async function POST(request: NextRequest) {
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || '';
     }
-    const stockDisposition = body.stockDisposition === 'scrap' ? 'scrap' : 'restock';
-    const result = await supabase.rpc('create_sale_return', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: cashSessionId || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items, target_stock_disposition: stockDisposition });
+    // The deployed RPC currently restores returned stock. Keep this payload
+    // aligned with its deployed seven-argument function signature.
+    const result = await supabase.rpc('create_sale_return', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: cashSessionId || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.returned', entity: 'sale', entityId: saleId, after: data, result: 'success' });

@@ -12,6 +12,9 @@ const salesRoute = readFileSync('app/api/sales/route.ts', 'utf8');
 const salesPage = readFileSync('app/workspace/sales/page.tsx', 'utf8');
 const presalesPage = readFileSync('app/workspace/presales/page.tsx', 'utf8');
 const orderMetadataMigration = readFileSync('supabase/migrations/20260916000003_sales_order_metadata.sql', 'utf8');
+const tenantAccess = readFileSync('lib/supabase/tenant-access.ts', 'utf8');
+const returnsRoute = readFileSync('app/api/sales/returns/route.ts', 'utf8');
+const tenantErrors = readFileSync('lib/tenant.ts', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
@@ -60,4 +63,21 @@ test('POS y preventa conservan datos operativos para la sucursal', () => {
   assert.match(presalesPage, /Imprimir ticket de preventa/);
   assert.match(salesPage, /Tipo de comprobante/);
   assert.match(salesPage, /Impuestos estimados/);
+});
+
+test('la autorización server-side respeta permisos guardados por tenant', () => {
+  assert.match(tenantAccess, /from\('tenant_settings'\)/);
+  assert.ok(tenantAccess.includes('saved?.[context.role]'));
+  assert.match(tenantAccess, /normalizePermissions\(saved/);
+});
+
+test('devoluciones usan exactamente la firma RPC desplegada', () => {
+  assert.match(returnsRoute, /create_sale_return/);
+  assert.doesNotMatch(returnsRoute, /target_stock_disposition/);
+});
+
+test('errores de migración y restricciones no se presentan como 500 genérico', () => {
+  assert.match(tenantErrors, /DATABASE_MIGRATION_REQUIRED/);
+  assert.match(tenantErrors, /DATABASE_PERMISSION_DENIED/);
+  assert.match(tenantErrors, /DATA_CONSTRAINT/);
 });

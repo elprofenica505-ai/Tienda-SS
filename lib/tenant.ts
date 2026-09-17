@@ -88,5 +88,9 @@ export function tenantErrorResponse(error: unknown) {
   if (code === 'MFA_REQUIRED') return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };
   if (code === 'SUBSCRIPTION_RESTRICTED') return { status: 402, body: { error: 'Tu suscripción requiere atención para continuar con esta operación.', code, upgradeUrl: '/workspace/billing' } };
   if (code.startsWith('RATE_LIMITED:')) { const [, scope, retryAfter] = code.split(':'); return { status: 429, body: { error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.', code: 'RATE_LIMITED', scope, retryAfterSeconds: Number(retryAfter) || 1 } }; }
+  if (/function .* does not exist|Could not find the function|42883|42P01|schema cache/i.test(code)) return { status: 503, body: { error: 'El módulo no está actualizado en Supabase. Ejecuta las migraciones pendientes.', code: 'DATABASE_MIGRATION_REQUIRED' } };
+  if (/permission denied|42501|invalid jwt|JWT expired|PGRST301/i.test(code)) return { status: 403, body: { error: 'La operación fue rechazada por la configuración de seguridad.', code: 'DATABASE_PERMISSION_DENIED' } };
+  if (/duplicate key|23505/i.test(code)) return { status: 409, body: { error: 'El registro ya existe o la operación ya fue procesada.', code: 'DUPLICATE_RECORD' } };
+  if (/foreign key|23503|violates check|23514/i.test(code)) return { status: 409, body: { error: 'La operación no es válida con los datos relacionados actuales.', code: 'DATA_CONSTRAINT' } };
   return { status: 500, body: { error: 'Error interno del servidor.' } };
 }

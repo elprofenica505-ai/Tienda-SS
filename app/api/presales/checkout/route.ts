@@ -85,9 +85,10 @@ export async function POST(request: NextRequest) {
       : await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
-    if (presale.reservation_id) {
+    const replayed = data.replayed === true;
+    if (presale.reservation_id && !replayed) {
       const consumed = await supabase.rpc('consume_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: presale.reservation_id, target_user_id: context.uid });
-      if (consumed.error) throw new Error(consumed.error.message);
+      if (consumed.error && !/RESERVATION_CLOSED|RESERVATION_NOT_FOUND/i.test(consumed.error.message || '')) throw new Error(consumed.error.message);
     }
     const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
     const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
@@ -96,7 +97,13 @@ export async function POST(request: NextRequest) {
     const seller = { name: sellerProfile.data?.display_name || presale.seller_email || presale.seller_uid || 'Vendedor', email: sellerProfile.data?.email || presale.seller_email || undefined };
     const updatedPresale = await supabase.from('presales').update({ status: 'paid', sale_id: data.saleId, paid_by: context.uid, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId).eq('status', 'sent_to_cashier').select('id').maybeSingle();
     if (updatedPresale.error) throw new Error(updatedPresale.error.message);
-    if (!updatedPresale.data) throw new Error('PRESALE_NOT_READY');
+    if (!updatedPresale.data) {
+      const confirmed = await supabase.from('presales').select('sale_id,status').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
+      if (confirmed.data?.status === 'paid' && confirmed.data.sale_id === data.saleId) {
+        return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, alreadyPaid: true });
+      }
+      throw new Error('PRESALE_NOT_READY');
+    }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
     return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
