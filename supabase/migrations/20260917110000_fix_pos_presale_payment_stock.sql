@@ -162,7 +162,7 @@ begin
     sale_qty := nullif(item->>'quantity', '')::numeric;
     if sale_quantity is null
        or sale_qty <= 0
-       or sale_qty <> trunc(sale_quantity) then
+       or sale_qty <> trunc(sale_qty) then
       raise exception 'INVALID_SALE_QUANTITY';
     end if;
 
