@@ -185,13 +185,17 @@ export async function upsertMemberBranches(tenantId: string, authUserId: string,
   const membership = await findMembership(tenantId, authUserId);
   if (!membership) throw new Error('FORBIDDEN');
   const supabase = getSupabaseServer();
-  const branchRows = await supabase.from('branches').select('id, legacy_firestore_id').eq('tenant_id', membership.tenant.id).in('legacy_firestore_id', branchIds);
-  if (branchRows.error) fail(branchRows.error);
-  if ((branchRows.data || []).length !== branchIds.length) throw new Error('BRANCH_NOT_FOUND');
+  const resolvedBranches: Array<{ id: string; legacy_firestore_id?: string | null }> = [];
+  for (const requestedId of branchIds) {
+    const branch = await supabase.from('branches').select('id,legacy_firestore_id').eq('tenant_id', membership.tenant.id).or(`id.eq.${requestedId},legacy_firestore_id.eq.${requestedId}`).eq('active', true).maybeSingle();
+    if (branch.error) fail(branch.error);
+    if (!branch.data) throw new Error('BRANCH_NOT_FOUND');
+    resolvedBranches.push(branch.data);
+  }
   const clear = await supabase.from('member_branches').delete().eq('tenant_id', membership.tenant.id).eq('member_id', membership.member.id);
   if (clear.error) fail(clear.error);
-  if (branchRows.data?.length) {
-    const insert = await supabase.from('member_branches').insert(branchRows.data.map((branch) => ({ tenant_id: membership.tenant.id, member_id: membership.member.id, branch_id: branch.id })));
+  if (resolvedBranches.length) {
+    const insert = await supabase.from('member_branches').insert(resolvedBranches.map((branch) => ({ tenant_id: membership.tenant.id, member_id: membership.member.id, branch_id: branch.id })));
     if (insert.error) fail(insert.error);
   }
   return branchIds;
