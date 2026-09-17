@@ -25,8 +25,16 @@ export async function GET(request: NextRequest) {
     const cursor = pageCursor(request.nextUrl.searchParams.get('cursor'));
     const branchId = text(request.headers.get('x-branch-id'), 80);
     let query = supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,seller_role,status,evidence_refs,metadata,sale_id,branch_id,created_at,updated_at,paid_by,paid_at').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(21);
-    if (code) query = query.eq('ticket_code', code).limit(1);
-    else {
+    if (code) {
+      query = query.eq('ticket_code', code).limit(1);
+      if (context.role === 'vendedor') query = query.eq('seller_uid', context.uid);
+      if (branchId) {
+        const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, branchId);
+        if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
+        assertResolvedBranchAccess(context, branchId, resolved.branchId);
+        query = query.eq('branch_id', resolved.branchId);
+      }
+    } else {
       if (context.role === 'vendedor') query = query.eq('seller_uid', context.uid);
       if (branchId && context.branchIds.includes(branchId)) query = query.eq('branch_id', branchId);
       if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
@@ -81,7 +89,11 @@ export async function POST(request: NextRequest) {
       if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
       reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
       const sent = await supabase.from('presales').update({ status: 'sent_to_cashier', reservation_id: reservationId || null, warehouse_id: warehouseId, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', inserted.data.id).select('id,ticket_code,status,total').single();
-      if (sent.error) throw new Error(sent.error.message);
+      if (sent.error) {
+        if (reservationId) await supabase.rpc('release_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: reservationId, target_user_id: context.uid });
+        await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id);
+        throw new Error(sent.error.message);
+      }
       inserted.data = sent.data;
     }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });

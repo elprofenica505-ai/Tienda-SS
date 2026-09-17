@@ -10,6 +10,7 @@ alter table public.customers
   add column if not exists sales_blocked_reason text;
 
 alter table public.receivable_payments
+  alter column receivable_id drop not null,
   add column if not exists customer_id uuid,
   add column if not exists receipt_number text,
   add column if not exists paid_at timestamptz not null default now(),
@@ -67,7 +68,7 @@ create trigger receivables_credit_limit_trigger before insert on public.receivab
   for each row execute function public.enforce_receivable_credit_limit();
 revoke all on function public.enforce_receivable_credit_limit() from public, anon, authenticated;
 
-a-- FIFO by due date when allocations are omitted; explicit allocations are validated and locked.
+-- FIFO by due date when allocations are omitted; explicit allocations are validated and locked.
 create or replace function public.register_receivable_payment(
   target_tenant_id uuid,
   target_customer_id uuid,

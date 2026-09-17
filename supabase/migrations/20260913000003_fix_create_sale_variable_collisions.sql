@@ -101,7 +101,7 @@ begin
     raise exception 'CUSTOMER_NOT_FOUND';
   end if;
 
-  if target_payment_method <> 'credit' then
+  if target_payment_method in ('cash', 'card', 'transfer') then
     if target_cash_session_id is null then
       raise exception 'CASH_SESSION_REQUIRED';
     end if;
@@ -256,7 +256,7 @@ begin
     nullif(target_metadata->>'paymentReference', '')
   );
 
-  if target_payment_method <> 'credit' then
+  if target_payment_method = 'cash' then
     insert into public.cash_movements (
       tenant_id, cash_session_id, movement_type, amount,
       reference_type, reference_id, performed_by, metadata

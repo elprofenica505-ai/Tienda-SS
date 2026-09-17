@@ -15,16 +15,25 @@ const orderMetadataMigration = readFileSync('supabase/migrations/20260916000003_
 const tenantAccess = readFileSync('lib/supabase/tenant-access.ts', 'utf8');
 const returnsRoute = readFileSync('app/api/sales/returns/route.ts', 'utf8');
 const tenantErrors = readFileSync('lib/tenant.ts', 'utf8');
+const organizationRepository = readFileSync('lib/repositories/organization-repository.ts', 'utf8');
 const organizationScope = readFileSync('lib/organization-scope.ts', 'utf8');
 const salesApi = readFileSync('app/api/sales/route.ts', 'utf8');
 
 test('venta mixta usa RPC transaccional y crea cuenta por cobrar por el crédito', () => {
   assert.match(migration, /create_sale_with_payments/);
-  assert.match(migration, /paymentMethod.*mixed/);
+  assert.match(migration, /paymentMethod[\s\S]*mixed/);
+  assert.match(migration, /payment_method, amount[\s\S]*card/);
+  assert.match(migration, /payment_method, amount[\s\S]*transfer/);
+  assert.match(migration, /cash_movements[\s\S]*cash_amount/);
   assert.match(migration, /insert into public\.receivables/);
   assert.match(migration, /CREDIT_LIMIT_EXCEEDED/);
   assert.match(checkout, /create_sale_with_payments/);
   assert.match(checkout, /splitPayments/);
+});
+
+test('la resolución de membership bloquea tenants suspendidos', () => {
+  assert.match(organizationRepository, /platform_status/);
+  assert.match(organizationRepository, /platform_status === 'suspended'/);
 });
 
 test('abono CxC expone FIFO y allocations explícitos', () => {
@@ -46,6 +55,11 @@ test('caja puede iniciar preventas y POS acepta pagos estructurados', () => {
   assert.match(presalesRoute, /Ventas > Crear/);
   assert.match(salesRoute, /create_sale_with_payments/);
   assert.match(salesRoute, /splitPayments/);
+});
+
+test('el pago simple sólo crea movimiento de caja para cash', () => {
+  const saleMigration = readFileSync('supabase/migrations/20260913000003_fix_create_sale_variable_collisions.sql', 'utf8');
+  assert.match(saleMigration, /if target_payment_method = 'cash' then[\s\S]*insert into public\.cash_movements/);
 });
 
 test('POS no permite cobrar efectivo insuficiente y genera comprobante con vuelto', () => {
