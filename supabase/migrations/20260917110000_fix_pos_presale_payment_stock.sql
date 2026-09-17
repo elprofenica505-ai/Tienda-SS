@@ -25,7 +25,7 @@ declare
   target_product_id uuid;
   product_row public.products%rowtype;
   stock_row public.inventory_stocks%rowtype;
-  sale_quantity numeric;
+  sale_qty numeric;
   sale_unit_price numeric;
   sale_line_total numeric;
   sale_subtotal numeric := 0;
@@ -159,10 +159,10 @@ begin
       raise exception 'PRODUCT_NOT_FOUND';
     end if;
 
-    sale_quantity := nullif(item->>'quantity', '')::numeric;
+    sale_qty := nullif(item->>'quantity', '')::numeric;
     if sale_quantity is null
-       or sale_quantity <= 0
-       or sale_quantity <> trunc(sale_quantity) then
+       or sale_qty <= 0
+       or sale_qty <> trunc(sale_quantity) then
       raise exception 'INVALID_SALE_QUANTITY';
     end if;
 
@@ -170,7 +170,7 @@ begin
       coalesce(nullif(item->>'unitPrice', '')::numeric, product_row.price),
       0
     );
-    sale_line_total := sale_unit_price * sale_quantity;
+    sale_line_total := sale_unit_price * sale_qty;
     sale_subtotal := sale_subtotal + sale_line_total;
     line_count := line_count + 1;
 
@@ -183,12 +183,12 @@ begin
          and inventory_stock.warehouse_id = target_warehouse_id
        for update;
 
-      if not found or stock_row.quantity < sale_quantity then
+      if not found or stock_row.quantity < sale_qty then
         raise exception 'INSUFFICIENT_STOCK';
       end if;
 
       update public.inventory_stocks as stock
-         set quantity = stock.quantity - sale_quantity,
+         set quantity = stock.quantity - sale_qty,
              updated_at = now()
        where stock.id = stock_row.id;
 
@@ -207,7 +207,7 @@ begin
         target_user_id,
         jsonb_build_object(
           'previous_quantity', stock_row.quantity,
-          'new_quantity', stock_row.quantity - sale_quantity
+          'new_quantity', stock_row.quantity - sale_qty
         )
       );
     end if;
