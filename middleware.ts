@@ -16,6 +16,18 @@ function unauthorized(message: string, status = 401, correlationId?: string) {
   return withSecurityHeaders(NextResponse.json({ error: message, correlationId }, { status }), correlationId);
 }
 
+function firstHeader(request: NextRequest, names: string[]) {
+  for (const name of names) {
+    const value = request.headers.get(name)?.trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function hasSupabaseAuthCookie(request: NextRequest) {
+  return request.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(?:\.[0-9]+)?$/.test(name));
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const canonicalHost = 'tienda-ss-ozkq.vercel.app';
@@ -35,7 +47,7 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith('/api/v1/') && pathname !== '/api/v1/keys') return withSecurityHeaders(NextResponse.next(), correlationId);
 
   const authorization = request.headers.get('authorization')?.trim() || '';
-  if (!/^Bearer\s+\S+$/i.test(authorization)) {
+  if (!/^Bearer\s+\S+$/i.test(authorization) && !hasSupabaseAuthCookie(request)) {
     return unauthorized('Autenticación requerida.', 401, correlationId);
   }
 
@@ -49,7 +61,8 @@ export function middleware(request: NextRequest) {
     return withSecurityHeaders(NextResponse.next(), correlationId);
   }
 
-  if (!request.headers.get('x-tenant-id')?.trim()) {
+  const tenantId = firstHeader(request, ['x-tenant-id', 'tenant-id', 'tenant_id']);
+  if (!tenantId) {
     return unauthorized('Falta identificar la empresa.', 400, correlationId);
   }
 
@@ -60,6 +73,9 @@ export function middleware(request: NextRequest) {
 
   const headers = new Headers(request.headers);
   headers.set('x-correlation-id', correlationId);
+  headers.set('x-tenant-id', tenantId);
+  const branchId = firstHeader(request, ['x-branch-id', 'branch-id', 'branch_id']);
+  if (branchId) headers.set('x-branch-id', branchId);
   if (policy) {
     headers.set('x-api-permission-module', policy.module);
     headers.set('x-api-permission-action', policy.action);

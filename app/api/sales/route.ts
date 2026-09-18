@@ -9,6 +9,7 @@ import { isMissingServerPricedRpc, priceSaleItemsFromCatalog } from '@/lib/sale-
 export const runtime = 'nodejs';
 const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
+function headerValue(request: NextRequest, names: string[]) { for (const name of names) { const value = text(request.headers.get(name), 160); if (value) return value; } return ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * 100) / 100) : 0; }
 type SalesCursor = { createdAt: string; id: string };
 function decodeSalesCursor(raw: string): SalesCursor {
@@ -20,7 +21,7 @@ function decodeSalesCursor(raw: string): SalesCursor {
   } catch { throw new Error('INVALID_SALES_CURSOR'); }
 }
 function encodeSalesCursor(cursor: SalesCursor) { return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url'); }
-function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { INVALID_JSON: ['El cuerpo de la solicitud debe ser JSON válido.', 400], INVALID_SALE_BODY: ['El cuerpo de la venta no tiene un formato válido.', 422], PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0], code: key }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
@@ -76,14 +77,23 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'create');
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      const parsed = await request.json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('INVALID_SALE_BODY');
+      body = parsed as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_SALE_BODY') throw error;
+      throw new Error('INVALID_JSON');
+    }
     const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
-    const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
-    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128);
+    const requestedPaymentMethod = text(body.paymentMethod, 20);
+    const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(requestedPaymentMethod) ? requestedPaymentMethod : '');
+    const requestedBranchId = text(body.branchId, 128) || headerValue(request, ['x-branch-id', 'branch-id', 'branch_id']);
     const requestedWarehouseId = text(body.warehouseId, 128);
     const customerId = text(body.customerId, 128) || null;
     const rawItems = Array.isArray(body.items) ? body.items : [];
-    if (!requestedBranchId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, método de pago y productos son obligatorios.' }, { status: 400 });
+    if (!paymentMethod) throw new Error('INVALID_PAYMENT_METHOD');
     const supabase = getSupabaseServer();
     const branchId = await resolveAuthorizedBranchId(context, requestedBranchId || undefined);
     const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, branchId, requestedWarehouseId);

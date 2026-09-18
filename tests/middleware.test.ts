@@ -30,3 +30,12 @@ test('middleware permite el health check público con cabeceras de seguridad', (
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
 });
+
+test('middleware deja pasar POST de ventas con sesión Supabase por cookie y normaliza tenant/branch', () => {
+  const response = middleware(request('/api/sales', {
+    Cookie: 'sb-test-auth-token=encoded-session',
+    tenant_id: 'tenant-a',
+    branch_id: 'branch-a',
+  }));
+  assert.equal(response.status, 200);
+});
