@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultPermissions } from '../lib/permissions';
+import { defaultPermissions, hasFullTenantAccess } from '../lib/permissions';
+
+test('Owner y Admin tienen bypass total de la configuración editable de permisos', () => {
+  assert.equal(hasFullTenantAccess('owner'), true);
+  assert.equal(hasFullTenantAccess('admin'), true);
+  assert.equal(hasFullTenantAccess('gerente'), false);
+  assert.equal(hasFullTenantAccess('vendedor'), false);
+});
 
 test('Supervisor de Sucursal puede operar y supervisar, pero no administrar el tenant', () => {
   const permissions = defaultPermissions.supervisor_sucursal;

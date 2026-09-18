@@ -16,6 +16,12 @@ export type PermissionModule = typeof permissionModules[number]['key'];
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'export';
 export type PermissionMap = Record<PermissionModule, Record<PermissionAction, boolean>>;
 
+export const FULL_TENANT_ACCESS_ROLES = new Set<TenantRole>(['owner', 'admin']);
+
+export function hasFullTenantAccess(role: TenantRole) {
+  return FULL_TENANT_ACCESS_ROLES.has(role);
+}
+
 export const tenantRoleLabels: Record<TenantRole, string> = {
   owner: 'Owner',
   admin: 'Admin',

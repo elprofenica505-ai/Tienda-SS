@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { assertTokenSessionPolicy } from '@/lib/auth-policy';
 import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
-import { normalizePermissions } from '@/lib/permissions';
+import { hasFullTenantAccess, normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 import { entitlementErrorResponse } from '@/lib/entitlement-guard';
 import { getSupabaseServer } from '@/lib/supabase/server';
@@ -65,8 +65,8 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
 
 export async function requireTenantPermission(request: NextRequest, module: PermissionModule, action: PermissionAction): Promise<TenantContext> {
   const context = await requireTenantMember(request);
+  if (hasFullTenantAccess(context.role)) return context;
   if (['create', 'edit', 'delete', 'export'].includes(action) && ['past_due', 'canceled', 'unpaid', 'incomplete_expired'].includes(context.subscriptionStatus || '')) throw new Error('SUBSCRIPTION_RESTRICTED');
-  if (context.role === 'owner') return context;
   const settings = await getSupabaseServer().from('tenant_settings').select('value').eq('tenant_id', context.tenantId).eq('setting_key', 'permissions').maybeSingle();
   if (settings.error) throw new Error(settings.error.message);
   const saved = settings.data?.value && typeof settings.data.value === 'object' ? settings.data.value as Record<string, unknown> : undefined;
