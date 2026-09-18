@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import { DEFAULT_PAGE_SIZE, pageRange, parsePage, parsePageSize } from '@/lib/pagination';
 
 export const runtime = 'nodejs';
 
@@ -61,16 +62,20 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const type = typeOf(url.searchParams.get('type'));
     const includeArchived = url.searchParams.get('includeArchived') === 'true';
+    const page = parsePage(url.searchParams.get('page'));
+    const pageSize = parsePageSize(url.searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
+    const { from, to } = pageRange(page, pageSize);
     let query = getSupabaseServer()
       .from(tableFor(type))
-      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at')
+      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at', { count: 'exact' })
       .eq('tenant_id', context.tenantId)
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .range(from, to);
     if (!includeArchived) query = query.eq('active', true);
     const result = await query;
     if (result.error) throw new Error(result.error.message);
     const contacts = (result.data || []).map((row) => mapContact(row as Record<string, any>, type));
-    return NextResponse.json({ ok: true, tenantId: context.tenantId, type, contacts }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ok: true, tenantId: context.tenantId, type, contacts, pagination: { page, pageSize, total: result.count || 0, hasNext: to < (result.count || 0) - 1, hasPrevious: page > 1 } }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {
     return errorResponse(error);
   }

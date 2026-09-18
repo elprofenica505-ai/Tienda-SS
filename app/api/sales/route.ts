@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
     const branchId = text(request.headers.get('x-branch-id'), 128);
     const params = request.nextUrl.searchParams;
     const rawLimit = Number(params.get('limit') || 50);
-    const pageSize = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.floor(rawLimit))) : 50;
+    const pageSize = Number.isFinite(rawLimit) ? Math.min(25, Math.max(1, Math.floor(rawLimit))) : 25;
     const rawCursor = text(params.get('cursor'), 512);
     if (branchId) assertBranchAccess(context, branchId);
     let query = getSupabaseServer().from('sales').select('id,tenant_id,branch_id,cash_register_id,customer_id,invoice_number,status,subtotal,tax,discount,total,sold_by,metadata,created_at,updated_at,sale_items(id,tenant_id,sale_id,product_id,warehouse_id,quantity,unit_price,tax,discount,line_total),sale_payments(id,tenant_id,sale_id,payment_method,amount,reference,created_at)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageSize + 1);

@@ -422,3 +422,10 @@ button:disabled { cursor: not-allowed; opacity: .65; }
   .fiscal-logo-field > div:first-child { min-width: 0; }
   .payment-options { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Navegación sin pantallas blancas: placeholders neutros mientras carga RSC/API. */
+.page-skeleton{min-height:100vh;background:#f8fbf7;padding:clamp(24px,5vw,72px);color:#dce8d8}
+.skeleton-heading,.skeleton-subheading,.skeleton-card{background:linear-gradient(100deg,#e7efe5 25%,#f5f8f3 37%,#e7efe5 63%);background-size:400% 100%;animation:skeleton-shimmer 1.4s ease-in-out infinite;border-radius:10px}
+.skeleton-heading{height:34px;max-width:360px}.skeleton-subheading{height:14px;margin-top:12px;max-width:520px}.skeleton-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:30px}.skeleton-card{height:128px}
+@keyframes skeleton-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+@media(prefers-reduced-motion:reduce){.skeleton-heading,.skeleton-subheading,.skeleton-card{animation:none}}

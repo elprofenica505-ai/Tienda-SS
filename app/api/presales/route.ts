@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
     const code = text(request.nextUrl.searchParams.get('code'), 80);
     const cursor = pageCursor(request.nextUrl.searchParams.get('cursor'));
     const branchId = text(request.headers.get('x-branch-id'), 80);
+    // 20 filas + 1 sentinel para cursor; el checkout/preventa permanece intacto.
     let query = supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,seller_role,status,evidence_refs,metadata,sale_id,branch_id,created_at,updated_at,paid_by,paid_at').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(21);
     if (code) {
       query = query.eq('ticket_code', code).limit(1);

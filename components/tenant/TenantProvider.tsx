@@ -117,7 +117,9 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       const storedBranch = window.localStorage.getItem(`${BRANCH_STORAGE_PREFIX}${selected.tenant.id}`);
       const nextBranch = visibleBranches.find((branch) => branch.id === storedBranch)?.id || visibleBranches[0]?.id || null;
       setTenant(selected.tenant); setMember(selected.member); setOrganization(normalizedOrganization); setActiveBranchIdState(nextBranch);
-      contextCache = { userId: session.user.id, tenantId: selected.tenant.id, expiresAt: Date.now() + 30_000, tenant: selected.tenant, member: selected.member, organization: normalizedOrganization, branchId: nextBranch };
+      // El layout permanece montado entre cambios de ruta; conservar el contexto
+      // cinco minutos evita repetir /api/tenants/me y /api/organization en cada clic.
+      contextCache = { userId: session.user.id, tenantId: selected.tenant.id, expiresAt: Date.now() + 300_000, tenant: selected.tenant, member: selected.member, organization: normalizedOrganization, branchId: nextBranch };
       if (nextBranch) window.localStorage.setItem(`${BRANCH_STORAGE_PREFIX}${selected.tenant.id}`, nextBranch);
     } catch (cause) {
       setTenant(null); setMember(null); setOrganization(null); setActiveBranchIdState(null);
