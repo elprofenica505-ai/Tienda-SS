@@ -3,6 +3,7 @@ import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { isMissingServerPricedRpc, priceSaleItemsFromCatalog } from '@/lib/sale-rpc';
 import { createFiscalSaleFields } from '@/lib/fiscal-ni';
 import { getFiscalAdapter, normalizeFiscalConfig, type FiscalEmissionResult } from '@/lib/fiscal-adapters';
 
@@ -87,11 +88,20 @@ export async function POST(request: NextRequest) {
     const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) };
     // create_sale remains the underlying atomic RPC (compat: supabase.rpc('create_sale'));
     // this wrapper recalculates price/tax server-side.
+    const saleArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items };
     const result = splitPayments.length
-      ? await supabase.rpc('create_sale_with_payments_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items, target_payments: splitPayments })
-      : await supabase.rpc('create_sale_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
-    if (result.error) throw new Error(result.error.message);
-    const data = result.data || {};
+      ? await supabase.rpc('create_sale_with_payments_server_priced', { ...saleArgs, target_payments: splitPayments })
+      : await supabase.rpc('create_sale_server_priced', { ...saleArgs, target_payment_method: paymentMethod });
+    let saleResult = result;
+    if (result.error && isMissingServerPricedRpc(result.error)) {
+      const fallbackPricing = await priceSaleItemsFromCatalog(context.tenantId, items);
+      const fallbackArgs = { ...saleArgs, target_items: fallbackPricing.items, target_metadata: { ...metadata, taxAmount: fallbackPricing.taxAmount, priceSource: 'server_catalog_fallback' } };
+      saleResult = splitPayments.length
+        ? await supabase.rpc('create_sale_with_payments', { ...fallbackArgs, target_payments: splitPayments })
+        : await supabase.rpc('create_sale', { ...fallbackArgs, target_payment_method: paymentMethod });
+    }
+    if (saleResult.error) throw new Error(saleResult.error.message);
+    const data = saleResult.data || {};
     const replayed = data.replayed === true;
     if (presale.reservation_id && !replayed) {
       const consumed = await supabase.rpc('consume_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: presale.reservation_id, target_user_id: context.uid });

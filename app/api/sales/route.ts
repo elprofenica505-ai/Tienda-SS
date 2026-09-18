@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
-import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
+import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { isMissingServerPricedRpc, priceSaleItemsFromCatalog } from '@/lib/sale-rpc';
 
 export const runtime = 'nodejs';
 const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
@@ -20,8 +21,6 @@ function decodeSalesCursor(raw: string): SalesCursor {
 }
 function encodeSalesCursor(cursor: SalesCursor) { return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url'); }
 function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
-function isMissingServerPricedRpc(error: unknown) { const message = error instanceof Error ? error.message : String(error || ''); return /function .*create_sale(_with_payments)?_server_priced.*does not exist|Could not find the function .*create_sale(_with_payments)?_server_priced|schema cache/i.test(message); }
-
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'sales', 'view');
@@ -80,16 +79,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
     const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
-    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128);
     const requestedWarehouseId = text(body.warehouseId, 128);
     const customerId = text(body.customerId, 128) || null;
     const rawItems = Array.isArray(body.items) ? body.items : [];
     if (!requestedBranchId || !paymentMethod) return NextResponse.json({ error: 'Sucursal, método de pago y productos son obligatorios.' }, { status: 400 });
     const supabase = getSupabaseServer();
-    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId, requestedWarehouseId);
+    const branchId = await resolveAuthorizedBranchId(context, requestedBranchId || undefined);
+    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, branchId, requestedWarehouseId);
     if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
-    assertResolvedBranchAccess(context, requestedBranchId, resolved.branchId);
-    const branchId = resolved.branchId;
+    assertResolvedBranchAccess(context, branchId, resolved.branchId);
     const warehouseId = resolved.warehouseId;
     if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     const splitCreditAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method === 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
@@ -115,9 +114,11 @@ export async function POST(request: NextRequest) {
       : await supabase.rpc('create_sale_server_priced', { ...saleArgs, target_payment_method: paymentMethod });
     let saleResult = result;
     if (result.error && isMissingServerPricedRpc(result.error)) {
+      const fallbackPricing = await priceSaleItemsFromCatalog(context.tenantId, items);
+      const fallbackArgs = { ...saleArgs, target_items: fallbackPricing.items, target_metadata: { ...metadata, taxAmount: fallbackPricing.taxAmount, priceSource: 'server_catalog_fallback' } };
       saleResult = splitPayments.length
-        ? await supabase.rpc('create_sale_with_payments', { ...saleArgs, target_payments: splitPayments })
-        : await supabase.rpc('create_sale', { ...saleArgs, target_payment_method: paymentMethod });
+        ? await supabase.rpc('create_sale_with_payments', { ...fallbackArgs, target_payments: splitPayments })
+        : await supabase.rpc('create_sale', { ...fallbackArgs, target_payment_method: paymentMethod });
     }
     if (saleResult.error) throw new Error(saleResult.error.message);
     const data = saleResult.data || {};

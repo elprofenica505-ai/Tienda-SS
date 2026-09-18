@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { assertBranchAccess } from '@/lib/data-scope';
-import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
+import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -79,11 +79,11 @@ export async function POST(request: NextRequest) {
     const lines: PreSaleLine[] = productIds.map((id) => { const data = productById.get(id)!; const quantity = unique.get(id) || 0; const unitPrice = money(Number(data.price)); return { productId: id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity }; });
     const total = lines.reduce((sum, line) => sum + line.total, 0);
     const metadata = { customerId: text(body.customerId, 120) || null, suggestedPayment: ['cash', 'card', 'transfer', 'credit'].includes(body.suggestedPayment) ? body.suggestedPayment : null, documentType: text(body.documentType, 40) || 'ticket', servicePoint: text(body.servicePoint, 120), notes: text(body.notes, 1000), itemNotes: typeof body.itemNotes === 'object' && body.itemNotes ? body.itemNotes : {} };
-    const requestedBranchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80) || context.branchIds[0] || '';
-    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId);
+    const requestedBranchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80);
+    const branchId = await resolveAuthorizedBranchId(context, requestedBranchId || undefined);
+    const resolved = await resolveTenantBranchAndWarehouse(context.tenantId, branchId);
     if (!resolved.branchId) throw new Error('BRANCH_NOT_FOUND');
-    assertResolvedBranchAccess(context, requestedBranchId, resolved.branchId);
-    const branchId = resolved.branchId;
+    assertResolvedBranchAccess(context, branchId, resolved.branchId);
     let warehouseId = '';
     let reservationId: string | null = null;
     if (action === 'sent_to_cashier') {
