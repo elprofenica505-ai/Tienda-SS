@@ -120,10 +120,34 @@ export function createManualAdapter(): FiscalAdapter {
   return { provider: 'manual', async emit() { return { provider: 'manual', status: 'accepted', message: 'Registro interno; no se envió a un proveedor externo.' }; } };
 }
 
-export function getFiscalAdapter(provider: FiscalProviderId): FiscalAdapter {
-  // Los adaptadores externos se conectarán aquí; no se realizan llamadas sin configuración explícita.
-  return createManualAdapter().provider === provider ? createManualAdapter() : {
+export function getFiscalAdapter(provider: FiscalProviderId, config?: FiscalTenantConfig): FiscalAdapter {
+  if (provider === 'manual') return createManualAdapter();
+  return {
     provider,
-    async emit() { return { provider, status: 'pending', message: 'Adaptador registrado; falta implementar la conexión del proveedor.', retryable: false }; },
+    async emit(request) {
+      if (!config?.endpoint || !config.credentialRef) {
+        return { provider, status: 'rejected', message: 'La integración fiscal no tiene endpoint o referencia segura configurada.', retryable: false };
+      }
+      try {
+        const response = await fetch(config.endpoint, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+            'x-credential-reference': config.credentialRef,
+            'x-fiscal-provider': provider,
+            'x-fiscal-environment': config.mode,
+          },
+          body: JSON.stringify({ provider, environment: config.mode, tenantId: request.tenantId, saleId: request.saleId, invoiceNumber: request.invoiceNumber, fields: request.fields, items: request.items }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+        const externalId = typeof payload.externalId === 'string' ? payload.externalId : typeof payload.id === 'string' ? payload.id : undefined;
+        if (!response.ok) return { provider, status: 'rejected', externalId, message: typeof payload.message === 'string' ? payload.message : `El proveedor respondió ${response.status}.`, retryable: response.status >= 500 };
+        return { provider, status: payload.status === 'rejected' ? 'rejected' : 'submitted', externalId, message: typeof payload.message === 'string' ? payload.message : 'Venta enviada al proveedor fiscal.', retryable: false };
+      } catch (error) {
+        return { provider, status: 'rejected', message: error instanceof Error ? error.message : 'No se pudo contactar al proveedor fiscal.', retryable: true };
+      }
+    },
   };
 }

@@ -3,6 +3,8 @@ import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { createFiscalSaleFields } from '@/lib/fiscal-ni';
+import { getFiscalAdapter, normalizeFiscalConfig, type FiscalEmissionResult } from '@/lib/fiscal-adapters';
 
 export const runtime = 'nodejs';
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -95,11 +97,26 @@ export async function POST(request: NextRequest) {
       const consumed = await supabase.rpc('consume_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: presale.reservation_id, target_user_id: context.uid });
       if (consumed.error && !/RESERVATION_CLOSED|RESERVATION_NOT_FOUND/i.test(consumed.error.message || '')) throw new Error(consumed.error.message);
     }
-    const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
+    const fiscalConfig = await supabase.from('fiscal_configs').select('provider,legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
     const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
+    const config = normalizeFiscalConfig({ ...fiscalMetadata, provider: fiscalConfig.data?.provider, legalName: fiscalConfig.data?.legal_name, taxId: fiscalConfig.data?.tax_id });
     const issuer = { legalName: fiscalConfig.data?.legal_name || undefined, taxId: fiscalConfig.data?.tax_id || undefined, address: typeof fiscalMetadata.address === 'string' ? fiscalMetadata.address : undefined, phone: typeof fiscalMetadata.phone === 'string' ? fiscalMetadata.phone : undefined, email: typeof fiscalMetadata.email === 'string' ? fiscalMetadata.email : undefined, logoDataUrl: typeof fiscalMetadata.logoDataUrl === 'string' ? fiscalMetadata.logoDataUrl : undefined };
     const sellerProfile = presale.seller_uid ? await supabase.from('profiles').select('display_name,email').eq('auth_user_id', presale.seller_uid).maybeSingle() : { data: null };
     const seller = { name: sellerProfile.data?.display_name || presale.seller_email || presale.seller_uid || 'Vendedor', email: sellerProfile.data?.email || presale.seller_email || undefined };
+    let fiscalEmission: FiscalEmissionResult = { status: 'not_requested', provider: config.provider };
+    if (config.mode !== 'manual') {
+      const invoiceNumber = text(data.invoiceNumber || data.saleNumber || data.saleId, 80);
+      const adapter = getFiscalAdapter(config.provider, config);
+      fiscalEmission = await adapter.emit({
+        tenantId: context.tenantId,
+        saleId: text(data.saleId, 128),
+        invoiceNumber,
+        fields: createFiscalSaleFields({ documentType: 'invoice', customerName: text(body.customerId, 128) ? 'Cliente registrado' : 'Cliente mostrador', customerRuc: '', customerAddress: '' }, Number(data.subtotal ?? data.total ?? 0), Number(data.discount ?? 0)),
+        items: rawItems,
+        config,
+      });
+      if (fiscalEmission.status === 'rejected') throw new Error(`FISCAL_PROVIDER_REJECTED:${fiscalEmission.message || 'El proveedor rechazó la venta.'}`);
+    }
     const updatedPresale = await supabase.from('presales').update({ status: 'paid', sale_id: data.saleId, paid_by: context.uid, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId).eq('status', 'sent_to_cashier').select('id').maybeSingle();
     if (updatedPresale.error) throw new Error(updatedPresale.error.message);
     if (!updatedPresale.data) {
@@ -110,6 +127,6 @@ export async function POST(request: NextRequest) {
       throw new Error('PRESALE_NOT_READY');
     }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
-    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
+    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: config.mode, provider: config.provider, showBarcode: config.showBarcode !== false, emission: fiscalEmission }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
