@@ -429,3 +429,10 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .skeleton-heading{height:34px;max-width:360px}.skeleton-subheading{height:14px;margin-top:12px;max-width:520px}.skeleton-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:30px}.skeleton-card{height:128px}
 @keyframes skeleton-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
 @media(prefers-reduced-motion:reduce){.skeleton-heading,.skeleton-subheading,.skeleton-card{animation:none}}
+
+/* Ajuste quirúrgico de densidad para listas y tablas operativas. */
+.contacts-main,.members-main{min-height:100vh;display:grid;align-content:start;gap:0}
+.contacts-main .contacts-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;align-content:start}
+.members-main .members-list{grid-template-columns:1fr;gap:10px;align-content:start}
+.returns-layout{min-height:0;align-items:start;gap:20px}
+@media(max-width:850px){.contacts-main .contacts-grid{grid-template-columns:1fr}.returns-layout{gap:16px}}

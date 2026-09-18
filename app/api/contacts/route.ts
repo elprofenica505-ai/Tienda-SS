@@ -65,9 +65,12 @@ export async function GET(request: NextRequest) {
     const page = parsePage(url.searchParams.get('page'));
     const pageSize = parsePageSize(url.searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
     const { from, to } = pageRange(page, pageSize);
+    const columns = type === 'customer'
+      ? 'id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at'
+      : 'id,tenant_id,name,email,phone,document_id,active,metadata,created_at,updated_at';
     let query = getSupabaseServer()
       .from(tableFor(type))
-      .select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at', { count: 'exact' })
+      .select(columns, { count: 'exact' })
       .eq('tenant_id', context.tenantId)
       .order('name', { ascending: true })
       .range(from, to);
