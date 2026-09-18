@@ -3,11 +3,14 @@ import { getSupabaseServer } from '@/lib/supabase/server';
 import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
 
 function configuredIds() { return (process.env.SUPERADMIN_UIDS || '').split(',').map((value) => value.trim()).filter(Boolean); }
+export function hasSuperadminAccess(user: { id: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }) {
+  return configuredIds().includes(user.id) || user.app_metadata?.superadmin === true;
+}
 export async function requireSuperadmin(request: NextRequest) {
   const header = request.headers.get('authorization') || ''; const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''; if (!token) throw new Error('UNAUTHENTICATED');
   const auth = await getSupabaseServer().auth.getUser(token); const user = auth.data.user;
   if (auth.error || !user) throw new Error('UNAUTHENTICATED');
-  if (!configuredIds().includes(user.id) && user.app_metadata?.superadmin !== true && user.user_metadata?.superadmin !== true) throw new Error('FORBIDDEN');
+  if (!hasSuperadminAccess(user)) throw new Error('FORBIDDEN');
   const rate = await consumeDistributedRateLimits({ endpoint: request.nextUrl.pathname, ip: getClientAddress(request), uid: user.id }, { ip: 120, uid: 300, endpoint: 600, composite: 100 }, 60_000);
   if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);
   return { uid: user.id, email: user.email || '' };

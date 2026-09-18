@@ -18,16 +18,23 @@ export async function POST(request: NextRequest) {
     if (sale.error || !sale.data) return NextResponse.json({ error: 'La venta no existe.' }, { status: 404 });
     assertBranchAccess(context, sale.data.branch_id);
     const refundMethod = text(body.refundMethod, 30) || 'cash';
+    const idempotencyKey = text(request.headers.get('idempotency-key'), 160) || text(body.idempotencyKey, 160);
+    if (!idempotencyKey) return NextResponse.json({ error: 'La llave de idempotencia es obligatoria para devoluciones.' }, { status: 400 });
     const items = Array.isArray(body.items) ? body.items.map((item: Record<string, unknown>) => ({ productId: text(item.productId, 128), quantity: item.quantity })).filter((item: { productId: string; quantity: unknown }) => item.productId) : [];
     const supabase = getSupabaseServer();
     let cashSessionId = text(body.cashSessionId, 128) || '';
+    if (refundMethod !== 'credit' && cashSessionId) {
+      const requestedSession = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('id', cashSessionId).eq('branch_id', sale.data.branch_id).eq('status', 'open').maybeSingle();
+      if (requestedSession.error) throw new Error(requestedSession.error.message);
+      if (!requestedSession.data) throw new Error('CASH_SESSION_NOT_OPEN');
+    }
     if (refundMethod !== 'credit' && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', sale.data.branch_id).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || '';
     }
-    const stockDisposition = body.stockDisposition === 'scrap' ? 'scrap' : 'restock';
-    const result = await supabase.rpc('create_sale_return', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: cashSessionId || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items, target_stock_disposition: stockDisposition });
+    // The wrapper delegates to create_sale_return and serializes retries by key.
+    const result = await supabase.rpc('create_sale_return_idempotent', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_refund_method: refundMethod, target_cash_session_id: cashSessionId || null, target_reason: text(body.reason, 300) || 'Devolución', target_items: items, target_idempotency_key: idempotencyKey });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.returned', entity: 'sale', entityId: saleId, after: data, result: 'success' });

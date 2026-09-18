@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const loginSource = readFileSync('components/Login.tsx', 'utf8');
+const marketingAuthSource = readFileSync('components/MarketingSite.tsx', 'utf8');
 const tenantRouteSource = readFileSync('app/api/tenants/route.ts', 'utf8');
 const authAttemptSource = readFileSync('app/api/auth/login-attempt/route.ts', 'utf8');
 const middlewareSource = readFileSync('middleware.ts', 'utf8');
@@ -20,10 +21,11 @@ test('la creación de empresa no contiene semillas de productos, ventas o client
   assert.equal(/seed|demo|fake|fixture/i.test(tenantRouteSource), false);
 });
 
-test('el pre-login usa un límite versionado y razonable', () => {
+test('el login real no bloquea usuarios con un contador pre-login paralelo', () => {
   assert.match(authAttemptSource, /login-attempt:v3/);
-  assert.match(authAttemptSource, /ip: 120, endpoint: 30, composite: 30/);
   assert.match(authAttemptSource, /ENABLE_LOGIN_ATTEMPT_RATE_LIMIT = true/);
+  assert.doesNotMatch(marketingAuthSource, /fetch\('\/api\/auth\/login-attempt'/);
+  assert.match(marketingAuthSource, /Supabase Auth is the source of truth/);
 });
 
 test('producción redirige aliases vercel al dominio canónico', () => {

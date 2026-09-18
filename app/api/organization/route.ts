@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
+import { getSupabaseServer } from '@/lib/supabase/server';
 import { tenantErrorResponse } from '@/lib/tenant';
 import { assertOrganizationResource, branchIdsFrom, filterOrganizationMembers, organizationName, organizationParentId, safeCode, type OrganizationResource } from '@/lib/organization';
 import { countActiveResource, createOrganizationResource, findResource, getOrganization, updateOrganizationResource } from '@/lib/repositories/organization-repository';
@@ -50,7 +51,15 @@ export async function POST(request: NextRequest) {
     const data: Record<string, unknown> = resource === 'branches'
       ? { name, code, active: true, timezone: text(body.timezone, 50) || 'America/Managua' }
       : { branch_id: branchId, name, code, active: true };
-    const item = await createOrganizationResource(context.tenantId, resource, data);
+    let item: Record<string, unknown>;
+    if (resource === 'branches') {
+      const provisioned = await getSupabaseServer().rpc('create_branch_with_resources', { target_tenant_id: context.tenantId, target_code: code, target_name: name, target_timezone: String(data.timezone) });
+      if (provisioned.error) throw new Error(provisioned.error.message);
+      const result = (provisioned.data || {}) as Record<string, unknown>;
+      item = { id: result.branchId, supabaseId: result.branchId, name, code, timezone: data.timezone, active: true, resources: result.resources };
+    } else {
+      item = await createOrganizationResource(context.tenantId, resource, data) as Record<string, unknown>;
+    }
     return NextResponse.json({ ok: true, resource, item }, { status: 201 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '';

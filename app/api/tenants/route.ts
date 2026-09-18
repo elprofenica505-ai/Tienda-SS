@@ -53,7 +53,8 @@ export async function POST(request: NextRequest) {
     if (created.error || !created.data.user) throw new Error(`SUPABASE_AUTH_CREATE_FAILED: ${created.error?.message || 'No se pudo crear el usuario.'}`);
     createdUserId = created.data.user.id;
 
-    const onboarding = await supabase.rpc('create_initial_tenant', {
+    // provision_initial_tenant reemplaza create_initial_tenant con aprovisionamiento atómico.
+    const onboarding = await supabase.rpc('provision_initial_tenant', {
       target_auth_user_id: created.data.user.id,
       target_email: email,
       target_display_name: ownerName,

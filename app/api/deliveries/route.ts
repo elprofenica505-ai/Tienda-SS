@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await requireTenantPermission(request, 'sales', 'create');
+    let context = await requireTenantPermission(request, 'sales', 'view');
+    if (context.role !== 'chofer') context = await requireTenantPermission(request, 'sales', 'create');
     if (!deliveryRoles.includes(context.role)) return NextResponse.json({ error: 'Tu rol no puede crear entregas.' }, { status: 403 });
     const body = await request.json();
     const saleId = text(body.saleId, 128);
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const context = await requireTenantPermission(request, 'sales', 'edit');
+    const context = await requireTenantPermission(request, 'sales', 'view');
     const body = await request.json();
     const id = text(body.id, 128);
     const status = body.status === 'delivered' ? 'delivered' : body.status === 'pending' ? 'pending' : '';
@@ -69,8 +70,14 @@ export async function PATCH(request: NextRequest) {
     const current = await getSupabaseServer().from('deliveries').select('id,branch_id,driver_id,status').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) throw new Error('DELIVERY_NOT_FOUND');
-    assertBranchAccess(context, await branchScopeId(context.tenantId, current.data.branch_id));
-    if (context.role === 'chofer' && current.data.driver_id !== context.uid) throw new Error('DELIVERY_OUT_OF_SCOPE');
+    if (context.role !== 'chofer') {
+      if (!['owner', 'admin', 'gerente', 'jefe'].includes(context.role)) {
+        const permissionContext = await requireTenantPermission(request, 'sales', 'edit');
+        assertBranchAccess(permissionContext, await branchScopeId(context.tenantId, current.data.branch_id));
+      }
+    } else {
+      if (current.data.driver_id !== context.uid) throw new Error('DELIVERY_OUT_OF_SCOPE');
+    }
     const result = await getSupabaseServer().rpc('update_delivery_status', { target_tenant_id: context.tenantId, target_delivery_id: id, target_status: status, target_user_id: context.uid });
     if (result.error) throw new Error(result.error.message);
     const data = result.data as Record<string, unknown>;

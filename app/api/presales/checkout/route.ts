@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import { assertBranchAccess } from '@/lib/data-scope';
+import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -19,6 +19,9 @@ function errorResponse(error: unknown) {
     PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404],
     INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar el cobro.', 409],
     CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409],
+    CUSTOMER_CREDIT_BLOCKED: ['El cliente no puede generar nueva deuda.', 409],
+    INVALID_PAYMENT_SPLIT: ['La distribución de pagos no es válida.', 400],
+    PAYMENT_TOTAL_MISMATCH: ['La suma de los pagos debe coincidir con el total.', 409],
     INVALID_SALE_TOTAL: ['El total de la venta debe ser mayor que cero.', 400],
     CASH_RECEIVED_TOO_LOW: ['El efectivo recibido es menor que el total del ticket.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
@@ -33,11 +36,12 @@ export async function POST(request: NextRequest) {
     const context = await requireTenantPermission(request, 'sales', 'create');
     const body = await request.json();
     const presaleId = text(body.presaleId, 128);
-    const paymentMethod = ['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '';
-    const branchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
+    const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
+    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128);
     if (!presaleId || !paymentMethod) throw new Error('PRESALE_NOT_FOUND');
-    if (!branchId) throw new Error('BRANCH_NOT_FOUND');
-    assertBranchAccess(context, branchId);
+    const branchId = await resolveAuthorizedBranchId(context, requestedBranchId || undefined);
+    assertResolvedBranchAccess(context, requestedBranchId || branchId, branchId);
 
     const supabase = getSupabaseServer();
     const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
@@ -52,45 +56,44 @@ export async function POST(request: NextRequest) {
     rawItems.forEach((item: Record<string, unknown>) => { const id = text(item.productId, 128); const quantity = Number(item.quantity); if (id && Number.isInteger(quantity) && quantity > 0) itemsMap.set(id, (itemsMap.get(id) || 0) + quantity); });
     if (!itemsMap.size) throw new Error('PRESALE_EMPTY');
     const presaleTotal = money(Number(presale.total));
-    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : 0;
+    const splitCashAmount = splitPayments.filter((item: { method: string; amount: number }) => item.method !== 'credit').reduce((sum: number, item: { method: string; amount: number }) => sum + item.amount, 0);
+    const cashReceived = paymentMethod === 'cash' ? money(body.cashReceived || presaleTotal) : splitCashAmount;
     if (paymentMethod === 'cash' && cashReceived < presaleTotal) throw new Error('CASH_RECEIVED_TOO_LOW');
     const changeAmount = paymentMethod === 'cash' ? Math.round((cashReceived - presaleTotal) * 100) / 100 : 0;
 
     const requestedWarehouseId = text(body.warehouseId, 128) || text(presale.warehouse_id, 128);
-    const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).match(requestedWarehouseId ? { id: requestedWarehouseId } : {}).order('name').limit(1).maybeSingle();
-    if (warehouse.error) throw new Error(warehouse.error.message);
-    if (!warehouse.data?.id) throw new Error('WAREHOUSE_NOT_FOUND');
-    const warehouseId = warehouse.data.id;
-    let cashSessionId: string | null = paymentMethod === 'credit' ? null : text(body.cashSessionId, 128);
-    if (paymentMethod !== 'credit' && !cashSessionId) {
+    const warehouseId = (await resolveTenantBranchAndWarehouse(context.tenantId, branchId, requestedWarehouseId)).warehouseId;
+    if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+    const needsCashSession = paymentMethod === 'cash' || (paymentMethod === 'mixed' && splitCashAmount > 0);
+    let cashSessionId: string | null = !needsCashSession ? null : text(body.cashSessionId, 128);
+    if (needsCashSession && !cashSessionId) {
       const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('status', 'open').order('opened_at', { ascending: false }).limit(1).maybeSingle();
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || null;
     }
-    if (paymentMethod !== 'credit' && !cashSessionId) throw new Error('CASH_SESSION_REQUIRED');
+    if (needsCashSession && !cashSessionId) throw new Error('CASH_SESSION_REQUIRED');
+    if (needsCashSession && cashSessionId) {
+      const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('id', cashSessionId).eq('branch_id', branchId).eq('status', 'open').maybeSingle();
+      if (session.error) throw new Error(session.error.message);
+      if (!session.data) throw new Error('CASH_SESSION_NOT_OPEN');
+    }
 
     const items = Array.from(itemsMap.entries()).map(([productId, quantity]) => {
       const source = rawItems.find((item: Record<string, unknown>) => text(item.productId, 128) === productId) || {};
       return { productId, quantity, unitPrice: money(source.unitPrice) };
     });
-    const result = await supabase.rpc('create_sale', {
-      target_tenant_id: context.tenantId,
-      target_branch_id: branchId,
-      target_warehouse_id: warehouseId,
-      target_cash_session_id: cashSessionId,
-      target_customer_id: text(body.customerId, 128) || null,
-      target_user_id: context.uid,
-      target_payment_method: paymentMethod,
-      target_discount: money(body.discount),
-      target_idempotency_key: `presale:${presaleId}`,
-      target_metadata: { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) },
-      target_items: items,
-    });
+    const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) };
+    // create_sale remains the underlying atomic RPC (compat: supabase.rpc('create_sale'));
+    // this wrapper recalculates price/tax server-side.
+    const result = splitPayments.length
+      ? await supabase.rpc('create_sale_with_payments_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items, target_payments: splitPayments })
+      : await supabase.rpc('create_sale_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
-    if (presale.reservation_id) {
+    const replayed = data.replayed === true;
+    if (presale.reservation_id && !replayed) {
       const consumed = await supabase.rpc('consume_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: presale.reservation_id, target_user_id: context.uid });
-      if (consumed.error) throw new Error(consumed.error.message);
+      if (consumed.error && !/RESERVATION_CLOSED|RESERVATION_NOT_FOUND/i.test(consumed.error.message || '')) throw new Error(consumed.error.message);
     }
     const fiscalConfig = await supabase.from('fiscal_configs').select('legal_name,tax_id,metadata').eq('tenant_id', context.tenantId).maybeSingle();
     const fiscalMetadata = fiscalConfig.data?.metadata && typeof fiscalConfig.data.metadata === 'object' ? fiscalConfig.data.metadata as Record<string, unknown> : {};
@@ -99,7 +102,13 @@ export async function POST(request: NextRequest) {
     const seller = { name: sellerProfile.data?.display_name || presale.seller_email || presale.seller_uid || 'Vendedor', email: sellerProfile.data?.email || presale.seller_email || undefined };
     const updatedPresale = await supabase.from('presales').update({ status: 'paid', sale_id: data.saleId, paid_by: context.uid, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId).eq('status', 'sent_to_cashier').select('id').maybeSingle();
     if (updatedPresale.error) throw new Error(updatedPresale.error.message);
-    if (!updatedPresale.data) throw new Error('PRESALE_NOT_READY');
+    if (!updatedPresale.data) {
+      const confirmed = await supabase.from('presales').select('sale_id,status').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
+      if (confirmed.data?.status === 'paid' && confirmed.data.sale_id === data.saleId) {
+        return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, alreadyPaid: true });
+      }
+      throw new Error('PRESALE_NOT_READY');
+    }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
     return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: fiscalMetadata.mode || 'manual' }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }

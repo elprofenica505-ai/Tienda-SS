@@ -81,11 +81,11 @@ export async function findTenantsForAuthUserId(authUserId: string) {
   const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return [];
-  const memberships = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,member_branches(branch_id,branches(legacy_firestore_id)),tenants(id,legacy_firestore_id,slug,name,status,timezone,currency,plan,onboarding_completed,created_at,updated_at)').eq('profile_id', profile.data.id).eq('status', 'active');
+  const memberships = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,member_branches(branch_id,branches(legacy_firestore_id)),tenants(id,legacy_firestore_id,slug,name,status,platform_status,timezone,currency,plan,onboarding_completed,created_at,updated_at)').eq('profile_id', profile.data.id).eq('status', 'active');
   if (memberships.error) fail(memberships.error);
   return (memberships.data || []).filter((row) => {
     const tenant = row.tenants as unknown as OrganizationRow | null;
-    return tenant && tenant.status === 'active';
+    return tenant && tenant.status === 'active' && tenant.platform_status !== 'suspended';
   }).map((row) => ({
     tenant: mapTenant(row.tenants as unknown as OrganizationRow),
     member: mapMember(row as OrganizationRow, profile.data as OrganizationRow, ((row.member_branches as unknown as Array<{ branch_id: string; branches?: OrganizationRow | OrganizationRow[] }> | undefined) || []).map((item) => { const branch = Array.isArray(item.branches) ? item.branches[0] : item.branches; return String(branch?.legacy_firestore_id || item.branch_id); })),
@@ -105,9 +105,9 @@ export async function findMembership(tenantId: string, authUserId: string) {
   const profile = await supabase.from('profiles').select('id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at').eq('auth_user_id', authUserId).maybeSingle();
   if (profile.error) fail(profile.error);
   if (!profile.data) return null;
-  const tenant = await supabase.from('tenants').select('id,legacy_firestore_id,status,subscription_status').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
+  const tenant = await supabase.from('tenants').select('id,legacy_firestore_id,status,platform_status,subscription_status').or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`).maybeSingle();
   if (tenant.error) fail(tenant.error);
-  if (!tenant.data || tenant.data.status !== 'active') return null;
+  if (!tenant.data || tenant.data.status !== 'active' || tenant.data.platform_status === 'suspended') return null;
   const member = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('profile_id', profile.data.id).eq('status', 'active').maybeSingle();
   if (member.error) fail(member.error);
   if (!member.data) return null;
@@ -185,13 +185,17 @@ export async function upsertMemberBranches(tenantId: string, authUserId: string,
   const membership = await findMembership(tenantId, authUserId);
   if (!membership) throw new Error('FORBIDDEN');
   const supabase = getSupabaseServer();
-  const branchRows = await supabase.from('branches').select('id, legacy_firestore_id').eq('tenant_id', membership.tenant.id).in('legacy_firestore_id', branchIds);
-  if (branchRows.error) fail(branchRows.error);
-  if ((branchRows.data || []).length !== branchIds.length) throw new Error('BRANCH_NOT_FOUND');
+  const resolvedBranches: Array<{ id: string; legacy_firestore_id?: string | null }> = [];
+  for (const requestedId of branchIds) {
+    const branch = await supabase.from('branches').select('id,legacy_firestore_id').eq('tenant_id', membership.tenant.id).or(`id.eq.${requestedId},legacy_firestore_id.eq.${requestedId}`).eq('active', true).maybeSingle();
+    if (branch.error) fail(branch.error);
+    if (!branch.data) throw new Error('BRANCH_NOT_FOUND');
+    resolvedBranches.push(branch.data);
+  }
   const clear = await supabase.from('member_branches').delete().eq('tenant_id', membership.tenant.id).eq('member_id', membership.member.id);
   if (clear.error) fail(clear.error);
-  if (branchRows.data?.length) {
-    const insert = await supabase.from('member_branches').insert(branchRows.data.map((branch) => ({ tenant_id: membership.tenant.id, member_id: membership.member.id, branch_id: branch.id })));
+  if (resolvedBranches.length) {
+    const insert = await supabase.from('member_branches').insert(resolvedBranches.map((branch) => ({ tenant_id: membership.tenant.id, member_id: membership.member.id, branch_id: branch.id })));
     if (insert.error) fail(insert.error);
   }
   return branchIds;

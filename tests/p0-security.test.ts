@@ -3,7 +3,7 @@ import test from 'node:test';
 import { NextRequest } from 'next/server';
 import { POST as loginAttempt } from '@/app/api/auth/login-attempt/route';
 import { POST as tenantSignup } from '@/app/api/tenants/route';
-import { superadminErrorResponse } from '@/lib/superadmin';
+import { hasSuperadminAccess, superadminErrorResponse } from '@/lib/superadmin';
 import { tenantErrorResponse } from '@/lib/tenant';
 
 function request(path: string, body: unknown) {
@@ -39,4 +39,9 @@ test('errores públicos no filtran mensajes de proveedores ni secretos', () => {
   assert.equal(superadminError.status, 500);
   assert.doesNotMatch(JSON.stringify(tenantError.body), /private-value|SERVICE_ACCOUNT_KEY/);
   assert.doesNotMatch(JSON.stringify(superadminError.body), /private-value|stripe_secret_key/);
+});
+
+test('user_metadata no concede acceso de superadministrador', () => {
+  assert.equal(hasSuperadminAccess({ id: 'regular-user', user_metadata: { superadmin: true } }), false);
+  assert.equal(hasSuperadminAccess({ id: 'regular-user', app_metadata: { superadmin: true }, user_metadata: { superadmin: false } }), true);
 });

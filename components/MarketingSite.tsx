@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { requestSupabasePasswordRecovery, resendSupabaseVerification, sendSupabaseVerification, signInWithSupabase, signOutSupabase } from '@/lib/supabase/auth';
 
@@ -106,6 +106,7 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
   const [website, setWebsite] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const submitLock = useRef(false);
 
   async function resetPassword() {
     if (!email.trim()) {
@@ -126,6 +127,8 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     setMessage('');
     setLoading(true);
     try {
@@ -136,17 +139,10 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
         await resendSupabaseVerification(email);
         setMessage('Cuenta creada. Te enviamos un correo de confirmación. Revisa también Spam o Promociones.');
       } else {
-        const attemptResponse = await fetch('/api/auth/login-attempt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        });
-        if (!attemptResponse.ok) {
-          const attemptData = await attemptResponse.json().catch(() => ({}));
-          const retryAfter = Number(attemptResponse.headers.get('Retry-After') || 0);
-          const waitMessage = retryAfter > 0 ? ` Espera aproximadamente ${Math.ceil(retryAfter / 60)} minuto(s) antes de volver a intentarlo.` : '';
-          throw new Error(`${attemptData.error || 'Demasiados intentos. Intenta de nuevo más tarde.'}${waitMessage}`);
-        }
+        // Supabase Auth is the source of truth for credential protection. Do not
+        // put a separate preflight counter in front of valid users: it cannot
+        // distinguish a successful login from a failed one and caused false
+        // “demasiados intentos” lockouts after deploys or shared IPs.
         const signedInUser = await signInWithSupabase(email.trim(), password);
         if (!signedInUser.email_confirmed_at) {
           await sendSupabaseVerification(signedInUser);
@@ -167,7 +163,7 @@ function AuthCard({ mode, onNavigate }: { mode: 'login' | 'register'; onNavigate
       } else {
         setMessage(errorMessage);
       }
-    } finally { setLoading(false); }
+    } finally { submitLock.current = false; setLoading(false); }
   }
 
   return <main className="auth-page"><div className="auth-orb orb-left" /><div className="auth-orb orb-right" /><nav className="auth-nav page-container"><button className="brand-button" onClick={() => onNavigate('home')}><Logo /></button><button className="back-link" onClick={() => onNavigate('home')}>← Volver al inicio</button></nav><div className="auth-layout page-container"><div className="auth-pitch"><div className="eyebrow">{isRegister ? 'Empieza con claridad' : 'Bienvenido de vuelta'}</div><h1>{isRegister ? <>Construye un negocio<br /><em>que avance.</em></> : <>Todo tu negocio.<br /><em>En control.</em></>}</h1><p>{isRegister ? 'Crea tu espacio de trabajo y descubre una forma más simple de operar, medir y crecer.' : 'Accede a tu espacio de trabajo y continúa donde lo dejaste.'}</p><div className="auth-benefits"><span>✦ Multiempresa desde el inicio</span><span>✦ Datos aislados y seguros</span><span>✦ Sin tarjeta de crédito</span></div></div><div className="auth-card"><div className="auth-card-top"><span className="eyebrow">{isRegister ? 'Crear espacio' : 'Acceder'}</span><h2>{isRegister ? 'Tu operación empieza aquí.' : 'Hola de nuevo.'}</h2><p>{isRegister ? 'Configura tu empresa en menos de dos minutos.' : 'Ingresa tus datos para continuar.'}</p></div><form onSubmit={submit}>{isRegister && <><label>Nombre de la empresa<input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Ej. Grupo Horizonte" required minLength={2} /></label><label>Tu nombre<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Carlos Sequeira" required minLength={2} /></label><input aria-hidden="true" tabIndex={-1} autoComplete="off" value={website} onChange={(event) => setWebsite(event.target.value)} style={{ display: 'none' }} /></>}<label>Correo electrónico<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><label>Contraseña<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 8 caracteres" required minLength={8} /></label>{!isRegister && <div className="form-helper"><label className="checkbox-label"><input type="checkbox" /> Recordarme</label><button type="button" className="text-link" onClick={() => void resetPassword()} disabled={loading}>¿Olvidaste tu contraseña?</button></div>}{message && <div className={`form-message ${message.includes('creada') ? 'success' : ''}`}>{message}</div>}<button className="button button-large auth-submit" disabled={loading}>{loading ? 'Procesando...' : isRegister ? 'Crear mi empresa ↗' : 'Iniciar sesión ↗'}</button></form><div className="auth-switch">{isRegister ? '¿Ya tienes una cuenta?' : '¿Todavía no tienes un espacio?'} <button onClick={() => onNavigate(isRegister ? 'login' : 'register')}>{isRegister ? 'Inicia sesión' : 'Crea tu empresa'}</button></div></div></div></main>;

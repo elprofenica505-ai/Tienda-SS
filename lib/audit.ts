@@ -36,13 +36,7 @@ function uuidOrNull(value: string | undefined): string | null {
 
 export async function writeImmutableAudit(input: AuditInput): Promise<string> {
   const supabase = getSupabaseServer();
-  const previous = await supabase.from('audit_logs').select('metadata, created_at').eq('tenant_id', input.tenantId).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (previous.error) throw new Error(previous.error.message);
-  const previousMetadata = previous.data?.metadata && typeof previous.data.metadata === 'object' ? previous.data.metadata as Record<string, unknown> : {};
-  const previousHash = typeof previousMetadata.hash === 'string' ? previousMetadata.hash : 'GENESIS';
-  const sequence = typeof previousMetadata.sequence === 'number' ? previousMetadata.sequence + 1 : 1;
   const payload = {
-    sequence,
     actorUid: input.actor?.uid || null,
     actorRole: input.actor?.role || null,
     tenantId: input.tenantId,
@@ -56,19 +50,19 @@ export async function writeImmutableAudit(input: AuditInput): Promise<string> {
     result: input.result,
     metadata: input.metadata || {},
     timestamp: new Date().toISOString(),
-    previousHash,
   };
-  const hash = digest(payload);
-  const result = await supabase.from('audit_logs').insert({
-    tenant_id: input.tenantId,
-    actor_id: input.actor?.uid || null,
-    action: input.action,
-    resource_type: input.entity,
-    resource_id: uuidOrNull(input.entityId),
-    metadata: { ...input.metadata, audit: payload, hash, sequence },
-  }).select('id').single();
+  const result = await supabase.rpc('append_audit_log', {
+    target_tenant_id: input.tenantId,
+    target_actor_id: uuidOrNull(input.actor?.uid),
+    target_action: input.action,
+    target_resource_type: input.entity,
+    target_resource_id: uuidOrNull(input.entityId),
+    target_metadata: input.metadata || {},
+    target_request_id: input.request?.requestId || null,
+    target_payload: payload,
+  });
   if (result.error) throw new Error(result.error.message);
-  return String(result.data.id);
+  return String(result.data);
 }
 
 export function auditIntegrityHash(payload: unknown): string {
