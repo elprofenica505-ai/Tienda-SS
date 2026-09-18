@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
     const saleId = text(body.saleId, 128);
     const payment = amount(body.amount);
     const method = ['cash', 'card', 'transfer', 'other'].includes(body.paymentMethod) ? body.paymentMethod : '';
+    const idempotencyKey = text(request.headers.get('idempotency-key'), 160) || text(body.idempotencyKey, 160);
+    if (!idempotencyKey) return NextResponse.json({ error: 'La llave de idempotencia es obligatoria para abonos.' }, { status: 400 });
     if ((!saleId && !customerId) || payment <= 0 || !method) return NextResponse.json({ error: 'Cliente o venta, monto y método de pago son obligatorios.' }, { status: 400 });
     const supabase = getSupabaseServer();
     if (customerId) {
@@ -47,7 +49,7 @@ export async function POST(request: NextRequest) {
         if (session.error) throw new Error(session.error.message);
         cashSessionId = session.data?.id || '';
       }
-      const result = await supabase.rpc('register_receivable_payment', {
+      const result = await supabase.rpc('register_receivable_payment_idempotent', {
         target_tenant_id: context.tenantId,
         target_customer_id: customerId,
         target_amount: payment,
@@ -56,6 +58,7 @@ export async function POST(request: NextRequest) {
         target_cash_session_id: cashSessionId || null,
         target_user_id: context.uid,
         target_note: text(body.notes, 300),
+        target_idempotency_key: idempotencyKey,
       });
       if (result.error) throw new Error(result.error.message);
       const data = result.data || {};
@@ -71,7 +74,7 @@ export async function POST(request: NextRequest) {
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || '';
     }
-    const result = await supabase.rpc('record_receivable_payment', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_payment_method: method, target_amount: payment, target_notes: text(body.notes, 300), target_cash_session_id: cashSessionId || null });
+    const result = await supabase.rpc('record_receivable_payment_idempotent', { target_tenant_id: context.tenantId, target_sale_id: saleId, target_user_id: context.uid, target_payment_method: method, target_amount: payment, target_notes: text(body.notes, 300), target_cash_session_id: cashSessionId || null, target_idempotency_key: idempotencyKey });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'receivable.payment_created', entity: 'sale', entityId: saleId, after: data, result: 'success' });

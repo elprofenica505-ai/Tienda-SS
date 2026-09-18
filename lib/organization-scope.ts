@@ -45,3 +45,26 @@ export function assertResolvedBranchAccess(context: Pick<TenantContext, 'role' |
   if (admin.has(context.role)) return;
   if (!context.branchIds.includes(requestedId) && !context.branchIds.includes(resolvedId)) throw new Error('BRANCH_OUT_OF_SCOPE');
 }
+
+export async function resolveAuthorizedBranchId(context: Pick<TenantContext, 'tenantId' | 'role' | 'branchIds'>, requestedId?: string) {
+  const requested = safe(requestedId || '');
+  const admin = new Set(['owner', 'admin', 'gerente', 'jefe']);
+  if (requested) {
+    const resolved = await resolveTenantBranchId(context.tenantId, requested);
+    if (!resolved) throw new Error('BRANCH_NOT_FOUND');
+    assertResolvedBranchAccess(context, requested, resolved);
+    return resolved;
+  }
+  if (!admin.has(context.role) && context.branchIds.length === 1) {
+    const resolved = await resolveTenantBranchId(context.tenantId, context.branchIds[0]);
+    if (!resolved) throw new Error('BRANCH_NOT_FOUND');
+    return resolved;
+  }
+  if (admin.has(context.role)) {
+    const supabase = getSupabaseServer();
+    const result = await supabase.from('branches').select('id').eq('tenant_id', context.tenantId).eq('active', true).limit(2);
+    if (result.error) throw new Error(result.error.message);
+    if ((result.data || []).length === 1) return String(result.data[0].id);
+  }
+  throw new Error('BRANCH_REQUIRED');
+}

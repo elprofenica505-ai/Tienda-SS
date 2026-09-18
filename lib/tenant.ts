@@ -82,6 +82,7 @@ export function tenantErrorResponse(error: unknown) {
   if (code.startsWith('SUPABASE_') || code.includes('relation') || code.includes('schema cache')) return { status: 503, body: { error: 'La conexión del servidor con Supabase no está configurada correctamente.' } };
   if (code === 'UNAUTHENTICATED') return { status: 401, body: { error: 'Autenticación requerida.' } };
   if (code === 'TENANT_REQUIRED') return { status: 400, body: { error: 'Falta identificar la empresa.' } };
+  if (code === 'BRANCH_REQUIRED') return { status: 400, body: { error: 'Debes indicar una sucursal autorizada cuando tienes más de una disponible.', code } };
   if (code === 'FORBIDDEN') return { status: 403, body: { error: 'No tienes permiso para esta empresa.' } };
   if (code === 'BRANCH_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa sucursal.', code } };
   if (code === 'BRANCH_NOT_FOUND') return { status: 404, body: { error: 'La sucursal no existe o no está activa.', code } };

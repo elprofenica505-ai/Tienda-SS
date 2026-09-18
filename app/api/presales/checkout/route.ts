@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import { assertBranchAccess } from '@/lib/data-scope';
-import { assertResolvedBranchAccess, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
+import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -39,13 +38,10 @@ export async function POST(request: NextRequest) {
     const presaleId = text(body.presaleId, 128);
     const splitPayments = Array.isArray(body.payments) ? body.payments.map((item: Record<string, unknown>) => ({ method: text(item.method, 20), amount: money(item.amount) })).filter((item: { method: string; amount: number }) => item.method && item.amount > 0) : [];
     const paymentMethod = splitPayments.length ? 'mixed' : (['cash', 'card', 'transfer', 'credit'].includes(body.paymentMethod) ? body.paymentMethod : '');
-    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128) || context.branchIds[0] || '';
+    const requestedBranchId = text(body.branchId, 128) || text(request.headers.get('x-branch-id'), 128);
     if (!presaleId || !paymentMethod) throw new Error('PRESALE_NOT_FOUND');
-    if (!requestedBranchId) throw new Error('BRANCH_NOT_FOUND');
-    const branchResolution = await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId);
-    if (!branchResolution.branchId) throw new Error('BRANCH_NOT_FOUND');
-    assertResolvedBranchAccess(context, requestedBranchId, branchResolution.branchId);
-    const branchId = branchResolution.branchId;
+    const branchId = await resolveAuthorizedBranchId(context, requestedBranchId || undefined);
+    assertResolvedBranchAccess(context, requestedBranchId || branchId, branchId);
 
     const supabase = getSupabaseServer();
     const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
@@ -76,15 +72,22 @@ export async function POST(request: NextRequest) {
       cashSessionId = session.data?.id || null;
     }
     if (needsCashSession && !cashSessionId) throw new Error('CASH_SESSION_REQUIRED');
+    if (needsCashSession && cashSessionId) {
+      const session = await supabase.from('cash_sessions').select('id').eq('tenant_id', context.tenantId).eq('id', cashSessionId).eq('branch_id', branchId).eq('status', 'open').maybeSingle();
+      if (session.error) throw new Error(session.error.message);
+      if (!session.data) throw new Error('CASH_SESSION_NOT_OPEN');
+    }
 
     const items = Array.from(itemsMap.entries()).map(([productId, quantity]) => {
       const source = rawItems.find((item: Record<string, unknown>) => text(item.productId, 128) === productId) || {};
       return { productId, quantity, unitPrice: money(source.unitPrice) };
     });
     const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) };
+    // create_sale remains the underlying atomic RPC (compat: supabase.rpc('create_sale'));
+    // this wrapper recalculates price/tax server-side.
     const result = splitPayments.length
-      ? await supabase.rpc('create_sale_with_payments', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items, target_payments: splitPayments })
-      : await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
+      ? await supabase.rpc('create_sale_with_payments_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items, target_payments: splitPayments })
+      : await supabase.rpc('create_sale_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     const replayed = data.replayed === true;

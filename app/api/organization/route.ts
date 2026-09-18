@@ -51,20 +51,14 @@ export async function POST(request: NextRequest) {
     const data: Record<string, unknown> = resource === 'branches'
       ? { name, code, active: true, timezone: text(body.timezone, 50) || 'America/Managua' }
       : { branch_id: branchId, name, code, active: true };
-    const item = await createOrganizationResource(context.tenantId, resource, data);
+    let item: Record<string, unknown>;
     if (resource === 'branches') {
-      const branchDbId = String((item as Record<string, unknown>).supabaseId || (item as Record<string, unknown>).id);
-      const supabase = getSupabaseServer();
-      const warehouse = await supabase.from('warehouses').insert({ tenant_id: context.tenantId, branch_id: branchDbId, code: `${code}-ALM`, name: `Almacén ${name}`, active: true }).select('id').single();
-      if (warehouse.error) throw new Error(warehouse.error.message);
-      const register = await supabase.from('cash_registers').insert({ tenant_id: context.tenantId, branch_id: branchDbId, code: `${code}-CAJA`, name: `Caja ${name}`, active: true }).select('id').single();
-      if (register.error) throw new Error(register.error.message);
-      const owner = await supabase.from('members').select('id').eq('tenant_id', context.tenantId).eq('role', 'owner').eq('status', 'active').limit(1).maybeSingle();
-      if (owner.error) throw new Error(owner.error.message);
-      if (owner.data) {
-        const assignment = await supabase.from('member_branches').upsert({ tenant_id: context.tenantId, member_id: owner.data.id, branch_id: branchDbId }, { onConflict: 'tenant_id,member_id,branch_id' });
-        if (assignment.error) throw new Error(assignment.error.message);
-      }
+      const provisioned = await getSupabaseServer().rpc('create_branch_with_resources', { target_tenant_id: context.tenantId, target_code: code, target_name: name, target_timezone: String(data.timezone) });
+      if (provisioned.error) throw new Error(provisioned.error.message);
+      const result = (provisioned.data || {}) as Record<string, unknown>;
+      item = { id: result.branchId, supabaseId: result.branchId, name, code, timezone: data.timezone, active: true, resources: result.resources };
+    } else {
+      item = await createOrganizationResource(context.tenantId, resource, data) as Record<string, unknown>;
     }
     return NextResponse.json({ ok: true, resource, item }, { status: 201 });
   } catch (error: unknown) {

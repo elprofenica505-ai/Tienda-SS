@@ -3,6 +3,7 @@ import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
+import { resolveAuthorizedBranchId, resolveTenantWarehouseId } from '@/lib/organization-scope';
 
 export const runtime = 'nodejs';
 function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -86,18 +87,13 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseServer();
     let warehouseId = text(body.warehouseId, 120);
     if (!productId || !movementType || quantity <= 0) return NextResponse.json({ error: 'Producto, tipo y cantidad son obligatorios.' }, { status: 400 });
-    if (!warehouseId) {
-      const branchId = text(request.headers.get('x-branch-id'), 120) || context.branchIds[0] || '';
-      if (!branchId) throw new Error('WAREHOUSE_NOT_FOUND');
-      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('branch_id', branchId).eq('active', true).order('created_at').limit(1).maybeSingle();
-      if (warehouse.error) throw new Error(warehouse.error.message);
-      warehouseId = warehouse.data?.id || '';
-    }
+    const branchId = await resolveAuthorizedBranchId(context, request.headers.get('x-branch-id') || undefined);
+    if (!warehouseId) warehouseId = await resolveTenantWarehouseId(context.tenantId, branchId);
     if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
     const warehouse = await supabase.from('warehouses').select('id,branch_id').eq('tenant_id', context.tenantId).eq('id', warehouseId).eq('active', true).maybeSingle();
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data) throw new Error('WAREHOUSE_NOT_FOUND');
-    if (!['owner', 'admin', 'gerente', 'jefe'].includes(context.role) && !context.branchIds.includes(String(warehouse.data.branch_id))) throw new Error('BRANCH_OUT_OF_SCOPE');
+    if (String(warehouse.data.branch_id) !== branchId) throw new Error('BRANCH_OUT_OF_SCOPE');
     const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: movementType, target_quantity: quantity, target_reason: reason, target_user_id: context.uid });
     if (result.error) throw new Error(result.error.message);
     const row = Array.isArray(result.data) ? result.data[0] : result.data;

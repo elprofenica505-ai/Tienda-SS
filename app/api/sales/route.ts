@@ -106,9 +106,10 @@ export async function POST(request: NextRequest) {
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || null;
     }
+    // create_sale remains the underlying atomic RPC; the contract wrapper recalculates price/tax server-side.
     const result = splitPayments.length
-      ? await supabase.rpc('create_sale_with_payments', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items, target_payments: splitPayments })
-      : await supabase.rpc('create_sale', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
+      ? await supabase.rpc('create_sale_with_payments_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items, target_payments: splitPayments })
+      : await supabase.rpc('create_sale_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
     if (result.error) throw new Error(result.error.message);
     const data = result.data || {};
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
