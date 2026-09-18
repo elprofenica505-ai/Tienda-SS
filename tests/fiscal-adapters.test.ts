@@ -85,3 +85,20 @@ test('el checkout usa el endpoint configurado y el ticket respeta showBarcode', 
   assert.match(cashierPage, /receipt\.fiscal\?\.showBarcode !== false/);
   assert.match(cashierPage, /ticket-barcode/);
 });
+
+test('el checkout manual no llama proveedores y conserva la contingencia fiscal', () => {
+  assert.match(checkoutApi, /config\.mode !== 'manual'/);
+  assert.match(checkoutApi, /shouldEmitFiscal/);
+  assert.match(checkoutApi, /void adapter\.emit/);
+  assert.match(checkoutApi, /pendiente_envio_fiscal/);
+  assert.match(checkoutApi, /status: shouldEmitFiscal \? 'pendiente_envio_fiscal' : 'local'/);
+});
+
+test('el formulario de preventa tiene controles etiquetados y responsive', () => {
+  const presalesPage = readFileSync('app/workspace/presales/page.tsx', 'utf8');
+  const styles = readFileSync('app/globals.css', 'utf8');
+  for (const id of ['presale-customer', 'presale-payment', 'presale-document', 'presale-service-point', 'presale-notes', 'presale-evidence']) assert.match(presalesPage, new RegExp(id));
+  assert.match(presalesPage, /space-y-4/);
+  assert.match(styles, /\.presale-form/);
+  assert.match(styles, /@media\(max-width:720px\).*presale-field input/);
+});

@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     assertResolvedBranchAccess(context, requestedBranchId || branchId, branchId);
 
     const supabase = getSupabaseServer();
-    const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
+    const presaleResult = await supabase.from('presales').select('id,ticket_code,items,total,seller_uid,seller_email,status,sale_id,branch_id,warehouse_id,reservation_id,metadata').eq('tenant_id', context.tenantId).eq('id', presaleId).maybeSingle();
     if (presaleResult.error) throw new Error(presaleResult.error.message);
     if (!presaleResult.data) throw new Error('PRESALE_NOT_FOUND');
     const presale = presaleResult.data;
@@ -104,18 +104,24 @@ export async function POST(request: NextRequest) {
     const sellerProfile = presale.seller_uid ? await supabase.from('profiles').select('display_name,email').eq('auth_user_id', presale.seller_uid).maybeSingle() : { data: null };
     const seller = { name: sellerProfile.data?.display_name || presale.seller_email || presale.seller_uid || 'Vendedor', email: sellerProfile.data?.email || presale.seller_email || undefined };
     let fiscalEmission: FiscalEmissionResult = { status: 'not_requested', provider: config.provider };
-    if (config.mode !== 'manual') {
+    const shouldEmitFiscal = config.mode !== 'manual' && (config.provider === 'generic_api' || config.provider === 'dgi_nicaragua' || config.provider === 'custom');
+    if (shouldEmitFiscal) {
       const invoiceNumber = text(data.invoiceNumber || data.saleNumber || data.saleId, 80);
       const adapter = getFiscalAdapter(config.provider, config);
-      fiscalEmission = await adapter.emit({
+      fiscalEmission = { status: 'pending', provider: config.provider, message: 'Venta guardada; pendiente_envio_fiscal.' };
+      const fiscalRequest = {
         tenantId: context.tenantId,
         saleId: text(data.saleId, 128),
         invoiceNumber,
         fields: createFiscalSaleFields({ documentType: 'invoice', customerName: text(body.customerId, 128) ? 'Cliente registrado' : 'Cliente mostrador', customerRuc: '', customerAddress: '' }, Number(data.subtotal ?? data.total ?? 0), Number(data.discount ?? 0)),
         items: rawItems,
         config,
+      };
+      void adapter.emit(fiscalRequest).then(async (emission) => {
+        await supabase.from('presales').update({ metadata: { ...(presale.metadata && typeof presale.metadata === 'object' ? presale.metadata : {}), fiscalStatus: emission.status === 'rejected' ? 'pendiente_envio_fiscal' : emission.status, fiscalExternalId: emission.externalId || null, fiscalMessage: emission.message || null, fiscalUpdatedAt: new Date().toISOString() }, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId);
+      }).catch(async (error) => {
+        await supabase.from('presales').update({ metadata: { ...(presale.metadata && typeof presale.metadata === 'object' ? presale.metadata : {}), fiscalStatus: 'pendiente_envio_fiscal', fiscalMessage: error instanceof Error ? error.message : 'Proveedor fiscal no disponible.', fiscalUpdatedAt: new Date().toISOString() }, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId);
       });
-      if (fiscalEmission.status === 'rejected') throw new Error(`FISCAL_PROVIDER_REJECTED:${fiscalEmission.message || 'El proveedor rechazó la venta.'}`);
     }
     const updatedPresale = await supabase.from('presales').update({ status: 'paid', sale_id: data.saleId, paid_by: context.uid, paid_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', presaleId).eq('status', 'sent_to_cashier').select('id').maybeSingle();
     if (updatedPresale.error) throw new Error(updatedPresale.error.message);
@@ -127,6 +133,6 @@ export async function POST(request: NextRequest) {
       throw new Error('PRESALE_NOT_READY');
     }
     await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
-    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: config.mode, provider: config.provider, showBarcode: config.showBarcode !== false, emission: fiscalEmission }, alreadyPaid: false }, { status: 201 });
+    return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: config.mode, provider: config.provider, showBarcode: config.showBarcode !== false, status: shouldEmitFiscal ? 'pendiente_envio_fiscal' : 'local', emission: fiscalEmission }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
