@@ -20,6 +20,7 @@ function decodeSalesCursor(raw: string): SalesCursor {
 }
 function encodeSalesCursor(cursor: SalesCursor) { return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url'); }
 function failure(error: unknown) { const message = error instanceof Error ? error.message : ''; const known: Record<string, [string, number]> = { PRODUCT_NOT_FOUND: ['Uno de los productos ya no está disponible.', 404], CUSTOMER_NOT_FOUND: ['El cliente seleccionado no existe o está archivado.', 404], BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404], WAREHOUSE_NOT_FOUND: ['El almacén no existe o no está activo.', 404], CASH_SESSION_REQUIRED: ['Abre una sesión de caja antes de registrar cobros.', 409], CASH_SESSION_NOT_OPEN: ['La sesión de caja no está abierta.', 409], INSUFFICIENT_STOCK: ['No hay existencias suficientes para completar la venta.', 409], CREDIT_LIMIT_EXCEEDED: ['La venta supera el límite de crédito del cliente.', 409], INVALID_PAYMENT_METHOD: ['El método de pago no es válido.', 400], INVALID_SALE_ITEMS: ['La venta debe contener entre 1 y 50 productos.', 400], INVALID_SALE_QUANTITY: ['Las cantidades de la venta no son válidas.', 400] }; for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+function isMissingServerPricedRpc(error: unknown) { const message = error instanceof Error ? error.message : String(error || ''); return /function .*create_sale(_with_payments)?_server_priced.*does not exist|Could not find the function .*create_sale(_with_payments)?_server_priced|schema cache/i.test(message); }
 
 export async function GET(request: NextRequest) {
   try {
@@ -106,13 +107,25 @@ export async function POST(request: NextRequest) {
       if (session.error) throw new Error(session.error.message);
       cashSessionId = session.data?.id || null;
     }
-    // create_sale remains the underlying atomic RPC; the contract wrapper recalculates price/tax server-side.
+    // Both paths are transactional RPCs. The legacy fallback is used only when
+    // the server-priced compatibility migration has not reached this database.
+    const saleArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items };
     const result = splitPayments.length
-      ? await supabase.rpc('create_sale_with_payments_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items, target_payments: splitPayments })
-      : await supabase.rpc('create_sale_server_priced', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: customerId, target_user_id: context.uid, target_payment_method: paymentMethod, target_discount: money(body.discount), target_idempotency_key: text(request.headers.get('idempotency-key'), 160), target_metadata: metadata, target_items: items });
-    if (result.error) throw new Error(result.error.message);
-    const data = result.data || {};
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
+      ? await supabase.rpc('create_sale_with_payments_server_priced', { ...saleArgs, target_payments: splitPayments })
+      : await supabase.rpc('create_sale_server_priced', { ...saleArgs, target_payment_method: paymentMethod });
+    let saleResult = result;
+    if (result.error && isMissingServerPricedRpc(result.error)) {
+      saleResult = splitPayments.length
+        ? await supabase.rpc('create_sale_with_payments', { ...saleArgs, target_payments: splitPayments })
+        : await supabase.rpc('create_sale', { ...saleArgs, target_payment_method: paymentMethod });
+    }
+    if (saleResult.error) throw new Error(saleResult.error.message);
+    const data = saleResult.data || {};
+    try {
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: data.replayed ? 'sale.replayed' : 'sale.created', entity: 'sale', entityId: data.saleId, after: data, result: 'success' });
+    } catch (auditError) {
+      console.error('sale_audit_failed_after_commit', auditError);
+    }
     return NextResponse.json({ ok: true, ...data }, { status: data.replayed ? 200 : 201 });
   } catch (error: unknown) { return failure(error); }
 }
