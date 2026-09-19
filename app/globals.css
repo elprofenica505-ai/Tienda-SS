@@ -436,3 +436,27 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .members-main .members-list{grid-template-columns:1fr;gap:10px;align-content:start}
 .returns-layout{min-height:0;align-items:start;gap:20px}
 @media(max-width:850px){.contacts-main .contacts-grid{grid-template-columns:1fr}.returns-layout{gap:16px}}
+/* Caja: preventas legibles, con detalle de producto y acciones separadas. */
+.pending-presale{align-items:stretch;flex-wrap:wrap;gap:16px}
+.pending-presale-main{display:grid;flex:1 1 420px;gap:6px;min-width:0}
+.pending-presale-main>small{color:var(--muted)}
+.pending-presale-items,.presale-detail-items{display:grid;gap:8px;margin-top:6px}
+.pending-presale-item,.presale-detail-item{align-items:center;display:flex;gap:10px;min-width:0}
+.pending-presale-item img,.presale-detail-item img,.pending-presale-placeholder{background:var(--soft);border:1px solid var(--line);border-radius:7px;flex:0 0 auto;height:42px;object-fit:cover;width:42px}
+.pending-presale-placeholder{align-items:center;color:var(--muted);display:inline-flex;font-size:22px;justify-content:center}
+.pending-presale-item>span:not(.pending-presale-placeholder),.presale-detail-item>div{display:grid;gap:2px;min-width:0}
+.pending-presale-item b,.presale-detail-item b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pending-presale-item small,.presale-detail-item small{color:var(--muted);font-size:11px}
+.pending-presale-actions{align-items:center;display:flex;flex:0 1 auto;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.pending-presale-actions .button{min-height:36px;padding:8px 13px;white-space:nowrap}
+.button-quiet{background:var(--soft);border:1px solid var(--line);color:var(--ink)}
+.button-danger{background:#fff1f0;border:1px solid #f0c7c3;color:#a4473e}
+.pending-presale-meta,.presale-detail-meta{color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:4px}
+.pending-presale-meta span,.presale-detail-meta span{font-size:11px}
+.cash-ticket-preview{display:grid;gap:14px}
+.presale-detail-header{align-items:center;display:flex;justify-content:space-between}
+.presale-detail-item{border-bottom:1px solid var(--line);padding:8px 0}
+.presale-detail-item img,.presale-detail-item .pending-presale-placeholder{height:58px;width:58px}
+.presale-detail-item>div{flex:1}
+.presale-detail-item>strong{margin-left:auto;white-space:nowrap}
+@media(max-width:720px){.pending-presale-actions{justify-content:stretch;width:100%}.pending-presale-actions .button{flex:1 1 30%}.pending-presale-item b{white-space:normal}}
