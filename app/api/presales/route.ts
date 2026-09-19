@@ -5,6 +5,7 @@ import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@
 import { assertBranchAccess } from '@/lib/data-scope';
 import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { reportError } from '@/lib/error-reporting';
 
 export const runtime = 'nodejs';
 const cashierRoles: TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'cajero'];
@@ -15,6 +16,9 @@ function ticketCode() { return `P-${new Date().toISOString().slice(0, 10).replac
 function pageCursor(value: unknown): { createdAt: string; id: string } | null { try { const parsed = JSON.parse(Buffer.from(text(value, 300), 'base64url').toString('utf8')); return typeof parsed.createdAt === 'string' && typeof parsed.id === 'string' ? parsed : null; } catch { return null; } }
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : '';
+  const normalized = message.toLowerCase();
+  if (normalized.includes('does not exist') || normalized.includes('undefined function') || normalized.includes('undefined column') || normalized.includes('pgrst202') || normalized.includes('pgrst204')) return NextResponse.json({ error: 'El esquema de Preventas o Inventario no está actualizado en Supabase.', code: 'DATABASE_MIGRATION_REQUIRED' }, { status: 503 });
+  if (normalized.includes('permission denied') || normalized.includes('42501')) return NextResponse.json({ error: 'Supabase rechazó la operación de Preventas por permisos de base de datos.', code: 'DATABASE_PERMISSION_DENIED' }, { status: 503 });
   const known: Record<string, [string, number]> = {
     INSUFFICIENT_WAREHOUSE_STOCK: ['No hay existencias suficientes en el almacén de la sucursal.', 409],
     RESERVATION_EMPTY: ['La preventa no contiene productos físicos que puedan reservarse.', 409],
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
     const last = docs.at(-1);
     const nextCursor = !code && rows.length > 20 && last ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url') : null;
     return NextResponse.json(code ? { ok: true, presale: serialize(rows[0], productById) } : { ok: true, presales: docs.map((row) => serialize(row, productById)), nextCursor }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) { return errorResponse(error); }
+  } catch (error: unknown) { reportError(error, { correlationId: request.headers.get('x-correlation-id') || 'unknown', tenantId: request.headers.get('x-tenant-id') || undefined, routePath: '/api/presales', method: request.method }); return errorResponse(error); }
 }
 
 export async function POST(request: NextRequest) {
@@ -138,6 +142,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: true, presaleId: inserted.data.id, ticketCode: inserted.data.ticket_code, status: inserted.data.status, total: inserted.data.total }, { status: 201 });
   } catch (error: unknown) {
+    reportError(error, { correlationId: request.headers.get('x-correlation-id') || 'unknown', tenantId: request.headers.get('x-tenant-id') || undefined, routePath: '/api/presales', method: request.method });
     if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos ya no está disponible.' }, { status: 404 });
     return errorResponse(error);
   }
