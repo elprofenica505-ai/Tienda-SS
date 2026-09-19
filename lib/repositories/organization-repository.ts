@@ -126,14 +126,15 @@ export async function getOrganization(tenantId: string) {
   if (tenant.error) fail(tenant.error);
   if (!tenant.data) throw new Error('TENANT_NOT_FOUND');
   const [branches, warehouses, cashRegisters, members] = await Promise.all([
-    supabase.from('branches').select('id,legacy_firestore_id,tenant_id,code,name,timezone,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
+    supabase.from('branches').select('id,legacy_firestore_id,tenant_id,code,name,timezone,active,created_at,updated_at').eq('tenant_id', tenant.data.id).order('name'),
     supabase.from('warehouses').select('id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
     supabase.from('cash_registers').select('id,legacy_firestore_id,tenant_id,branch_id,code,name,active,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('active', true).order('name'),
     supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at,profiles(id,legacy_firestore_id,auth_user_id,email,display_name,created_at,updated_at),member_branches(branch_id,branches(legacy_firestore_id))').eq('tenant_id', tenant.data.id).order('created_at'),
   ]);
   for (const result of [branches, warehouses, cashRegisters, members]) if (result.error) fail(result.error);
   return {
-    branches: (branches.data || []).map((row) => mapOrganizationRow('branches', row as OrganizationRow)),
+    branches: (branches.data || []).filter((row) => row.active !== false).map((row) => mapOrganizationRow('branches', row as OrganizationRow)),
+    archivedBranches: (branches.data || []).filter((row) => row.active === false).map((row) => mapOrganizationRow('branches', row as OrganizationRow)),
     warehouses: (warehouses.data || []).map((row) => mapOrganizationRow('warehouses', row as OrganizationRow)),
     cashRegisters: (cashRegisters.data || []).map((row) => mapOrganizationRow('cashRegisters', row as OrganizationRow)),
     members: (members.data || []).map((row) => {

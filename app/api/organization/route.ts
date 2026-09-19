@@ -22,9 +22,13 @@ export async function GET(request: NextRequest) {
     const visibleBranches = ['owner', 'admin', 'gerente', 'jefe'].includes(context.role)
       ? organization.branches
       : organization.branches.filter((branch) => context.branchIds.includes(String(branch.id)));
+    const visibleArchivedBranches = ['owner', 'admin', 'gerente', 'jefe'].includes(context.role)
+      ? organization.archivedBranches || []
+      : (organization.archivedBranches || []).filter((branch) => context.branchIds.includes(String(branch.id)));
     const branchSet = new Set(visibleBranches.map((branch) => String(branch.id)));
     return NextResponse.json({ ok: true, organization: {
       branches: visibleBranches,
+      archivedBranches: visibleArchivedBranches,
       warehouses: organization.warehouses.filter((item) => branchSet.has(String(item.branchId))),
       cashRegisters: organization.cashRegisters.filter((item) => branchSet.has(String(item.branchId))),
       members: filterOrganizationMembers(organization.members, context.role, context.branchIds),

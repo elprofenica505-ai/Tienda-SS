@@ -4,6 +4,7 @@ import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from
 import { requireTenantPermission, tenantErrorResponse, TenantRole } from '@/lib/tenant';
 import { assertPlanCapacity } from '@/lib/entitlement-guard';
 import { redactSensitiveFields } from '@/lib/data-scope';
+import { resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 
 export const runtime = 'nodejs';
 const productRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
@@ -30,6 +31,9 @@ export async function GET(request: NextRequest) {
     const context = await requireCatalogRead(request);
     const supabase = getSupabaseServer();
     const params = new URL(request.url).searchParams;
+    const requestedBranchId = request.headers.get('x-branch-id')?.trim() || '';
+    const resolvedScope = requestedBranchId ? await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId) : { branchId: '', warehouseId: '' };
+    if (requestedBranchId && !resolvedScope.branchId) throw new Error('BRANCH_NOT_FOUND');
     const includeArchived = params.get('includeArchived') === 'true';
     const pageSize = Math.min(25, parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE));
     const rawCursor = parseCursor(params.get('cursor'));
@@ -51,7 +55,7 @@ export async function GET(request: NextRequest) {
     const hasMore = products.length > pageSize;
     const page = products.slice(0, pageSize);
     const ids = page.map((item) => item.id);
-    const stocks = ids.length ? await supabase.from('inventory_stocks').select('product_id, quantity').eq('tenant_id', context.tenantId).in('product_id', ids) : { data: [], error: null };
+    const stocks = ids.length && resolvedScope.warehouseId ? await supabase.from('inventory_stocks').select('product_id, quantity').eq('tenant_id', context.tenantId).eq('warehouse_id', resolvedScope.warehouseId).in('product_id', ids) : { data: [], error: null };
     if (stocks.error) throw new Error(stocks.error.message);
     const stockByProduct = new Map<string, number>();
     for (const item of stocks.data || []) stockByProduct.set(item.product_id, (stockByProduct.get(item.product_id) || 0) + Number(item.quantity || 0));

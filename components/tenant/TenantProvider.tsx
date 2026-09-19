@@ -23,6 +23,7 @@ export type TenantBranch = { id: string; name: string; code: string; active: boo
 
 export type TenantOrganization = {
   branches: TenantBranch[];
+  archivedBranches?: TenantBranch[];
   warehouses: Array<{ id: string; branchId: string; name: string; code: string; active: boolean; type?: string }>;
   cashRegisters: Array<{ id: string; branchId: string; name: string; code: string; active: boolean }>;
   members: Array<{ uid: string; name?: string; email?: string; role?: string; branchIds?: string[]; status?: string }>;
@@ -113,7 +114,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       }
       const assigned = Array.isArray(selected.member.branchIds) ? selected.member.branchIds : [];
       const visibleBranches = ADMIN_ROLES.has(selected.member.role) ? nextOrganization.branches : nextOrganization.branches.filter((branch) => assigned.includes(branch.id));
-      const normalizedOrganization = { ...nextOrganization, branches: visibleBranches };
+      const normalizedOrganization = { ...nextOrganization, branches: visibleBranches, archivedBranches: nextOrganization.archivedBranches || [] };
       const storedBranch = window.localStorage.getItem(`${BRANCH_STORAGE_PREFIX}${selected.tenant.id}`);
       const nextBranch = visibleBranches.find((branch) => branch.id === storedBranch)?.id || visibleBranches[0]?.id || null;
       setTenant(selected.tenant); setMember(selected.member); setOrganization(normalizedOrganization); setActiveBranchIdState(nextBranch);
