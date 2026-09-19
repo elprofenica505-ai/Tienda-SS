@@ -9,6 +9,16 @@ export const runtime = 'nodejs';
 const productRoles: TenantRole[] = ['owner', 'admin', 'jefe', 'bodega'];
 const categoryRoles: TenantRole[] = ['owner', 'admin', 'jefe'];
 const MAX_CATEGORY_PAGE_SIZE = 100;
+async function requireCatalogRead(request: NextRequest) {
+  try {
+    return await requireTenantPermission(request, 'catalog', 'view');
+  } catch (error) {
+    // El flujo de venta/preventa necesita leer productos aunque una matriz
+    // personalizada no haya activado catalog.view para ese rol.
+    if (error instanceof Error && error.message === 'FORBIDDEN') return requireTenantPermission(request, 'sales', 'create');
+    throw error;
+  }
+}
 function cleanText(value: unknown, max = 120) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function cleanNumber(value: unknown, fallback = 0) { return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
 function mapCategory(row: Record<string, any>) { return { id: row.id, name: row.name, color: row.color || '#c7f57b', active: row.active, createdAt: row.created_at, updatedAt: row.updated_at }; }
@@ -17,7 +27,7 @@ function responseFor(error: unknown) { const response = tenantErrorResponse(erro
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantPermission(request, 'catalog', 'view');
+    const context = await requireCatalogRead(request);
     const supabase = getSupabaseServer();
     const params = new URL(request.url).searchParams;
     const includeArchived = params.get('includeArchived') === 'true';
