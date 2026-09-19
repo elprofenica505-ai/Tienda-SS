@@ -13,7 +13,19 @@ function text(value: unknown, max = 160) { return typeof value === 'string' ? va
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
 function ticketCode() { return `P-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomBytes(3).toString('hex').toUpperCase()}`; }
 function pageCursor(value: unknown): { createdAt: string; id: string } | null { try { const parsed = JSON.parse(Buffer.from(text(value, 300), 'base64url').toString('utf8')); return typeof parsed.createdAt === 'string' && typeof parsed.id === 'string' ? parsed : null; } catch { return null; } }
-function errorResponse(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+function errorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  const known: Record<string, [string, number]> = {
+    INSUFFICIENT_WAREHOUSE_STOCK: ['No hay existencias suficientes en el almacén de la sucursal.', 409],
+    RESERVATION_EMPTY: ['La preventa no contiene productos físicos que puedan reservarse.', 409],
+    INVALID_RESERVATION_QUANTITY: ['La cantidad de la preventa no es válida para reservar inventario.', 400],
+    RESERVATION_ITEMS_REQUIRED: ['No se recibieron productos válidos para reservar.', 400],
+    DATABASE_MIGRATION_REQUIRED: ['El módulo de inventario no está actualizado en Supabase.', 503],
+  };
+  for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0], code: key }, { status: value[1] });
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
+}
 function serialize(row: Record<string, unknown>) { return { id: row.id, ticketCode: row.ticket_code, items: row.items || [], total: row.total, vendedorUid: row.seller_uid, vendedorEmail: row.seller_email, vendedorRole: row.seller_role, status: row.status, evidenceRefs: row.evidence_refs || [], metadata: row.metadata || {}, saleId: row.sale_id, branchId: row.branch_id, createdAt: row.created_at, updatedAt: row.updated_at, paidBy: row.paid_by, paidAt: row.paid_at }; }
 
 export async function GET(request: NextRequest) {
@@ -73,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (!unique.size) return NextResponse.json({ error: 'Las cantidades de la preventa no son válidas.' }, { status: 400 });
     const supabase = getSupabaseServer();
     const productIds = Array.from(unique.keys());
-    const products = await supabase.from('products').select('id,name,sku,price,active').eq('tenant_id', context.tenantId).in('id', productIds);
+    const products = await supabase.from('products').select('id,name,sku,price,active,item_type').eq('tenant_id', context.tenantId).in('id', productIds);
     if (products.error) throw new Error(products.error.message);
     const productById = new Map((products.data || []).map((product) => [String(product.id), product]));
     if (productById.size !== productIds.length || productIds.some((id) => productById.get(id)?.active === false)) throw new Error('PRODUCT_NOT_FOUND');
@@ -94,9 +106,14 @@ export async function POST(request: NextRequest) {
     const inserted = await supabase.from('presales').insert({ tenant_id: context.tenantId, branch_id: branchId || null, warehouse_id: warehouseId || null, ticket_code: ticketCode(), items: lines, total, seller_uid: context.uid, seller_email: context.email || null, seller_role: context.role, status: action === 'sent_to_cashier' ? 'draft' : action, evidence_refs: evidenceRefs, metadata }).select('id,ticket_code,status,total').single();
     if (inserted.error) throw new Error(inserted.error.message);
     if (action === 'sent_to_cashier') {
-      const reservation = await supabase.rpc('reserve_inventory_contract', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: lines.map((line) => ({ productId: line.productId, quantity: line.quantity })), target_reason: `Preventa ${inserted.data.ticket_code}` });
-      if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
-      reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
+      const physicalItems = productIds
+        .filter((id) => productById.get(id)?.item_type !== 'service')
+        .map((id) => ({ productId: id, quantity: unique.get(id) || 0 }));
+      if (physicalItems.length) {
+        const reservation = await supabase.rpc('reserve_inventory_contract', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: physicalItems, target_reason: `Preventa ${inserted.data.ticket_code}` });
+        if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
+        reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
+      }
       const sent = await supabase.from('presales').update({ status: 'sent_to_cashier', reservation_id: reservationId || null, warehouse_id: warehouseId, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', inserted.data.id).select('id,ticket_code,status,total').single();
       if (sent.error) {
         if (reservationId) await supabase.rpc('release_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: reservationId, target_user_id: context.uid });
@@ -105,7 +122,11 @@ export async function POST(request: NextRequest) {
       }
       inserted.data = sent.data;
     }
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
+    try {
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
+    } catch (auditError) {
+      console.error('presale_audit_failed_after_commit', auditError);
+    }
     return NextResponse.json({ ok: true, presaleId: inserted.data.id, ticketCode: inserted.data.ticket_code, status: inserted.data.status, total: inserted.data.total }, { status: 201 });
   } catch (error: unknown) {
     if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos ya no está disponible.' }, { status: 404 });

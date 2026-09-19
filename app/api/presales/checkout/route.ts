@@ -143,7 +143,11 @@ export async function POST(request: NextRequest) {
       }
       throw new Error('PRESALE_NOT_READY');
     }
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
+    try {
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
+    } catch (auditError) {
+      console.error('presale_checkout_audit_failed_after_commit', auditError);
+    }
     return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: config.mode, provider: config.provider, showBarcode: config.showBarcode !== false, status: shouldEmitFiscal ? 'pendiente_envio_fiscal' : 'local', emission: fiscalEmission }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }

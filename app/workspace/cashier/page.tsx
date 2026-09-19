@@ -50,7 +50,7 @@ function CashierContent() {
     finally { setLoading(false); }
   }
   function amountMap(values: Record<string, string>) { return { cash: Number(values.cash || 0), card: Number(values.card || 0), transfer: Number(values.transfer || 0) }; }
-  async function open(event: FormEvent) { event.preventDefault(); await action({ action: 'open', registerId, openingByMethod: amountMap(opening) }, 'Turno de caja abierto.'); }
+  async function open(event: FormEvent) { event.preventDefault(); if (!window.confirm('¿Confirmas abrir este turno de caja con los montos indicados?')) return; await action({ action: 'open', confirmOpen: true, registerId, openingByMethod: amountMap(opening) }, 'Turno de caja abierto.'); }
   async function addMovement(event: FormEvent) { event.preventDefault(); await action({ action: 'movement', sessionId: session?.id, ...movement, amount: Number(movement.amount) }, 'Movimiento de caja registrado.'); setMovement({ ...movement, amount: '', description: '' }); }
   async function count(event: FormEvent) { event.preventDefault(); await action({ action: 'count', sessionId: session?.id, countedByMethod: amountMap(counted) }, 'Arqueo registrado. El turno espera revisión.'); }
   async function close(actionName: 'close' | 'approve') { await action({ action: actionName, sessionId: session?.id }, actionName === 'approve' ? 'Diferencia aprobada y caja cerrada.' : 'Caja cerrada correctamente.'); }

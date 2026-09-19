@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     const registerId = text(body.registerId, 128);
     const sessionId = text(body.sessionId, 128);
     const payload = action === 'open' ? { openingByMethod: methods(body.openingByMethod) } : action === 'movement' ? { paymentMethod: text(body.paymentMethod, 30), amount: body.amount, direction: body.direction, description: text(body.description), notes: text(body.notes, 300) } : { countedByMethod: methods(body.countedByMethod) };
+    if (action === 'open' && body.confirmOpen !== true) return NextResponse.json({ error: 'Confirma explícitamente la apertura del turno.', code: 'OPEN_CONFIRMATION_REQUIRED' }, { status: 400 });
     if (action === 'open' && !registerId) return NextResponse.json({ error: 'Selecciona una caja para abrir el turno.' }, { status: 400 });
     if (action !== 'open' && !sessionId) return NextResponse.json({ error: 'El turno de caja es obligatorio.' }, { status: 400 });
     if (action === 'close' && !MANAGER_ROLES.has(context.role)) { /* RPC enforces manager only when a difference exists. */ }
