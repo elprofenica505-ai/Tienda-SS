@@ -7,12 +7,9 @@ import { requestSupabasePasswordRecovery, resendSupabaseVerification, sendSupaba
 type View = 'home' | 'login' | 'register';
 
 const modules = [
-  { number: '01', title: 'Ventas y cobros', text: 'Registra ventas, preventas, clientes, pagos y crédito básico en un solo espacio.' },
-  { number: '02', title: 'Catálogo e inventario', text: 'Controla productos, servicios, existencias, mínimos y movimientos auditados.' },
-  { number: '03', title: 'Clientes y crédito', text: 'Centraliza clientes, límites de crédito, abonos y cuentas por cobrar.' },
-  { number: '04', title: 'Compras y recepción', text: 'Registra proveedores, recibe mercancía y actualiza existencias con trazabilidad.' },
-  { number: '05', title: 'Caja y gastos', text: 'Consulta cobros, gastos y movimientos básicos de efectivo por empresa.' },
-  { number: '06', title: 'Métricas operativas', text: 'Consulta ventas, gastos, productos destacados, métodos de pago y cartera.' },
+  { number: '01', title: 'Cobra tus ventas', text: 'Registra ventas y cobros desde un espacio simple y rápido.' },
+  { number: '02', title: 'Controla tu stock', text: 'Mantén tus productos y existencias bajo control.' },
+  { number: '03', title: 'Mira tus ganancias', text: 'Entiende cómo avanza tu negocio con información clara.' },
 ];
 
 const plans = [
@@ -59,12 +56,12 @@ function Landing({ onNavigate }: { onNavigate: (view: View) => void }) {
 
       <section className="hero page-container">
         <div className="hero-copy">
-          <div className="eyebrow"><span className="eyebrow-dot" /> La plataforma para operar mejor</div>
-          <h1>Tu negocio, <em>en una sola vista.</em></h1>
-          <p className="hero-lede">ConexiaX reúne ventas, inventario, clientes, crédito y operaciones básicas en un espacio claro para que tu empresa trabaje con más orden.</p>
+          <div className="eyebrow"><span className="eyebrow-dot" /> Operación clara para tu negocio</div>
+          <h1>Cobra, controla tu stock <em>y mira tus ganancias.</em></h1>
+          <p className="hero-lede">ConexiaX te ayuda a cobrar, controlar tus productos y entender tus resultados sin complicarte con herramientas que no necesitas.</p>
           <div className="hero-actions">
             <button className="button button-large" onClick={() => onNavigate('register')}>Comenzar gratis <Arrow /></button>
-            <a className="text-link" href="#modulos">Explorar módulos <span>↓</span></a>
+            <a className="text-link" href="#modulos">Ver cómo funciona <span>↓</span></a>
           </div>
           <div className="hero-proof"><div className="avatar-stack"><i>JD</i><i>ML</i><i>AR</i><i>+</i></div><span><strong>Sin tarjeta de crédito</strong><br />Prueba la operación completa</span></div>
         </div>
@@ -85,7 +82,7 @@ function Landing({ onNavigate }: { onNavigate: (view: View) => void }) {
 
       <section className="trusted page-container"><span>DISEÑADO PARA NEGOCIOS QUE QUIEREN AVANZAR</span><div><b>comercio</b><b>distribución</b><b>servicios</b><b>retail</b><b>operaciones</b></div></section>
 
-      <section className="section page-container" id="modulos"><div className="section-heading"><div><div className="eyebrow">Todo lo que necesitas</div><h2>Menos herramientas.<br /><em>Más claridad.</em></h2></div><p>Una plataforma flexible para cada parte de tu operación. Activa lo que necesitas hoy y crece sin cambiar de sistema mañana.</p></div><div className="module-grid">{modules.map((module) => <article className="module-card" key={module.number}><span className="module-number">{module.number}</span><h3>{module.title}</h3><p>{module.text}</p><span className="module-arrow">↗</span></article>)}</div></section>
+      <section className="section page-container" id="modulos"><div className="section-heading"><div><div className="eyebrow">Lo esencial para avanzar</div><h2>Cobra mejor.<br /><em>Decide con claridad.</em></h2></div><p>Todo lo importante para vender, cuidar tu stock y saber cómo va tu negocio.</p></div><div className="module-grid">{modules.map((module) => <article className="module-card" key={module.number}><span className="module-number">{module.number}</span><h3>{module.title}</h3><p>{module.text}</p><span className="module-arrow">↗</span></article>)}</div></section>
 
       <section className="dark-band" id="como-funciona"><div className="page-container steps-section"><div className="eyebrow light">Empieza en minutos</div><h2>De la idea a la operación.<br /><em>Sin complicaciones.</em></h2><div className="steps-grid"><div className="step"><span>01</span><h3>Crea tu espacio</h3><p>Registra tu empresa y configura la base de tu operación sin depender de hojas dispersas.</p></div><div className="step"><span>02</span><h3>Organiza tu equipo</h3><p>Invita colaboradores y asigna permisos según cada responsabilidad.</p></div><div className="step"><span>03</span><h3>Opera con claridad</h3><p>Registra ventas, controla existencias, gestiona crédito y toma decisiones con métricas.</p></div></div></div></section>
 
