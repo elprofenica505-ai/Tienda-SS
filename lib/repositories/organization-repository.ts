@@ -202,6 +202,6 @@ export async function upsertMemberBranches(tenantId: string, authUserId: string,
 }
 
 export function toTenantContext(tenantId: string, authUserId: string, membership: Awaited<ReturnType<typeof findMembership>>) {
-  if (!membership) throw new Error('FORBIDDEN');
+  if (!membership) throw new Error('TENANT_MEMBERSHIP_NOT_FOUND');
   return { uid: authUserId, tenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, subscriptionStatus: undefined };
 }

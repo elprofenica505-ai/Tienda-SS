@@ -34,9 +34,10 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
   const requestedTenant = request.headers.get('x-tenant-id')?.trim();
   if (!requestedTenant || !TENANT_ID_PATTERN.test(requestedTenant)) throw new Error('TENANT_REQUIRED');
   const membership = await findMembership(requestedTenant, auth.data.user.id);
-  if (!membership || membership.tenant.status !== 'active') throw new Error('FORBIDDEN');
+  if (!membership) throw new Error('TENANT_MEMBERSHIP_NOT_FOUND');
+  if (membership.tenant.status !== 'active') throw new Error('TENANT_INACTIVE');
   const roleValue = membership.member.role;
-  if (!isTenantRole(roleValue)) throw new Error('FORBIDDEN');
+  if (!isTenantRole(roleValue)) throw new Error('TENANT_ROLE_INVALID');
   const role = roleValue;
   const policyToken = {
     uid: auth.data.user.id,
@@ -52,7 +53,7 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
   }
   const rate = await consumeDistributedRateLimits({ endpoint: request.nextUrl.pathname, ip: getClientAddress(request), uid: auth.data.user.id, tenantId: membership.tenant.id }, { ip: 120, uid: 300, tenant: 1_000, endpoint: 2_000, composite: 100 }, 60_000);
   if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);
-  if (allowedRoles && !allowedRoles.includes(role)) throw new Error('FORBIDDEN');
+  if (allowedRoles && !allowedRoles.includes(role)) throw new Error('ROLE_NOT_ALLOWED');
   return {
     uid: auth.data.user.id,
     tenantId: membership.tenant.id,
@@ -71,7 +72,7 @@ export async function requireTenantPermission(request: NextRequest, module: Perm
   if (settings.error) throw new Error(settings.error.message);
   const saved = settings.data?.value && typeof settings.data.value === 'object' ? settings.data.value as Record<string, unknown> : undefined;
   const permissions = normalizePermissions(saved?.[context.role] as Record<string, unknown> | undefined, context.role);
-  if (!permissions[module][action]) throw new Error('FORBIDDEN');
+  if (!permissions[module][action]) throw new Error(`PERMISSION_DENIED:${module}.${action}`);
   return context;
 }
 
@@ -82,6 +83,11 @@ export function tenantErrorResponse(error: unknown) {
   if (code.startsWith('SUPABASE_') || code.includes('relation') || code.includes('schema cache')) return { status: 503, body: { error: 'La conexión del servidor con Supabase no está configurada correctamente.' } };
   if (code === 'UNAUTHENTICATED') return { status: 401, body: { error: 'Autenticación requerida.' } };
   if (code === 'TENANT_REQUIRED') return { status: 400, body: { error: 'Falta identificar la empresa.' } };
+  if (code === 'TENANT_MEMBERSHIP_NOT_FOUND') return { status: 403, body: { error: 'Tu usuario no tiene una membresía activa en esta empresa.', code } };
+  if (code === 'TENANT_INACTIVE') return { status: 403, body: { error: 'Esta empresa no está activa.', code } };
+  if (code === 'TENANT_ROLE_INVALID') return { status: 403, body: { error: 'La membresía tiene un rol inválido.', code } };
+  if (code === 'ROLE_NOT_ALLOWED') return { status: 403, body: { error: 'Tu rol no permite esta operación.', code } };
+  if (code.startsWith('PERMISSION_DENIED:')) return { status: 403, body: { error: 'Tu rol no tiene habilitado este permiso.', code } };
   if (code === 'BRANCH_REQUIRED') return { status: 400, body: { error: 'Debes indicar una sucursal autorizada cuando tienes más de una disponible.', code } };
   if (code === 'FORBIDDEN') return { status: 403, body: { error: 'No tienes permiso para esta empresa.' } };
   if (code === 'BRANCH_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa sucursal.', code } };

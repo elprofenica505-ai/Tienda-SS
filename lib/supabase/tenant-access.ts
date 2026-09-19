@@ -35,12 +35,12 @@ export async function requireSupabaseTenantPermission(request: NextRequest, modu
   }
   const rate = await consumeDistributedRateLimits({ endpoint: request.nextUrl.pathname, ip: getClientAddress(request), uid: user.id, tenantId }, { ip: 120, uid: 300, tenant: 1_000, endpoint: 2_000, composite: 100 }, 60_000);
   if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);
-  if (context.role !== 'owner') {
+  if (context.role !== 'owner' && context.role !== 'admin') {
     const settings = await getSupabaseServer().from('tenant_settings').select('value').eq('tenant_id', context.tenantId).eq('setting_key', 'permissions').maybeSingle();
     if (settings.error) throw new Error(settings.error.message);
     const saved = settings.data?.value && typeof settings.data.value === 'object' ? settings.data.value as Record<string, unknown> : undefined;
     const permissions = normalizePermissions(saved?.[context.role] as Record<string, unknown> | undefined, context.role);
-    if (!permissions[module][action]) throw new Error('FORBIDDEN');
+    if (!permissions[module][action]) throw new Error(`PERMISSION_DENIED:${module}.${action}`);
   }
   return context;
 }
