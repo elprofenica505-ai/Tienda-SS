@@ -110,13 +110,16 @@ export async function POST(request: NextRequest) {
     if (active.error) throw new Error(active.error.message);
     try { assertPlanCapacity(tenant.data.plan, 'products', active.count || 0, 1); } catch (error) { return responseFor(error); }
     const categoryId = cleanText(body.categoryId, 80) || null;
+    const requestedBranchId = cleanText(body.branchId, 128) || cleanText(request.headers.get('x-branch-id'), 128);
+    const requestedScope = requestedBranchId ? await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId) : { branchId: '', warehouseId: '' };
+    if (requestedBranchId && !requestedScope.branchId) throw new Error('BRANCH_NOT_FOUND');
     const initialStock = itemType === 'service' ? 0 : Math.max(0, Math.floor(cleanNumber(body.stock)));
     const result = await supabase.from('products').insert({ tenant_id: context.tenantId, category_id: categoryId, sku: sku || `SERV-${Date.now()}`, barcode: barcode || null, name, item_type: itemType, price: Math.max(0, cleanNumber(body.price)), cost: productRoles.slice(0, 4).includes(context.role) ? Math.max(0, cleanNumber(body.cost)) : 0, min_stock: itemType === 'service' ? 0 : Math.max(0, cleanNumber(body.minStock, 5)), unit: cleanText(body.unit, 20) || 'unidad', active: true, created_by: context.uid }).select('id,tenant_id,category_id,sku,barcode,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at').single();
     if (result.error) throw new Error(result.error.message);
     const imageUrl = await saveProductImage(supabase, context.tenantId, result.data.id, body.imageDataUrl);
     if (imageUrl) { const imageUpdate = await supabase.from('products').update({ metadata: { imageUrl }, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', result.data.id); if (imageUpdate.error) throw new Error(imageUpdate.error.message); }
     if (itemType === 'physical') {
-      const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('active', true).order('created_at').limit(1).maybeSingle();
+      const warehouse = requestedScope.warehouseId ? { data: { id: requestedScope.warehouseId }, error: null } : await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('active', true).order('created_at').limit(1).maybeSingle();
       if (warehouse.error || !warehouse.data) throw new Error(warehouse.error?.message || 'No hay un almacén activo para guardar el stock.');
       const stock = await supabase.from('inventory_stocks').upsert({ tenant_id: context.tenantId, product_id: result.data.id, warehouse_id: warehouse.data.id, quantity: initialStock, reorder_point: Math.max(0, Math.floor(cleanNumber(body.minStock, 5))), updated_at: new Date().toISOString() }, { onConflict: 'tenant_id,product_id,warehouse_id' });
       if (stock.error) throw new Error(stock.error.message);
@@ -143,6 +146,17 @@ export async function PATCH(request: NextRequest) {
     if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.barcode === 'string') changes.barcode = cleanText(body.barcode, 32).toUpperCase() || null; if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.cost === 'number') changes.cost = Math.max(0, body.cost); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
     const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select(type === 'product' ? 'id,tenant_id,category_id,sku,barcode,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').single();
     if (updated.error) throw new Error(updated.error.message);
+    const updatedProduct = updated.data as unknown as Record<string, unknown>;
+    if (type === 'product' && updatedProduct.item_type !== 'service' && typeof body.stock === 'number' && Number.isFinite(body.stock)) {
+      const requestedBranchId = cleanText(body.branchId, 128) || cleanText(request.headers.get('x-branch-id'), 128);
+      const scope = requestedBranchId ? await resolveTenantBranchAndWarehouse(context.tenantId, requestedBranchId) : { branchId: '', warehouseId: '' };
+      const warehouseId = scope.warehouseId || (await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('active', true).order('created_at').limit(1).maybeSingle()).data?.id;
+      if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+      const existingStock = await supabase.from('inventory_stocks').select('reserved_quantity,reorder_point').eq('tenant_id', context.tenantId).eq('product_id', id).eq('warehouse_id', warehouseId).maybeSingle();
+      if (existingStock.error) throw new Error(existingStock.error.message);
+      const stock = await supabase.from('inventory_stocks').upsert({ tenant_id: context.tenantId, product_id: id, warehouse_id: warehouseId, quantity: Math.max(0, Math.floor(body.stock)), reserved_quantity: Number(existingStock.data?.reserved_quantity || 0), reorder_point: Number(existingStock.data?.reorder_point || 0), updated_at: new Date().toISOString() }, { onConflict: 'tenant_id,product_id,warehouse_id' });
+      if (stock.error) throw new Error(stock.error.message);
+    }
     return NextResponse.json({ ok: true, id, changes, item: type === 'product' ? mapProduct(updated.data, 0) : mapCategory(updated.data) });
   } catch (error: unknown) { return responseFor(error); }
 }

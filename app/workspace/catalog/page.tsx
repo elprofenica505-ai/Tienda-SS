@@ -37,7 +37,7 @@ async function compressProductImage(file: File): Promise<string> {
 
 function CatalogContent() {
   const router = useRouter();
-  const { authUser, tenant, member, loading: tenantLoading } = useTenant();
+  const { authUser, tenant, member, activeBranchId, loading: tenantLoading } = useTenant();
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,9 +61,9 @@ function CatalogContent() {
       if (showArchived) params.set('includeArchived', 'true');
       if (cursor) params.set('cursor', cursor);
       const cursorKey = cursor || 'first';
-      const cachePrefix = `catalog:${authUser.id}:${tenant.id}:`;
+      const cachePrefix = `catalog:${authUser.id}:${tenant.id}:${activeBranchId || 'all'}:`;
       const data = await getClientCached<CatalogResponse>(`${cachePrefix}${showArchived ? 'archived' : 'active'}:${cursorKey}`, async () => {
-        const response = await fetch(`/api/catalog${params.toString() ? `?${params.toString()}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' });
+        const response = await fetch(`/api/catalog${params.toString() ? `?${params.toString()}` : ''}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, cache: 'no-store' });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el catálogo.');
         return payload as CatalogResponse;
@@ -72,7 +72,7 @@ function CatalogContent() {
       setNextCursor(data.pagination?.nextCursor || null);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando el catálogo.'); }
     finally { if (append) setLoadingMore(false); else setLoading(false); }
-  }, [authUser, tenant, showArchived]);
+  }, [authUser, tenant, activeBranchId, showArchived]);
 
   useEffect(() => { void loadCatalog(); }, [loadCatalog]);
 
@@ -80,7 +80,7 @@ function CatalogContent() {
     if (!authUser || !tenant) return;
     setSaving(true); setMessage('');
     try {
-      const response = await fetch('/api/catalog', { method: body.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify(body) });
+      const response = await fetch('/api/catalog', { method: body.id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) }, body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo guardar el cambio.');
       invalidateClientCache(`catalog:${authUser.id}:${tenant.id}:`);

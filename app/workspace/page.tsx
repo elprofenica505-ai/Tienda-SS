@@ -29,7 +29,7 @@ type DashboardData = {
 
 function WorkspaceContent() {
   const router = useRouter();
-  const { authUser, tenant, member, loading: tenantLoading, error: tenantError } = useTenant();
+  const { authUser, tenant, member, activeBranchId, loading: tenantLoading, error: tenantError } = useTenant();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -40,7 +40,7 @@ function WorkspaceContent() {
     setMessage('');
     try {
       const token = await authUser.getIdToken();
-      const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id };
+      const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, ...(activeBranchId ? { 'x-branch-id': activeBranchId } : {}) };
       // Paint the command center from the three critical datasets first. Contacts
       // and pending presales are secondary panels and must not block the shell.
       const [reportResponse, statsResponse, catalogResponse] = await Promise.all([
@@ -78,7 +78,7 @@ function WorkspaceContent() {
     } finally {
       setLoading(false);
     }
-  }, [authUser, tenant]);
+  }, [authUser, tenant, activeBranchId]);
 
   useEffect(() => { void loadDashboard(); }, [loadDashboard]);
 
