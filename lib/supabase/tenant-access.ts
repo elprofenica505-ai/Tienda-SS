@@ -30,8 +30,8 @@ export async function requireSupabaseTenantPermission(request: NextRequest, modu
       auth_time: Math.floor(new Date(user.last_sign_in_at || user.created_at).getTime() / 1000),
     } as never, context.role);
   } catch (error) {
-    if (error instanceof Error && ['EMAIL_NOT_VERIFIED', 'SESSION_EXPIRED', 'MFA_REQUIRED'].includes(error.message)) throw error;
-    throw new Error('FORBIDDEN');
+    if (error instanceof Error) throw error;
+    throw new Error('SESSION_POLICY_REJECTED');
   }
   const rate = await consumeDistributedRateLimits({ endpoint: request.nextUrl.pathname, ip: getClientAddress(request), uid: user.id, tenantId }, { ip: 120, uid: 300, tenant: 1_000, endpoint: 2_000, composite: 100 }, 60_000);
   if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);

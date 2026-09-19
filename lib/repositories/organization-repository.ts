@@ -183,7 +183,7 @@ export async function updateOrganizationResource(tenantId: string, resource: Org
 
 export async function upsertMemberBranches(tenantId: string, authUserId: string, branchIds: string[]) {
   const membership = await findMembership(tenantId, authUserId);
-  if (!membership) throw new Error('FORBIDDEN');
+  if (!membership) throw new Error('TENANT_MEMBERSHIP_NOT_FOUND');
   const supabase = getSupabaseServer();
   const resolvedBranches: Array<{ id: string; legacy_firestore_id?: string | null }> = [];
   for (const requestedId of branchIds) {
