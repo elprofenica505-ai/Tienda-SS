@@ -115,7 +115,11 @@ export async function POST(request: NextRequest) {
         .filter((id) => productById.get(id)?.item_type !== 'service')
         .map((id) => ({ productId: id, quantity: unique.get(id) || 0 }));
       if (physicalItems.length) {
-        const reservation = await supabase.rpc('reserve_inventory_contract', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: physicalItems, target_reason: `Preventa ${inserted.data.ticket_code}` });
+        const reservationArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: physicalItems, target_reason: `Preventa ${inserted.data.ticket_code}` };
+        let reservation = await supabase.rpc('reserve_inventory_contract', reservationArgs);
+        // Compatibilidad con despliegues que tienen la migración de reservas base,
+        // pero todavía no la envoltura del contrato canónico.
+        if (reservation.error && /function .*reserve_inventory_contract.*does not exist|Could not find the function|42883|PGRST202/i.test(reservation.error.message || '')) reservation = await supabase.rpc('reserve_inventory', reservationArgs);
         if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
         reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
       }

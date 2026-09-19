@@ -137,13 +137,14 @@ export async function PATCH(request: NextRequest) {
     if (!type || !id) return NextResponse.json({ error: 'Tipo o identificador inválido.' }, { status: 400 });
     const supabase = getSupabaseServer();
     const table = type === 'category' ? 'categories' : 'products';
-    const current = await supabase.from(table).select(type === 'product' ? 'id,tenant_id,category_id,sku,barcode,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const current = await supabase.from(table).select(type === 'product' ? 'id,tenant_id,category_id,sku,barcode,name,item_type,price,cost,min_stock,unit,metadata,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
     const changes: Record<string, unknown> = { updated_at: new Date().toISOString(), updated_by: context.uid };
     if (typeof body.active === 'boolean') changes.active = body.active;
     if (type === 'category') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.color === 'string') changes.color = cleanText(body.color, 20); }
     if (type === 'product') { if (typeof body.name === 'string' && cleanText(body.name).length >= 2) changes.name = cleanText(body.name); if (typeof body.barcode === 'string') changes.barcode = cleanText(body.barcode, 32).toUpperCase() || null; if (typeof body.price === 'number') changes.price = Math.max(0, body.price); if (typeof body.cost === 'number') changes.cost = Math.max(0, body.cost); if (typeof body.minStock === 'number') changes.min_stock = Math.max(0, body.minStock); if (typeof body.categoryId === 'string') changes.category_id = cleanText(body.categoryId, 80) || null; }
+    if (type === 'product' && typeof body.imageDataUrl === 'string' && body.imageDataUrl) { const imageUrl = await saveProductImage(supabase, context.tenantId, id, body.imageDataUrl); const currentRecord = current.data as unknown as Record<string, unknown>; const currentMetadata = currentRecord.metadata && typeof currentRecord.metadata === 'object' ? currentRecord.metadata : {}; changes.metadata = { ...currentMetadata, imageUrl }; }
     const updated = await supabase.from(table).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select(type === 'product' ? 'id,tenant_id,category_id,sku,barcode,name,item_type,price,cost,min_stock,unit,active,created_at,updated_at' : 'id,tenant_id,name,color,active,created_at,updated_at').single();
     if (updated.error) throw new Error(updated.error.message);
     const updatedProduct = updated.data as unknown as Record<string, unknown>;
