@@ -15,9 +15,6 @@ function ticketCode() { return `P-${new Date().toISOString().slice(0, 10).replac
 function pageCursor(value: unknown): { createdAt: string; id: string } | null { try { const parsed = JSON.parse(Buffer.from(text(value, 300), 'base64url').toString('utf8')); return typeof parsed.createdAt === 'string' && typeof parsed.id === 'string' ? parsed : null; } catch { return null; } }
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : '';
-  const normalized = message.toLowerCase();
-  if (normalized.includes('does not exist') || normalized.includes('undefined function') || normalized.includes('undefined column') || normalized.includes('pgrst202') || normalized.includes('pgrst204')) return NextResponse.json({ error: 'El esquema de Preventas o Inventario no está actualizado en Supabase.', code: 'DATABASE_MIGRATION_REQUIRED' }, { status: 503 });
-  if (normalized.includes('permission denied') || normalized.includes('42501')) return NextResponse.json({ error: 'Supabase rechazó la operación de Preventas por permisos de base de datos.', code: 'DATABASE_PERMISSION_DENIED' }, { status: 503 });
   const known: Record<string, [string, number]> = {
     INSUFFICIENT_WAREHOUSE_STOCK: ['No hay existencias suficientes en el almacén de la sucursal.', 409],
     RESERVATION_EMPTY: ['La preventa no contiene productos físicos que puedan reservarse.', 409],

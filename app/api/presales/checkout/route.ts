@@ -12,9 +12,6 @@ function text(value: unknown, max = 160) { return typeof value === 'string' ? va
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : '';
-  const normalized = message.toLowerCase();
-  if (normalized.includes('does not exist') || normalized.includes('undefined function') || normalized.includes('undefined column') || normalized.includes('pgrst202') || normalized.includes('pgrst204')) return NextResponse.json({ error: 'El esquema de Preventas, Ventas o Inventario no está actualizado en Supabase.', code: 'DATABASE_MIGRATION_REQUIRED' }, { status: 503 });
-  if (normalized.includes('permission denied') || normalized.includes('42501')) return NextResponse.json({ error: 'Supabase rechazó el cobro por permisos de base de datos.', code: 'DATABASE_PERMISSION_DENIED' }, { status: 503 });
   const known: Record<string, [string, number]> = {
     PRESALE_NOT_FOUND: ['La preventa no existe en esta empresa.', 404],
     PRESALE_NOT_READY: ['La preventa todavía no está lista para caja.', 409],
