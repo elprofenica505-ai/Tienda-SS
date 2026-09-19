@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
-import { tenantErrorResponse, type TenantRole } from '@/lib/tenant';
+import { requireTenantMember, tenantErrorResponse, type TenantRole } from '@/lib/tenant';
 import { canAssignRole, canManageRole } from '@/lib/role-policy';
 import { createMember, findMemberByAuthUserId, listMembers, updateMember } from '@/lib/repositories/member-repository';
 
@@ -66,8 +66,19 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const context = await requireSupabaseTenantPermission(request, 'members', 'edit');
     const body = await request.json(); const uid = text(body.uid, 160);
+    if (body.selfAccess === 'admin') {
+      const context = await requireTenantMember(request);
+      if (uid !== context.uid) return NextResponse.json({ error: 'La acción de acceso propio no es válida.' }, { status: 400 });
+      if (context.role === 'owner' || context.role === 'admin') return NextResponse.json({ ok: true, uid, role: context.role, alreadyFullAccess: true });
+      const activeMembers = await getSupabaseServer().from('members').select('id').eq('tenant_id', context.tenantId).eq('status', 'active');
+      if (activeMembers.error) throw new Error(activeMembers.error.message);
+      if ((activeMembers.data || []).length !== 1) return NextResponse.json({ error: 'Solo el único usuario activo de la empresa puede reclamar este acceso.' }, { status: 409 });
+      const updated = await updateMember(context.tenantId, uid, { role: 'admin' });
+      if (!updated) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
+      return NextResponse.json({ ok: true, uid, role: 'admin', selfAccessGranted: true });
+    }
+    const context = await requireSupabaseTenantPermission(request, 'members', 'edit');
     const current = await findMemberByAuthUserId(context.tenantId, uid);
     if (!uid || !current) return NextResponse.json({ error: 'El miembro no existe en este tenant.' }, { status: 404 });
     const currentMember = { ...current.member, branchIds: current.branchIds };
