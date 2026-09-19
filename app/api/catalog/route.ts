@@ -15,7 +15,7 @@ async function requireCatalogRead(request: NextRequest) {
   } catch (error) {
     // El flujo de venta/preventa necesita leer productos aunque una matriz
     // personalizada no haya activado catalog.view para ese rol.
-    if (error instanceof Error && error.message === 'FORBIDDEN') return requireTenantPermission(request, 'sales', 'create');
+    if (error instanceof Error && (error.message === 'FORBIDDEN' || error.message.startsWith('PERMISSION_DENIED:catalog.'))) return requireTenantPermission(request, 'sales', 'create');
     throw error;
   }
 }
