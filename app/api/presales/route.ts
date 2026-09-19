@@ -18,7 +18,9 @@ function serialize(row: Record<string, unknown>) { return { id: row.id, ticketCo
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantPermission(request, 'sales', 'view');
+    // Caja consulta preventas que luego cobrará como una venta; usa la misma
+    // capacidad efectiva que el checkout directo, no una vista más restrictiva.
+    const context = await requireTenantPermission(request, 'sales', 'create');
     const supabase = getSupabaseServer();
     const code = text(request.nextUrl.searchParams.get('code'), 80);
     const cursor = pageCursor(request.nextUrl.searchParams.get('cursor'));
