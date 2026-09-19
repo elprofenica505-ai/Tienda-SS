@@ -15,6 +15,25 @@ type Category = { id: string; name: string; color?: string; active: boolean };
 type Product = { id: string; name: string; sku?: string; barcode?: string; imageUrl?: string | null; itemType: string; categoryId?: string; price: number; cost?: number; stock: number; active: boolean };
 type Editing = { type: 'category' | 'product'; id: string; name: string; sku: string; price: string; cost: string; stock: string; categoryId: string; active: boolean };
 type CatalogResponse = { categories?: Category[]; products?: Product[]; pagination?: { nextCursor?: string | null } };
+async function compressProductImage(file: File): Promise<string> {
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = () => reject(new Error('IMAGE_READ_ERROR')); element.src = sourceUrl; });
+    let maxDimension = 1280;
+    let quality = 0.78;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+      const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      const context = canvas.getContext('2d'); if (!context) throw new Error('IMAGE_CANVAS_ERROR');
+      context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const dataUrl = await new Promise<string>((resolve, reject) => canvas.toBlob((blob) => { if (!blob) { reject(new Error('IMAGE_COMPRESS_ERROR')); return; } const reader = new FileReader(); reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : ''); reader.onerror = () => reject(new Error('IMAGE_COMPRESS_ERROR')); reader.readAsDataURL(blob); }, 'image/jpeg', quality));
+      if (dataUrl.length * 0.75 <= 900 * 1024) return dataUrl;
+      quality -= 0.08; if (quality < 0.5) { quality = 0.72; maxDimension = Math.round(maxDimension * 0.75); }
+    }
+    throw new Error('IMAGE_TOO_LARGE');
+  } finally { URL.revokeObjectURL(sourceUrl); }
+}
+
 
 function CatalogContent() {
   const router = useRouter();
@@ -74,7 +93,7 @@ function CatalogContent() {
   function createCategory(event: FormEvent) { event.preventDefault(); void saveMutation({ type: 'category', name: categoryName }, 'Categoría creada.').then(() => setCategoryName('')); }
   function createProduct(event: FormEvent) { event.preventDefault(); void saveMutation({ type: 'product', ...product, price: Number(product.price || 0), stock: Number(product.stock || 0) }, 'Producto creado.').then(() => setProduct({ name: '', sku: '', barcode: '', imageDataUrl: '', price: '', stock: '', categoryId: '', itemType: 'physical' })); }
   const handleBarcodeDetected = useCallback((value: string) => setProduct((current) => ({ ...current, barcode: value, sku: current.sku || value })), []);
-  function handleProductImage(file: File | undefined) { if (!file) return; if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setMessage('La foto debe ser JPG, PNG o WebP.'); return; } if (file.size > 2 * 1024 * 1024) { setMessage('La foto no debe superar 2 MB.'); return; } const reader = new FileReader(); reader.onload = () => setProduct((current) => ({ ...current, imageDataUrl: typeof reader.result === 'string' ? reader.result : '' })); reader.readAsDataURL(file); }
+  async function handleProductImage(file: File | undefined) { if (!file) return; if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { setMessage('La foto debe ser JPG, PNG o WebP.'); return; } setMessage('Comprimiendo foto…'); try { const imageDataUrl = await compressProductImage(file); setProduct((current) => ({ ...current, imageDataUrl })); setMessage('Foto lista y comprimida para guardar.'); } catch { setMessage('No se pudo comprimir la foto. Elige otra imagen.'); } }
   function startEditCategory(item: Category) { setEditing({ type: 'category', id: item.id, name: item.name, sku: '', price: '', cost: '', stock: '', categoryId: '', active: item.active }); setShowForm(false); }
   function startEditProduct(item: Product) { setEditing({ type: 'product', id: item.id, name: item.name, sku: item.sku || '', price: String(item.price || 0), cost: String((item as Product & { cost?: number }).cost || 0), stock: String(item.stock || 0), categoryId: item.categoryId || '', active: item.active }); setShowForm(false); }
   function printProductLabel(item: Product) { const escape = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char)); const code = item.barcode || item.sku || ''; const popup = window.open('', '_blank', 'width=420,height=320'); if (!popup) { setMessage('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para imprimir.'); return; } popup.document.write(`<!doctype html><html><head><title>Etiqueta ${escape(item.name)}</title><style>body{font-family:Arial,sans-serif;text-align:center;margin:20px}.label{border:1px dashed #777;padding:16px;width:280px;margin:auto}.label strong{display:block;font-size:16px;margin-bottom:10px}.label svg{display:block;height:80px;margin:auto;width:100%}.label span{display:block;letter-spacing:2px;margin-top:5px}.label b{display:block;font-size:16px;margin-top:7px}.text-only{display:grid;gap:10px}</style></head><body><div class="label">${ean13Svg(code, escape(item.name), escape(money(Number(item.price || 0))))}</div><script>window.onload=()=>window.print()<\/script></body></html>`); popup.document.close(); }

@@ -47,3 +47,19 @@ test('el mismo escáner está conectado a Preventas, Venta directa y Caja', asyn
   assert.match(cashier, /Confirmar con escáner/);
   assert.match(cashier, /verifyTicketProduct/);
 });
+
+
+test('la política de seguridad permite cámara del mismo dominio', async () => {
+  const config = await readFile('next.config.mjs', 'utf8');
+  assert.match(config, /camera=\(self\)/);
+  assert.doesNotMatch(config, /camera=\(\)/);
+});
+
+test('las fotos de producto se comprimen antes de enviarse y el servidor limita el binario', async () => {
+  const catalog = await readFile('app/workspace/catalog/page.tsx', 'utf8');
+  const route = await readFile('app/api/catalog/route.ts', 'utf8');
+  assert.match(catalog, /compressProductImage/);
+  assert.match(catalog, /900 \* 1024/);
+  assert.match(route, /950 \* 1024/);
+  assert.match(route, /product-images/);
+});

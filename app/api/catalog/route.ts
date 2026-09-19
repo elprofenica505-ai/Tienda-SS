@@ -30,7 +30,7 @@ async function saveProductImage(supabase: ReturnType<typeof getSupabaseServer>, 
   const match = imageDataUrl.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
   if (!match) throw new Error('PRODUCT_IMAGE_INVALID');
   const buffer = Buffer.from(match[2], 'base64');
-  if (buffer.length > 2 * 1024 * 1024) throw new Error('PRODUCT_IMAGE_TOO_LARGE');
+  if (buffer.length > 950 * 1024) throw new Error('PRODUCT_IMAGE_TOO_LARGE');
   const extension = match[1].split('/')[1].toLowerCase().replace('jpeg', 'jpg');
   const path = `${tenantId}/${productId}.${extension}`;
   const upload = await supabase.storage.from('product-images').upload(path, buffer, { contentType: match[1], upsert: true, cacheControl: '31536000' });
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
       if (stock.error) throw new Error(stock.error.message);
     }
     return NextResponse.json({ ok: true, item: redactSensitiveFields(mapProduct({ ...result.data, metadata: imageUrl ? { imageUrl } : {} }, initialStock), context) }, { status: 201 });
-  } catch (error: unknown) { return responseFor(error); }
+  } catch (error: unknown) { if (error instanceof Error && error.message === 'PRODUCT_IMAGE_INVALID') return NextResponse.json({ error: 'La imagen debe ser JPG, PNG o WebP.' }, { status: 400 }); if (error instanceof Error && error.message === 'PRODUCT_IMAGE_TOO_LARGE') return NextResponse.json({ error: 'La imagen comprimida todavía supera 1 MB. Elige una foto más pequeña.' }, { status: 400 }); return responseFor(error); }
 }
 
 export async function PATCH(request: NextRequest) {
