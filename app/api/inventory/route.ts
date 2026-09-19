@@ -8,7 +8,8 @@ import { resolveAuthorizedBranchId, resolveTenantWarehouseId } from '@/lib/organ
 export const runtime = 'nodejs';
 function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function positiveNumber(value: unknown) { return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0; }
-type InventoryProduct = { id: string; name: string; sku: string; itemType: string; stock: number; reserved: number; available: number; minStock: number; active: boolean };
+type InventoryProduct = { id: string; name: string; sku: string; imageUrl?: string | null; itemType: string; stock: number; reserved: number; available: number; minStock: number; active: boolean };
+function productImage(metadata: unknown) { const value = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>).imageUrl || (metadata as Record<string, unknown>).image_url : null; return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null; }
 function responseFor(error: unknown) { const message = error instanceof Error ? error.message : ''; if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 }); if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o está inactivo.' }, { status: 404 }); if (message.includes('INSUFFICIENT_STOCK')) return NextResponse.json({ error: 'El movimiento dejaría el inventario en negativo.' }, { status: 409 }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
 export async function GET(request: NextRequest) {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
     const productsRequested = params.get('products') === 'true';
     const pageSize = parsePageSize(params.get('pageSize'), DEFAULT_PAGE_SIZE);
     const rawCursor = parseCursor(params.get('cursor'));
-    let productQuery = supabase.from('products').select('id,name,sku,item_type,min_stock,active').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
+    let productQuery = supabase.from('products').select('id,name,sku,item_type,min_stock,active,metadata').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
     if (rawCursor) { try { const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string }; if (cursor.name && cursor.id) productQuery = productQuery.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`); } catch { return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 }); } }
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const authorizedWarehouses = await supabase.from('warehouses').select('id,branch_id').eq('tenant_id', context.tenantId).eq('active', true);
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     if (stocks.error) throw new Error(stocks.error.message);
     const stockByProduct = new Map<string, { quantity: number; reserved: number }>();
     for (const stock of stocks.data || []) { const current = stockByProduct.get(stock.product_id) || { quantity: 0, reserved: 0 }; current.quantity += Number(stock.quantity || 0); current.reserved += Number(stock.reserved_quantity || 0); stockByProduct.set(stock.product_id, current); }
-    const products: InventoryProduct[] = productPage.map((row: any) => { const stock = stockByProduct.get(row.id) || { quantity: 0, reserved: 0 }; return { id: row.id, name: row.name, sku: row.sku, itemType: row.item_type, stock: stock.quantity, reserved: stock.reserved, available: Math.max(0, stock.quantity - stock.reserved), minStock: Number(row.min_stock || 0), active: row.active }; });
+    const products: InventoryProduct[] = productPage.map((row: any) => { const stock = stockByProduct.get(row.id) || { quantity: 0, reserved: 0 }; return { id: row.id, name: row.name, sku: row.sku, imageUrl: productImage(row.metadata), itemType: row.item_type, stock: stock.quantity, reserved: stock.reserved, available: Math.max(0, stock.quantity - stock.reserved), minStock: Number(row.min_stock || 0), active: row.active }; });
     const lowStock = products.filter((item) => item.itemType !== 'service' && item.stock <= item.minStock);
     const next = (productsResult.data || []).length > pageSize ? productPage[productPage.length - 1] : null;
     const nextCursor = next ? Buffer.from(JSON.stringify({ name: next.name, id: next.id }), 'utf8').toString('base64url') : undefined;
