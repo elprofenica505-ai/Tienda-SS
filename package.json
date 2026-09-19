@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
+    "@zxing/browser": "^0.1.5",
     "next": "15.5.24",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

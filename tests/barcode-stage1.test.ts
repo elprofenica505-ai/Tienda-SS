@@ -19,10 +19,18 @@ test('el catálogo persiste y devuelve barcode e imagen', async () => {
 
 test('el escáner ofrece cámara, encuadre y respaldo manual', async () => {
   const scanner = await readFile('components/workspace/BarcodeScanner.tsx', 'utf8');
-  assert.match(scanner, /getUserMedia/);
-  assert.match(scanner, /BarcodeDetector/);
+  assert.match(scanner, /decodeFromConstraints/);
+  assert.match(scanner, /BrowserMultiFormatReader/);
   assert.match(scanner, /barcode-frame/);
+  assert.match(scanner, /Reintentar cámara/);
+  assert.match(scanner, /Elegir foto/);
   assert.match(scanner, /Código manual/);
+});
+
+test('el formulario de producto separa cámara y Galería', async () => {
+  const catalog = await readFile('app/workspace/catalog/page.tsx', 'utf8');
+  assert.match(catalog, /Tomar foto/);
+  assert.match(catalog, /Galería/);
 });
 
 
