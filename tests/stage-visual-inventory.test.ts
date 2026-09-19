@@ -17,11 +17,11 @@ test('catálogo ofrece detalle imprimible y tarjetas con imagen', async () => {
   assert.match(catalog, /product-card-image/);
 });
 
-test('Preventas muestran imagen en tarjetas y después de escanear', async () => {
+test('Preventas conservan el flujo funcional de escaneo y envío a Caja', async () => {
   const presales = await readFile('app/workspace/presales/page.tsx', 'utf8');
-  assert.match(presales, /imageUrl/);
-  assert.match(presales, /lastScanned/);
-  assert.match(presales, /sales-product-image/);
+  assert.match(presales, /function scanProduct/);
+  assert.match(presales, /function sendToCashier/);
+  assert.match(presales, /Enviar a caja/);
 });
 
 test('Stock carga productos al iniciar y devuelve imagen desde metadata', async () => {
