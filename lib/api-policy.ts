@@ -15,6 +15,7 @@ const publicRoutes = new Set([
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
+  { pattern: /^\/api\/ai\/usage$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/catalog$/, policy: { module: 'catalog', action: 'view' } },
   { pattern: /^\/api\/catalog\/(import|export)$/, policy: { module: 'catalog', action: 'export' } },
   { pattern: /^\/api\/inventory(?:\/reservations)?$/, policy: { module: 'inventory', action: 'view' } },
