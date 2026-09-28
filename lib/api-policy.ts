@@ -12,6 +12,7 @@ const publicRoutes = new Set([
   'POST /api/billing/webhook',
   'GET /api/invitations/accept',
   'POST /api/invitations/accept',
+  'GET /api/cron/daily-alerts',
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
