@@ -38,7 +38,7 @@ test('el cron diario exige secreto y llama la generación SQL server-side', () =
   assert.match(cronRoute, /rpc\('generate_daily_smart_alerts'/);
   assert.match(apiPolicy, /GET \/api\/cron\/daily-alerts/);
   assert.match(vercelConfig, /"path": "\/api\/cron\/daily-alerts"/);
-  assert.match(vercelConfig, /"schedule": "0 10 \* \* \*"/);
+  assert.match(vercelConfig, /"schedule": "59 5 \* \* \*"/);
   assert.match(envExample, /CRON_SECRET=/);
 });
 
