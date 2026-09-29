@@ -33,4 +33,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Acción no válida.' }, { status: 400 });
   } catch (error: unknown) { return errorResponse(error); }
 }
-

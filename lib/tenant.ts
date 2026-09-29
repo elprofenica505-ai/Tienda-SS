@@ -34,10 +34,9 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
   const requestedTenant = request.headers.get('x-tenant-id')?.trim();
   if (!requestedTenant || !TENANT_ID_PATTERN.test(requestedTenant)) throw new Error('TENANT_REQUIRED');
   const membership = await findMembership(requestedTenant, auth.data.user.id);
-  if (!membership) throw new Error('TENANT_MEMBERSHIP_NOT_FOUND');
-  if (membership.tenant.status !== 'active') throw new Error('TENANT_INACTIVE');
+  if (!membership || membership.tenant.status !== 'active') throw new Error('FORBIDDEN');
   const roleValue = membership.member.role;
-  if (!isTenantRole(roleValue)) throw new Error('TENANT_ROLE_INVALID');
+  if (!isTenantRole(roleValue)) throw new Error('FORBIDDEN');
   const role = roleValue;
   const policyToken = {
     uid: auth.data.user.id,
@@ -48,12 +47,12 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
   try {
     assertTokenSessionPolicy(policyToken, role);
   } catch (error) {
-    if (error instanceof Error) throw error;
-    throw new Error('SESSION_POLICY_REJECTED');
+    if (error instanceof Error && ['EMAIL_NOT_VERIFIED', 'SESSION_EXPIRED', 'MFA_REQUIRED'].includes(error.message)) throw error;
+    throw new Error('FORBIDDEN');
   }
   const rate = await consumeDistributedRateLimits({ endpoint: request.nextUrl.pathname, ip: getClientAddress(request), uid: auth.data.user.id, tenantId: membership.tenant.id }, { ip: 120, uid: 300, tenant: 1_000, endpoint: 2_000, composite: 100 }, 60_000);
   if (!rate.allowed) throw new Error(`RATE_LIMITED:${rate.blockedBy || 'composite'}:${rate.retryAfterSeconds}`);
-  if (allowedRoles && !allowedRoles.includes(role)) throw new Error('ROLE_NOT_ALLOWED');
+  if (allowedRoles && !allowedRoles.includes(role)) throw new Error('FORBIDDEN');
   return {
     uid: auth.data.user.id,
     tenantId: membership.tenant.id,
@@ -72,7 +71,7 @@ export async function requireTenantPermission(request: NextRequest, module: Perm
   if (settings.error) throw new Error(settings.error.message);
   const saved = settings.data?.value && typeof settings.data.value === 'object' ? settings.data.value as Record<string, unknown> : undefined;
   const permissions = normalizePermissions(saved?.[context.role] as Record<string, unknown> | undefined, context.role);
-  if (!permissions[module][action]) throw new Error(`PERMISSION_DENIED:${module}.${action}`);
+  if (!permissions[module][action]) throw new Error('FORBIDDEN');
   return context;
 }
 
@@ -83,11 +82,6 @@ export function tenantErrorResponse(error: unknown) {
   if (code.startsWith('SUPABASE_') || code.includes('relation') || code.includes('schema cache')) return { status: 503, body: { error: 'La conexión del servidor con Supabase no está configurada correctamente.' } };
   if (code === 'UNAUTHENTICATED') return { status: 401, body: { error: 'Autenticación requerida.' } };
   if (code === 'TENANT_REQUIRED') return { status: 400, body: { error: 'Falta identificar la empresa.' } };
-  if (code === 'TENANT_MEMBERSHIP_NOT_FOUND') return { status: 403, body: { error: 'Tu usuario no tiene una membresía activa en esta empresa.', code } };
-  if (code === 'TENANT_INACTIVE') return { status: 403, body: { error: 'Esta empresa no está activa.', code } };
-  if (code === 'TENANT_ROLE_INVALID') return { status: 403, body: { error: 'La membresía tiene un rol inválido.', code } };
-  if (code === 'ROLE_NOT_ALLOWED') return { status: 403, body: { error: 'Tu rol no permite esta operación.', code } };
-  if (code.startsWith('PERMISSION_DENIED:')) return { status: 403, body: { error: 'Tu rol no tiene habilitado este permiso.', code } };
   if (code === 'BRANCH_REQUIRED') return { status: 400, body: { error: 'Debes indicar una sucursal autorizada cuando tienes más de una disponible.', code } };
   if (code === 'FORBIDDEN') return { status: 403, body: { error: 'No tienes permiso para esta empresa.' } };
   if (code === 'BRANCH_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa sucursal.', code } };
@@ -95,7 +89,6 @@ export function tenantErrorResponse(error: unknown) {
   if (code === 'EMAIL_NOT_VERIFIED') return { status: 403, body: { error: 'Verifica tu correo electrónico antes de continuar.', code } };
   if (code === 'SESSION_EXPIRED') return { status: 401, body: { error: 'Tu sesión expiró. Inicia sesión nuevamente.', code } };
   if (code === 'MFA_REQUIRED') return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };
-  if (code === 'SESSION_POLICY_REJECTED') return { status: 403, body: { error: 'La sesión no cumple la política de seguridad.', code } };
   if (code === 'SUBSCRIPTION_RESTRICTED') return { status: 402, body: { error: 'Tu suscripción requiere atención para continuar con esta operación.', code, upgradeUrl: '/workspace/billing' } };
   if (code.startsWith('RATE_LIMITED:')) { const [, scope, retryAfter] = code.split(':'); return { status: 429, body: { error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.', code: 'RATE_LIMITED', scope, retryAfterSeconds: Number(retryAfter) || 1 } }; }
   if (/function .* does not exist|Could not find the function|42883|42P01|schema cache/i.test(code)) return { status: 503, body: { error: 'El módulo no está actualizado en Supabase. Ejecuta las migraciones pendientes.', code: 'DATABASE_MIGRATION_REQUIRED' } };

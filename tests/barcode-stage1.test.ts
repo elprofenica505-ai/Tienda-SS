@@ -63,3 +63,18 @@ test('las fotos de producto se comprimen antes de enviarse y el servidor limita 
   assert.match(route, /950 \* 1024/);
   assert.match(route, /product-images/);
 });
+
+test('migraciones agregan el índice por tenant y no hacen público un bucket preexistente', async () => {
+  const [barcodeMigration, imageMigration] = await Promise.all([
+    readFile('supabase/migrations/20260929000001_product_barcodes.sql', 'utf8'),
+    readFile('supabase/migrations/20260929000002_product_images.sql', 'utf8'),
+  ]);
+  assert.match(barcodeMigration, /add column if not exists barcode text/i);
+  assert.match(barcodeMigration, /unique index if not exists products_tenant_barcode_unique/i);
+  assert.match(barcodeMigration, /on public\.products \(tenant_id, barcode\)/i);
+  assert.doesNotMatch(barcodeMigration, /drop|delete|truncate/i);
+  assert.match(imageMigration, /on conflict \(id\) do nothing/i);
+  assert.match(imageMigration, /public = true/i);
+  assert.match(imageMigration, /raise exception/i);
+  assert.doesNotMatch(imageMigration, /do update set public/i);
+});
