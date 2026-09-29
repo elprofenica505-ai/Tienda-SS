@@ -36,7 +36,7 @@ const superadminRoutes = [
 ];
 
 const discoveredTenantRoutes = ['/api/tenants/me'];
-const publicRoutes = ['/api/health', '/api/auth/login-attempt', '/api/tenants', '/api/billing/webhook'];
+const publicRoutes = ['/api/health', '/api/auth/login-attempt', '/api/tenants', '/api/billing/webhook', '/api/cron/daily-alerts'];
 
 function request(path: string, method = 'GET', headers?: Record<string, string>) {
   return new NextRequest(`http://localhost${path}`, { method, headers });
