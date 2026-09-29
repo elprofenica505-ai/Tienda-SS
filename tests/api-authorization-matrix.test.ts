@@ -5,7 +5,6 @@ import { middleware } from '@/middleware';
 import { getApiPolicy, isPublicApiRoute } from '@/lib/api-policy';
 
 const protectedTenantRoutes = [
-  '/api/ai/usage',
   '/api/billing',
   '/api/cash-sessions',
   '/api/catalog',
