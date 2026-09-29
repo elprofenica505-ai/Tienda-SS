@@ -5,20 +5,39 @@ import { requireTenantPermission, tenantErrorResponse, type TenantRole } from '@
 import { assertBranchAccess } from '@/lib/data-scope';
 import { assertResolvedBranchAccess, resolveAuthorizedBranchId, resolveTenantBranchAndWarehouse } from '@/lib/organization-scope';
 import { writeImmutableAudit } from '@/lib/audit';
+import { reportError } from '@/lib/error-reporting';
 
 export const runtime = 'nodejs';
 const cashierRoles: TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'cajero'];
-type PreSaleLine = { productId: string; name: string; sku: string; quantity: number; unitPrice: number; total: number };
+type PreSaleLine = { productId: string; name: string; sku: string; quantity: number; unitPrice: number; total: number; description?: string; imageUrl?: string | null };
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function money(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0; }
 function ticketCode() { return `P-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${randomBytes(3).toString('hex').toUpperCase()}`; }
 function pageCursor(value: unknown): { createdAt: string; id: string } | null { try { const parsed = JSON.parse(Buffer.from(text(value, 300), 'base64url').toString('utf8')); return typeof parsed.createdAt === 'string' && typeof parsed.id === 'string' ? parsed : null; } catch { return null; } }
-function errorResponse(error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
-function serialize(row: Record<string, unknown>) { return { id: row.id, ticketCode: row.ticket_code, items: row.items || [], total: row.total, vendedorUid: row.seller_uid, vendedorEmail: row.seller_email, vendedorRole: row.seller_role, status: row.status, evidenceRefs: row.evidence_refs || [], metadata: row.metadata || {}, saleId: row.sale_id, branchId: row.branch_id, createdAt: row.created_at, updatedAt: row.updated_at, paidBy: row.paid_by, paidAt: row.paid_at }; }
+function errorResponse(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  const normalized = message.toLowerCase();
+  if (normalized.includes('does not exist') || normalized.includes('undefined function') || normalized.includes('undefined column') || normalized.includes('pgrst202') || normalized.includes('pgrst204')) return NextResponse.json({ error: 'El esquema de Preventas o Inventario no está actualizado en Supabase.', code: 'DATABASE_MIGRATION_REQUIRED' }, { status: 503 });
+  if (normalized.includes('permission denied') || normalized.includes('42501')) return NextResponse.json({ error: 'Supabase rechazó la operación de Preventas por permisos de base de datos.', code: 'DATABASE_PERMISSION_DENIED' }, { status: 503 });
+  const known: Record<string, [string, number]> = {
+    INSUFFICIENT_WAREHOUSE_STOCK: ['No hay existencias suficientes en el almacén de la sucursal.', 409],
+    RESERVATION_EMPTY: ['La preventa no contiene productos físicos que puedan reservarse.', 409],
+    INVALID_RESERVATION_QUANTITY: ['La cantidad de la preventa no es válida para reservar inventario.', 400],
+    RESERVATION_ITEMS_REQUIRED: ['No se recibieron productos válidos para reservar.', 400],
+    DATABASE_MIGRATION_REQUIRED: ['El módulo de inventario no está actualizado en Supabase.', 503],
+  };
+  for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0], code: key }, { status: value[1] });
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
+}
+function productImage(product: Record<string, unknown> | undefined) { const metadata = product?.metadata && typeof product.metadata === 'object' ? product.metadata as Record<string, unknown> : {}; const value = metadata.imageUrl || metadata.image_url || metadata.photoUrl || metadata.photo_url; return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null; }
+function serialize(row: Record<string, unknown>, productById = new Map<string, Record<string, unknown>>()) { const items = Array.isArray(row.items) ? row.items.map((item: any) => { const product = productById.get(String(item.productId)); return { ...item, name: item.name || product?.name || 'Producto', sku: item.sku || product?.sku || '', description: item.description || product?.description || '', imageUrl: item.imageUrl || productImage(product) }; }) : []; return { id: row.id, ticketCode: row.ticket_code, items, total: row.total, vendedorUid: row.seller_uid, vendedorEmail: row.seller_email, vendedorRole: row.seller_role, status: row.status, evidenceRefs: row.evidence_refs || [], metadata: row.metadata || {}, saleId: row.sale_id, branchId: row.branch_id, createdAt: row.created_at, updatedAt: row.updated_at, paidBy: row.paid_by, paidAt: row.paid_at }; }
 
 export async function GET(request: NextRequest) {
   try {
-    const context = await requireTenantPermission(request, 'sales', 'view');
+    // Caja consulta preventas que luego cobrará como una venta; usa la misma
+    // capacidad efectiva que el checkout directo, no una vista más restrictiva.
+    const context = await requireTenantPermission(request, 'sales', 'create');
     const supabase = getSupabaseServer();
     const code = text(request.nextUrl.searchParams.get('code'), 80);
     const cursor = pageCursor(request.nextUrl.searchParams.get('cursor'));
@@ -51,11 +70,15 @@ export async function GET(request: NextRequest) {
     if (result.error) throw new Error(result.error.message);
     if (code && !result.data?.length) return NextResponse.json({ error: 'No encontramos una preventa con ese código.' }, { status: 404 });
     const rows = result.data || [];
+    const productIds = Array.from(new Set(rows.flatMap((row: any) => Array.isArray(row.items) ? row.items.map((item: any) => String(item.productId || '')).filter(Boolean) : [])));
+    const products = productIds.length ? await supabase.from('products').select('id,name,sku,description,metadata').eq('tenant_id', context.tenantId).in('id', productIds) : { data: [], error: null } as any;
+    if (products.error) throw new Error(products.error.message);
+    const productById = new Map<string, Record<string, unknown>>((products.data || []).map((product: any) => [String(product.id), product]));
     const docs = code ? rows : rows.slice(0, 20);
     const last = docs.at(-1);
     const nextCursor = !code && rows.length > 20 && last ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url') : null;
-    return NextResponse.json(code ? { ok: true, presale: serialize(rows[0]) } : { ok: true, presales: docs.map(serialize), nextCursor }, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) { return errorResponse(error); }
+    return NextResponse.json(code ? { ok: true, presale: serialize(rows[0], productById) } : { ok: true, presales: docs.map((row) => serialize(row, productById)), nextCursor }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: unknown) { reportError(error, { correlationId: request.headers.get('x-correlation-id') || 'unknown', tenantId: request.headers.get('x-tenant-id') || undefined, routePath: '/api/presales', method: request.method }); return errorResponse(error); }
 }
 
 export async function POST(request: NextRequest) {
@@ -71,11 +94,11 @@ export async function POST(request: NextRequest) {
     if (!unique.size) return NextResponse.json({ error: 'Las cantidades de la preventa no son válidas.' }, { status: 400 });
     const supabase = getSupabaseServer();
     const productIds = Array.from(unique.keys());
-    const products = await supabase.from('products').select('id,name,sku,price,active').eq('tenant_id', context.tenantId).in('id', productIds);
+    const products = await supabase.from('products').select('id,name,sku,description,price,active,item_type,metadata').eq('tenant_id', context.tenantId).in('id', productIds);
     if (products.error) throw new Error(products.error.message);
     const productById = new Map((products.data || []).map((product) => [String(product.id), product]));
     if (productById.size !== productIds.length || productIds.some((id) => productById.get(id)?.active === false)) throw new Error('PRODUCT_NOT_FOUND');
-    const lines: PreSaleLine[] = productIds.map((id) => { const data = productById.get(id)!; const quantity = unique.get(id) || 0; const unitPrice = money(Number(data.price)); return { productId: id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity }; });
+    const lines: PreSaleLine[] = productIds.map((id) => { const data = productById.get(id)!; const quantity = unique.get(id) || 0; const unitPrice = money(Number(data.price)); return { productId: id, name: text(data.name) || 'Producto', sku: text(data.sku, 50), quantity, unitPrice, total: unitPrice * quantity, description: text(data.description, 500), imageUrl: productImage(data) }; });
     const total = lines.reduce((sum, line) => sum + line.total, 0);
     const metadata = { customerId: text(body.customerId, 120) || null, suggestedPayment: ['cash', 'card', 'transfer', 'credit'].includes(body.suggestedPayment) ? body.suggestedPayment : null, documentType: text(body.documentType, 40) || 'ticket', servicePoint: text(body.servicePoint, 120), notes: text(body.notes, 1000), itemNotes: typeof body.itemNotes === 'object' && body.itemNotes ? body.itemNotes : {} };
     const requestedBranchId = text(body.branchId, 80) || text(request.headers.get('x-branch-id'), 80);
@@ -92,9 +115,18 @@ export async function POST(request: NextRequest) {
     const inserted = await supabase.from('presales').insert({ tenant_id: context.tenantId, branch_id: branchId || null, warehouse_id: warehouseId || null, ticket_code: ticketCode(), items: lines, total, seller_uid: context.uid, seller_email: context.email || null, seller_role: context.role, status: action === 'sent_to_cashier' ? 'draft' : action, evidence_refs: evidenceRefs, metadata }).select('id,ticket_code,status,total').single();
     if (inserted.error) throw new Error(inserted.error.message);
     if (action === 'sent_to_cashier') {
-      const reservation = await supabase.rpc('reserve_inventory_contract', { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: lines.map((line) => ({ productId: line.productId, quantity: line.quantity })), target_reason: `Preventa ${inserted.data.ticket_code}` });
-      if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
-      reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
+      const physicalItems = productIds
+        .filter((id) => productById.get(id)?.item_type !== 'service')
+        .map((id) => ({ productId: id, quantity: unique.get(id) || 0 }));
+      if (physicalItems.length) {
+        const reservationArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_user_id: context.uid, target_items: physicalItems, target_reason: `Preventa ${inserted.data.ticket_code}` };
+        let reservation = await supabase.rpc('reserve_inventory_contract', reservationArgs);
+        // Compatibilidad con despliegues que tienen la migración de reservas base,
+        // pero todavía no la envoltura del contrato canónico.
+        if (reservation.error && /function .*reserve_inventory_contract.*does not exist|Could not find the function|42883|PGRST202/i.test(reservation.error.message || '')) reservation = await supabase.rpc('reserve_inventory', reservationArgs);
+        if (reservation.error) { await supabase.from('presales').delete().eq('tenant_id', context.tenantId).eq('id', inserted.data.id); throw new Error(reservation.error.message); }
+        reservationId = String((reservation.data as Record<string, unknown>)?.reservationId || '');
+      }
       const sent = await supabase.from('presales').update({ status: 'sent_to_cashier', reservation_id: reservationId || null, warehouse_id: warehouseId, updated_at: new Date().toISOString() }).eq('tenant_id', context.tenantId).eq('id', inserted.data.id).select('id,ticket_code,status,total').single();
       if (sent.error) {
         if (reservationId) await supabase.rpc('release_inventory_reservation', { target_tenant_id: context.tenantId, target_reservation_id: reservationId, target_user_id: context.uid });
@@ -103,9 +135,14 @@ export async function POST(request: NextRequest) {
       }
       inserted.data = sent.data;
     }
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
+    try {
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'presale.created', entity: 'presale', entityId: inserted.data.id, after: { status: action, total, itemCount: lines.length }, result: 'success' });
+    } catch (auditError) {
+      console.error('presale_audit_failed_after_commit', auditError);
+    }
     return NextResponse.json({ ok: true, presaleId: inserted.data.id, ticketCode: inserted.data.ticket_code, status: inserted.data.status, total: inserted.data.total }, { status: 201 });
   } catch (error: unknown) {
+    reportError(error, { correlationId: request.headers.get('x-correlation-id') || 'unknown', tenantId: request.headers.get('x-tenant-id') || undefined, routePath: '/api/presales', method: request.method });
     if (error instanceof Error && error.message === 'PRODUCT_NOT_FOUND') return NextResponse.json({ error: 'Uno de los productos ya no está disponible.' }, { status: 404 });
     return errorResponse(error);
   }

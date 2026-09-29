@@ -28,6 +28,7 @@ function errorResponse(error: unknown) {
     INVALID_SALE_TOTAL: ['El total de la venta debe ser mayor que cero.', 400],
     CASH_RECEIVED_TOO_LOW: ['El efectivo recibido es menor que el total del ticket.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
+    PRESALE_OTHER_BRANCH: ['La preventa es de otra sucursal.', 409],
   };
   for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] });
   const response = tenantErrorResponse(error);
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     if (presaleResult.error) throw new Error(presaleResult.error.message);
     if (!presaleResult.data) throw new Error('PRESALE_NOT_FOUND');
     const presale = presaleResult.data;
-    if (presale.branch_id && presale.branch_id !== branchId) throw new Error('BRANCH_NOT_FOUND');
+    if (presale.branch_id && presale.branch_id !== branchId) throw new Error('PRESALE_OTHER_BRANCH');
     if (presale.status === 'paid') return NextResponse.json({ ok: true, saleId: presale.sale_id, total: Number(presale.total || 0), alreadyPaid: true });
     if (presale.status !== 'sent_to_cashier') throw new Error('PRESALE_NOT_READY');
     const rawItems = Array.isArray(presale.items) ? presale.items as Array<Record<string, unknown>> : [];
@@ -142,7 +143,11 @@ export async function POST(request: NextRequest) {
       }
       throw new Error('PRESALE_NOT_READY');
     }
-    await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
+    try {
+      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: 'sale.created_from_presale', entity: 'sale', entityId: data.saleId, after: data, metadata: { presaleId }, result: 'success' });
+    } catch (auditError) {
+      console.error('presale_checkout_audit_failed_after_commit', auditError);
+    }
     return NextResponse.json({ ok: true, ...data, ticketCode: presale.ticket_code, paymentMethod, cashReceived, changeAmount, items: rawItems, issuer, seller, fiscal: { mode: config.mode, provider: config.provider, showBarcode: config.showBarcode !== false, status: shouldEmitFiscal ? 'pendiente_envio_fiscal' : 'local', emission: fiscalEmission }, alreadyPaid: false }, { status: 201 });
   } catch (error: unknown) { return errorResponse(error); }
 }
