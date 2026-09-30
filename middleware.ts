@@ -30,8 +30,13 @@ function hasSupabaseAuthCookie(request: NextRequest) {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const canonicalHost = 'tienda-ss-ozkq.vercel.app';
-  if (process.env.VERCEL_ENV === 'production' && request.nextUrl.hostname.endsWith('.vercel.app') && request.nextUrl.hostname !== canonicalHost) {
+  const canonicalHost = process.env.NEXT_PUBLIC_CANONICAL_HOST || 'tienda-ss-ozkq.vercel.app';
+  const isPreview = process.env.VERCEL_ENV === 'preview';
+  const isProduction = process.env.VERCEL_ENV === 'production';
+  
+  // Only enforce canonical host on production, never on preview deployments
+  // Never redirect API routes — they must remain accessible on any hostname
+  if (!isPreview && isProduction && !pathname.startsWith('/api/') && request.nextUrl.hostname.endsWith('.vercel.app') && request.nextUrl.hostname !== canonicalHost) {
     const canonicalUrl = request.nextUrl.clone();
     canonicalUrl.hostname = canonicalHost;
     return NextResponse.redirect(canonicalUrl, 308);
