@@ -66,9 +66,13 @@ function NotificationsContent() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo marcar la alerta.');
-      setItems((current) => current.map((notice) => notice.id === item.id && notice.source === item.source
-        ? { ...notice, read: true }
-        : notice));
+      setItems((current) =>
+        current.map((notice) =>
+          notice.id === item.id && notice.source === item.source
+            ? { ...notice, read: true }
+            : notice
+        )
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo marcar la alerta.');
     }
@@ -81,8 +85,11 @@ function NotificationsContent() {
   }
 
   const unread = items.filter((item) => !item.read).length;
+
+  // ✅ AGREGADO: icono para out_of_stock (stock agotado = crítico)
   const icon: Record<string, string> = {
     low_stock: '◇',
+    out_of_stock: '⚠',
     overdue_receivables: '$',
     sales_comparison: '↗',
     no_movement: '◷',
@@ -91,19 +98,32 @@ function NotificationsContent() {
     subscription_updated: '✓',
   };
 
+  // ✅ AGREGADO: etiqueta de severidad que incluye 'critical'
+  function severityLabel(severity: string) {
+    if (severity === 'critical') return 'Crítico';
+    if (severity === 'warning') return 'Revisar';
+    return 'Informativa';
+  }
+
   return (
     <main className="workspace-page">
       <WorkspaceSidebar />
       <section className="workspace-main notifications-main">
         <header className="notifications-header">
           <div>
-            <button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button>
+            <button className="text-link" onClick={() => router.push('/workspace')}>
+              ← Resumen
+            </button>
             <div className="eyebrow catalog-eyebrow">Tu espacio / Alertas</div>
             <h1>Alertas y notificaciones</h1>
             <p>Información guardada para <strong>{tenant.name}</strong>; las alertas operativas se actualizan una vez al día.</p>
-            <p><strong>{activeAlertsCount}</strong> alertas operativas activas · <strong>{unread}</strong> sin leer</p>
+            <p>
+              <strong>{activeAlertsCount}</strong> alertas operativas activas · <strong>{unread}</strong> sin leer
+            </p>
           </div>
-          <button className="button button-secondary" onClick={() => void load()} disabled={loading}>Actualizar</button>
+          <button className="button button-secondary" onClick={() => void load()} disabled={loading}>
+            Actualizar
+          </button>
         </header>
 
         {message && <div className="catalog-message" role="alert">{message}</div>}
@@ -115,22 +135,26 @@ function NotificationsContent() {
               <h2>Todo está tranquilo</h2>
               <p>Aquí aparecerán alertas de inventario, créditos vencidos, comparación de ventas y productos sin movimiento.</p>
             </div>
-          ) : items.map((item) => (
-            <article className={`notice-card ${item.read ? 'read' : ''}`} key={`${item.source}-${item.id}`}>
-              <span className={`notice-icon ${item.type}`} aria-hidden="true">{icon[item.type] || 'i'}</span>
-              <div>
-                <h3>{item.title}</h3>
-                <p>{item.message}</p>
-                <small>
-                  {item.source === 'daily_alert'
-                    ? `Alerta operativa · ${item.severity === 'warning' ? 'Revisar' : 'Informativa'}`
-                    : 'Notificación de la plataforma'}
-                  {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString()}` : ''}
-                </small>
-              </div>
-              {!item.read && <button onClick={() => void markRead(item)}>Marcar leída</button>}
-            </article>
-          ))}
+          ) : (
+            items.map((item) => (
+              <article className={`notice-card ${item.read ? 'read' : ''}`} key={`${item.source}-${item.id}`}>
+                <span className={`notice-icon ${item.type}`} aria-hidden="true">
+                  {icon[item.type] || 'i'}
+                </span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <p>{item.message}</p>
+                  <small>
+                    {item.source === 'daily_alert'
+                      ? `Alerta operativa · ${severityLabel(item.severity)}`
+                      : 'Notificación de la plataforma'}
+                    {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString()}` : ''}
+                  </small>
+                </div>
+                {!item.read && <button onClick={() => void markRead(item)}>Marcar leída</button>}
+              </article>
+            ))
+          )}
         </div>
       </section>
     </main>
