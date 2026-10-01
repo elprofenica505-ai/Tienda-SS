@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildLiveStockAlerts,
+  fetchLiveStockAlerts,
   formatQuantity,
   mergeStockAlerts,
   prioritizeAlerts,
@@ -146,4 +148,37 @@ test('prioritizeAlerts: críticas primero, luego sin leer, luego las más recien
 
   assert.deepEqual(ordered, ['critical-old', 'new-unread-warning', 'old-unread-warning', 'new-read-warning', 'info']);
   assert.deepEqual(rows.map((row) => row.id), before);
+});
+
+// Cliente mínimo que no informa el total de filas (sin "count"), para probar el camino alterno.
+function clientWithoutCount(tables: Record<string, Array<Record<string, unknown>>>, count?: number) {
+  return {
+    from: (table: string) => {
+      const rows = tables[table] || [];
+      const builder: Record<string, unknown> = {};
+      for (const method of ['select', 'eq', 'neq', 'order']) builder[method] = () => builder;
+      builder.range = (from: number, to: number) => Promise.resolve({ data: rows.slice(from, to + 1), error: null, count });
+      return builder;
+    },
+  } as unknown as Pick<SupabaseClient, 'from'>;
+}
+
+test('fetchLiveStockAlerts: sin total informado, una página incompleta marca el final (y un total inválido se ignora)', async () => {
+  const products = Array.from({ length: 1200 }, (_, index) => ({ id: `p${index}`, name: `Producto ${index}`, sku: `S${index}`, unit: 'unidad', min_stock: 5 }));
+  const stocks = products.map((item, index) => ({ product_id: item.id, warehouse_id: 'w1', quantity: index === 1199 ? 0 : 9 }));
+  const tables = { warehouses: [{ id: 'w1' }], products, inventory_stocks: stocks };
+
+  for (const count of [undefined, Number.NaN]) {
+    const alerts = await fetchLiveStockAlerts(clientWithoutCount(tables, count), 'tenant');
+    assert.deepEqual(alerts.map((alert) => alert.productId), ['p1199']);
+  }
+});
+
+test('fetchLiveStockAlerts: sin almacenes activos no se inventan alertas', async () => {
+  const tables = {
+    warehouses: [],
+    products: [{ id: 'p1', name: 'Coca', sku: 'C', unit: 'unidad', min_stock: 5 }],
+    inventory_stocks: [],
+  };
+  assert.deepEqual(await fetchLiveStockAlerts(clientWithoutCount(tables), 'tenant'), []);
 });

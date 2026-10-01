@@ -71,6 +71,7 @@ function resetData() {
   fake.tables.daily_smart_alerts = [];
   fake.tables.notifications = [];
   fake.failTables.clear();
+  fake.maxRows = undefined;
   fake.rpcCalls.length = 0;
   fake.requests.length = 0;
 }
@@ -290,6 +291,24 @@ test('GET: más de 1000 productos se leen completos por páginas', async () => {
 
   assert.equal(body.activeAlertsCount, 3);
   assert.equal(fake.requests.filter((item) => item.table === 'products').length, 3, '2300 filas = 3 páginas de producto');
+  assert.equal(fake.requests.filter((item) => item.table === 'inventory_stocks').length, 3);
+});
+
+test('GET: si la API limita cada respuesta a 500 filas, igual se leen todos los productos (sin perder ni inventar agotados)', async () => {
+  const many = Array.from({ length: 1300 }, (_, index) => product(`p-cap-${index}`, `Producto ${index}`));
+  // Un producto de cada 100 está agotado (13 en total), repartidos por todo el rango leído.
+  const depleted = many.filter((_, index) => index % 100 === 0).map((item) => String(item.id)).sort();
+  fake.tables.products = many;
+  fake.tables.inventory_stocks = many.map((item, index) => stock(String(item.id), index % 100 === 0 ? 0 : 50));
+  fake.maxRows = 500;
+  fake.requests.length = 0;
+
+  const body = await list();
+
+  const found = body.notifications.filter((item) => item.type === 'out_of_stock').map((item) => String(item.metadata.productId)).sort();
+  assert.deepEqual(found, depleted);
+  assert.equal(body.activeAlertsCount, 13);
+  assert.equal(fake.requests.filter((item) => item.table === 'products').length, 3, '1300 filas con páginas de 500 = 3 lecturas');
   assert.equal(fake.requests.filter((item) => item.table === 'inventory_stocks').length, 3);
 });
 

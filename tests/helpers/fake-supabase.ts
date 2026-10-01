@@ -22,6 +22,8 @@ export type FakeSupabase = {
   requests: Array<{ method: string; table: string; search: string }>;
   /** tablas que responden con error 500 para simular una falla de la base de datos */
   failTables: Set<string>;
+  /** límite de filas por respuesta (como el "Max rows" de la API de Supabase); sin valor = sin límite */
+  maxRows?: number;
   close: () => Promise<void>;
 };
 
@@ -53,7 +55,7 @@ function matches(row: FakeRow, column: string, expression: string): boolean {
   }
 }
 
-function filterRows(rows: FakeRow[], params: URLSearchParams): FakeRow[] {
+function filterRows(rows: FakeRow[], params: URLSearchParams, maxRows?: number): { rows: FakeRow[]; total: number; offset: number } {
   let result = rows.filter((row) => {
     for (const [column, expression] of Array.from(params.entries())) {
       if (RESERVED_PARAMS.has(column)) continue;
@@ -87,8 +89,9 @@ function filterRows(rows: FakeRow[], params: URLSearchParams): FakeRow[] {
   }
 
   const offset = Number(params.get('offset') || 0);
-  const limit = params.get('limit') === null ? undefined : Number(params.get('limit'));
-  return result.slice(offset, limit === undefined ? undefined : offset + limit);
+  const requested = params.get('limit') === null ? Number.POSITIVE_INFINITY : Number(params.get('limit'));
+  const limit = Math.min(requested, maxRows ?? Number.POSITIVE_INFINITY);
+  return { rows: result.slice(offset, Number.isFinite(limit) ? offset + limit : undefined), total: result.length, offset };
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -153,18 +156,25 @@ export async function startFakeSupabase(initial: { tables?: Record<string, FakeR
     const rows = state.tables[table] || (state.tables[table] = []);
     const wantsObject = String(request.headers.accept || '').includes('application/vnd.pgrst.object+json');
     const wantsRepresentation = String(request.headers.prefer || '').includes('return=representation');
-    const reply = (selected: FakeRow[]) => {
+    const wantsCount = /count=(exact|planned|estimated)/.test(String(request.headers.prefer || ''));
+    const reply = (selected: FakeRow[], page?: { total: number; offset: number }) => {
       if (wantsObject) {
         if (selected.length === 1) return send(200, selected[0]);
         return send(406, { code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned', details: `The result contains ${selected.length} rows`, hint: null });
       }
-      return send(200, selected, { 'content-range': `0-${Math.max(0, selected.length - 1)}/${selected.length}` });
+      const total = page?.total ?? selected.length;
+      const offset = page?.offset ?? 0;
+      const range = selected.length === 0 ? '*' : `${offset}-${offset + selected.length - 1}`;
+      return send(200, selected, { 'content-range': `${range}/${wantsCount ? total : '*'}` });
     };
 
-    if (method === 'GET') return reply(filterRows(rows, url.searchParams));
+    if (method === 'GET') {
+      const page = filterRows(rows, url.searchParams, state.maxRows);
+      return reply(page.rows, page);
+    }
     if (method === 'PATCH') {
       const body = (await readJson(request)) as FakeRow;
-      const targets = filterRows(rows, url.searchParams);
+      const targets = filterRows(rows, url.searchParams).rows;
       for (const row of targets) Object.assign(row, body);
       return wantsRepresentation ? reply(targets) : send(204);
     }

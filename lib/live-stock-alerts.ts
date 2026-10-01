@@ -49,12 +49,12 @@ export type LiveStockResult = {
   error: string | null;
 };
 
-type PageResult = { data: Array<Record<string, any>> | null; error: { message: string } | null };
+type PageResult = { data: Array<Record<string, any>> | null; error: { message: string } | null; count?: number | null };
 
 const PAGE_SIZE = 1000;
-// Tope de seguridad (20 000 filas por tabla). Si se supera, NO se calculan alertas en vivo:
+// Tope de seguridad (100 páginas por tabla). Si se supera, NO se calculan alertas en vivo:
 // con datos incompletos se marcarían productos como agotados por error.
-const MAX_PAGES = 20;
+const MAX_PAGES = 100;
 
 const SEVERITY_RANK: Record<string, number> = { critical: 0, warning: 1, info: 2 };
 
@@ -196,12 +196,16 @@ async function fetchAllRows(
 ): Promise<Array<Record<string, any>>> {
   const rows: Array<Record<string, any>> = [];
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const from = page * PAGE_SIZE;
-    const result = await readPage(from, from + PAGE_SIZE - 1);
+    // El desplazamiento usa lo ya leído (no page * PAGE_SIZE): así no se saltan filas si el servidor
+    // devuelve páginas más cortas de lo pedido (límite "max rows" de la API).
+    const result = await readPage(rows.length, rows.length + PAGE_SIZE - 1);
     if (result.error) throw new Error(`${label}: ${result.error.message}`);
     const data = result.data || [];
     rows.push(...data);
-    if (data.length < PAGE_SIZE) return rows;
+    if (data.length === 0) return rows;
+    const total = typeof result.count === 'number' && Number.isFinite(result.count) ? result.count : null;
+    // Con el total exacto se sigue leyendo hasta completarlo; sin total, una página incompleta es el final.
+    if (total !== null ? rows.length >= total : data.length < PAGE_SIZE) return rows;
   }
   throw new Error(`${label}: hay demasiados registros para revisar el stock en vivo`);
 }
@@ -213,7 +217,7 @@ export async function fetchLiveStockAlerts(
 ): Promise<LiveStockAlert[]> {
   const warehouses = await fetchAllRows('warehouses', (from, to) => supabase
     .from('warehouses')
-    .select('id')
+    .select('id', { count: 'exact' })
     .eq('tenant_id', tenantId)
     .eq('active', true)
     .order('id')
@@ -225,7 +229,7 @@ export async function fetchLiveStockAlerts(
   const [productRows, stockRows] = await Promise.all([
     fetchAllRows('products', (from, to) => supabase
       .from('products')
-      .select('id,name,sku,unit,min_stock')
+      .select('id,name,sku,unit,min_stock', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('active', true)
       .neq('item_type', 'service')
@@ -233,7 +237,7 @@ export async function fetchLiveStockAlerts(
       .range(from, to)),
     fetchAllRows('inventory_stocks', (from, to) => supabase
       .from('inventory_stocks')
-      .select('product_id,warehouse_id,quantity')
+      .select('product_id,warehouse_id,quantity', { count: 'exact' })
       .eq('tenant_id', tenantId)
       .order('id')
       .range(from, to)),
