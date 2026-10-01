@@ -479,3 +479,8 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 
 .presale-product-image,.presale-product-placeholder{width:88px;height:88px;flex:0 0 88px;border-radius:12px;object-fit:cover;background:#f1f6ef;display:grid;place-items:center;color:#718072;font-size:2rem}
 .presale-product-image{object-fit:cover}
+
+/* Alertas: stock agotado (crítico) y mensaje de detalle. */
+.notice-icon.out_of_stock{background:#fde8e6;color:#c0392b}
+.notice-icon.low_stock{background:#fff0dd;color:#bd7d37}
+.catalog-message small{display:block;margin-top:4px;opacity:.75}

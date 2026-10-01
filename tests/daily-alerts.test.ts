@@ -48,7 +48,7 @@ test('la bandeja muestra alertas guardadas solo a roles de administración y per
   assert.match(notificationRoute, /activeAlertsCount/);
   assert.match(notificationRoute, /source === 'daily_alert'/);
   assert.match(notificationPage, /alertas operativas se actualizan/i);
-  assert.match(sidebar, /Notificaciones/);
+  assert.match(sidebar, /Alertas diarias/);
   assert.match(sidebar, /activeAlertCount/);
 });
 
