@@ -26,6 +26,7 @@ const controlItems: NavItem[] = [
   { href: '/workspace/finance', icon: '$', label: 'Finanzas' },
   { href: '/workspace/reports', icon: '≡', label: 'Reportes / Ganancias' },
   { href: '/workspace/notifications', icon: '♧', label: 'Alertas diarias' },
+  { href: '/workspace/daily-summary', icon: '✦', label: 'Resumen diario' },
 ];
 
 const companyItems: NavItem[] = [
@@ -127,7 +128,7 @@ export function WorkspaceSidebar() {
 
   const visibleControlItems = isManager
     ? controlItems
-    : controlItems.filter((item) => item.href !== '/workspace/notifications');
+    : controlItems.filter((item) => item.href !== '/workspace/notifications' && item.href !== '/workspace/daily-summary');
 
   return (
     <aside className={`workspace-sidebar${mobileOpen ? ' mobile-open' : ''}`} aria-label="Navegación principal">
