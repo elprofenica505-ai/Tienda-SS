@@ -13,6 +13,7 @@ const publicRoutes = new Set([
   'GET /api/invitations/accept',
   'POST /api/invitations/accept',
   'GET /api/cron/daily-alerts',
+  'GET /api/cron/daily-summary',
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
@@ -27,6 +28,7 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/finance$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/(members|usuarios)$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/notifications$/, policy: { module: 'dashboard', action: 'view' } },
+  { pattern: /^\/api\/daily-summaries(?:\/settings)?$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/permissions$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/receivables(?:\/credit-notes)?$/, policy: { module: 'receivables', action: 'view' } },
   { pattern: /^\/api\/reports(?:\/export)?$/, policy: { module: 'reports', action: 'view' } },

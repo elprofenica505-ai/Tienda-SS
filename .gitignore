@@ -22,3 +22,6 @@ ui-debug.log*
 # Playwright artifacts
 playwright-report/
 test-results/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
