@@ -19,6 +19,12 @@ function tableFor(type: ContactType) {
   return type === 'supplier' ? 'suppliers' : 'customers';
 }
 
+function columnsFor(type: ContactType) {
+  return type === 'customer'
+    ? 'id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,whatsapp_opt_in,sales_blocked,sales_blocked_reason,created_at,updated_at'
+    : 'id,tenant_id,name,email,phone,document_id,active,metadata,created_at,updated_at';
+}
+
 function money(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.round(Math.max(0, value) * 100) / 100
@@ -43,6 +49,7 @@ function mapContact(row: Record<string, any>, type: ContactType) {
       termDays: Number(row.term_days || 30),
       graceDays: Number(row.grace_days || 0),
       creditStatus: row.credit_status || 'activo',
+      whatsappOptIn: row.whatsapp_opt_in === true,
       salesBlocked: row.sales_blocked === true,
       salesBlockedReason: row.sales_blocked_reason || '',
     } : {}),
@@ -65,9 +72,7 @@ export async function GET(request: NextRequest) {
     const page = parsePage(url.searchParams.get('page'));
     const pageSize = parsePageSize(url.searchParams.get('pageSize'), DEFAULT_PAGE_SIZE);
     const { from, to } = pageRange(page, pageSize);
-    const columns = type === 'customer'
-      ? 'id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at'
-      : 'id,tenant_id,name,email,phone,document_id,active,metadata,created_at,updated_at';
+    const columns = columnsFor(type);
     let query = getSupabaseServer()
       .from(tableFor(type))
       .select(columns, { count: 'exact' })
@@ -112,9 +117,9 @@ export async function POST(request: NextRequest) {
       document_id: taxId || null,
       active: true,
       metadata,
-      ...(type === 'customer' ? { credit_limit: money(body.creditLimit), credit_enabled: body.creditEnabled === true, term_days: Math.max(0, Math.floor(Number(body.termDays) || 30)), grace_days: Math.max(0, Math.floor(Number(body.graceDays) || 0)) } : {}),
+      ...(type === 'customer' ? { credit_limit: money(body.creditLimit), credit_enabled: body.creditEnabled === true, whatsapp_opt_in: body.whatsappOptIn === true, term_days: Math.max(0, Math.floor(Number(body.termDays) || 30)), grace_days: Math.max(0, Math.floor(Number(body.graceDays) || 0)) } : {}),
     };
-    const result = await supabase.from(tableFor(type)).insert(payload).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').single();
+    const result = await supabase.from(tableFor(type)).insert(payload).select(columnsFor(type)).single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, item: mapContact(result.data as Record<string, any>, type) }, { status: 201 });
   } catch (error: unknown) {
@@ -131,7 +136,7 @@ export async function PATCH(request: NextRequest) {
     if (!id) return NextResponse.json({ error: 'Identificador inválido.' }, { status: 400 });
 
     const supabase = getSupabaseServer();
-    const current = await supabase.from(tableFor(type)).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
+    const current = await supabase.from(tableFor(type)).select(columnsFor(type)).eq('tenant_id', context.tenantId).eq('id', id).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) return NextResponse.json({ error: 'El registro no existe en este tenant.' }, { status: 404 });
     const currentRow = current.data as Record<string, any>;
@@ -162,13 +167,14 @@ export async function PATCH(request: NextRequest) {
     }
     if (type === 'customer') {
       if (typeof body.creditEnabled === 'boolean') changes.credit_enabled = body.creditEnabled;
+      if (typeof body.whatsappOptIn === 'boolean') changes.whatsapp_opt_in = body.whatsappOptIn;
       if (typeof body.termDays === 'number') changes.term_days = Math.max(0, Math.floor(body.termDays));
       if (typeof body.graceDays === 'number') changes.grace_days = Math.max(0, Math.floor(body.graceDays));
       if (typeof body.creditStatus === 'string' && ['activo', 'bloqueado', 'en_cobro', 'incobrable'].includes(body.creditStatus)) changes.credit_status = body.creditStatus;
       if (typeof body.salesBlocked === 'boolean') changes.sales_blocked = body.salesBlocked;
       if (typeof body.salesBlockedReason === 'string') changes.sales_blocked_reason = text(body.salesBlockedReason, 300) || null;
     }
-    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select('id,tenant_id,name,email,phone,document_id,active,metadata,credit_limit,credit_enabled,term_days,grace_days,credit_status,sales_blocked,sales_blocked_reason,created_at,updated_at').single();
+    const result = await supabase.from(tableFor(type)).update(changes).eq('tenant_id', context.tenantId).eq('id', id).select(columnsFor(type)).single();
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, id, changes: mapContact(result.data as Record<string, any>, type) });
   } catch (error: unknown) {

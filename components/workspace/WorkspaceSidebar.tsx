@@ -24,6 +24,7 @@ const controlItems: NavItem[] = [
   { href: '/workspace/inventory', icon: '◇', label: 'Stock / Inventario' },
   { href: '/workspace/purchases', icon: '↥', label: 'Compras' },
   { href: '/workspace/finance', icon: '$', label: 'Finanzas' },
+  { href: '/workspace/receivables', icon: '◷', label: 'Cuentas por cobrar' },
   { href: '/workspace/reports', icon: '≡', label: 'Reportes / Ganancias' },
   { href: '/workspace/notifications', icon: '♧', label: 'Alertas diarias' },
   { href: '/workspace/daily-summary', icon: '✦', label: 'Resumen diario' },

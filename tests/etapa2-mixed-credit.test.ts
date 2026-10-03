@@ -52,7 +52,7 @@ test('la UI móvil permite configurar crédito y registrar abono por cliente', (
 
 test('caja puede iniciar preventas y POS acepta pagos estructurados', () => {
   assert.match(presalesRoute, /'cajero'/);
-  assert.match(presalesRoute, /Ventas > Crear/);
+  assert.match(presalesRoute, /requireTenantPermission\(request, 'sales', 'create'\)/);
   assert.match(salesRoute, /create_sale_with_payments/);
   assert.match(salesRoute, /splitPayments/);
 });

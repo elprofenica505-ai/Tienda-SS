@@ -14,6 +14,9 @@ const publicRoutes = new Set([
   'POST /api/invitations/accept',
   'GET /api/cron/daily-alerts',
   'GET /api/cron/daily-summary',
+  'GET /api/cron/receivables-reminders',
+  'GET /api/webhooks/whatsapp',
+  'POST /api/webhooks/whatsapp',
 ]);
 
 const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
@@ -31,6 +34,7 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/daily-summaries(?:\/settings)?$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/permissions$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/receivables(?:\/credit-notes)?$/, policy: { module: 'receivables', action: 'view' } },
+  { pattern: /^\/api\/receivables\/reminders(?:\/settings)?$/, policy: { module: 'receivables', action: 'view' } },
   { pattern: /^\/api\/reports(?:\/export)?$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/stats\/daily$/, policy: { module: 'reports', action: 'view' } },
   { pattern: /^\/api\/sales(?:\/(returns|void))?$/, policy: { module: 'sales', action: 'view' } },
