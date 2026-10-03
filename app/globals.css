@@ -538,3 +538,83 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .summary-history-main span{color:#87938a;font-size:10px}
 @media(max-width:980px){.summary-metrics,.summary-settings{grid-template-columns:repeat(2,1fr)}.summary-grid{grid-template-columns:1fr}}
 @media(max-width:680px){.daily-summary-header{align-items:start;flex-direction:column;gap:18px}.daily-summary-actions{width:100%}.daily-summary-actions .button{flex:1}.summary-metrics,.summary-settings,.summary-comparison{grid-template-columns:1fr}.summary-history-row{grid-template-columns:1fr auto}.summary-history-row .button{grid-column:1/-1;width:100%}}
+
+/* Automated collections / accounts receivable */
+.receivables-header-actions{display:flex;flex-wrap:wrap;gap:10px}
+.receivables-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+.receivable-metric-warning{background:#fffaf4!important;border-color:#f1dfc7!important}
+.receivable-metric-warning strong{color:#b66b39}
+.receivable-metric-soon{background:#fbfff5!important;border-color:#e2eccd!important}
+.receivable-metric-soon strong{color:#6f963f}
+.collection-agent-panel{background:#fff;border:1px solid #dfe8dc;border-radius:10px;margin-top:16px;padding:22px}
+.collection-agent-heading,.collection-accounts-heading{align-items:flex-start;display:flex;gap:18px;justify-content:space-between}
+.collection-agent-heading h2,.collection-accounts-heading h2{font-size:20px;letter-spacing:-.8px;margin:7px 0 5px}
+.collection-agent-heading p,.collection-accounts-heading p{color:#859188;font-size:10px;line-height:1.5;margin:0}
+.collection-agent-badge{background:#f1f3f0;border-radius:20px;color:#748076;font-size:10px;font-weight:800;padding:8px 12px;white-space:nowrap}
+.collection-agent-badge.is-enabled{background:#eaf7d8;color:#62863d}
+.collection-agent-grid{display:grid;gap:15px;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:22px}
+.collection-agent-field{color:#637168;display:grid;font-size:10px;font-weight:700;gap:7px}
+.collection-agent-field>span{color:#647269;font-size:10px;font-weight:800}
+.collection-agent-field input:not([type=checkbox]),.collection-agent-field textarea{background:#f8fbf7;border:1px solid #dfe8dd;border-radius:6px;color:#46564b;font:inherit;font-size:11px;padding:11px;width:100%}
+.collection-agent-field textarea{line-height:1.55;min-height:105px;resize:vertical}
+.collection-agent-field small{color:#8a968e;font-size:9px;font-weight:400;line-height:1.5}
+.collection-agent-toggle{align-items:center;background:#f8fbf6;border:1px solid #e7eee4;border-radius:7px;display:flex;justify-content:space-between;min-height:55px;padding:12px}
+.collection-agent-toggle span{max-width:85%}
+.collection-agent-toggle input{accent-color:#84ad4a;height:18px;width:18px}
+.collection-agent-wide{grid-column:span 2}
+.collection-agent-connection{background:#f7faf5;border:1px solid #e8eee5;border-radius:8px;display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:18px;padding:14px}
+.collection-agent-connection>div{display:grid;gap:5px}
+.collection-agent-connection b{color:#647269;font-size:9px}
+.collection-agent-connection span{color:#849087;font-size:10px;line-height:1.5}
+.collection-agent-hint,.collection-agent-readonly-hint{background:#fff7e9;border:1px solid #f0dfbd;border-radius:7px;color:#856c39;font-size:10px;line-height:1.6;margin-top:13px;padding:12px 14px}
+.collection-agent-hint code{font-size:9px}
+.collection-agent-save{align-items:center;background:#eaf7d8;border:1px solid #d4e9b8;border-radius:8px;color:#63764e;display:flex;font-size:10px;gap:16px;justify-content:space-between;margin-top:18px;padding:13px 15px}
+.collection-agent-save .button{white-space:nowrap}
+.collection-agent-consent-note{color:#8a968e;display:block;font-size:9px;line-height:1.5;margin:-4px 0 12px}
+.collection-accounts-panel,.collection-summary-panel,.collection-history-panel{margin-top:16px}
+.collection-accounts-heading{align-items:center}
+.collection-accounts-heading>span{color:#8a968e;font-size:10px}
+.collection-accounts-heading .inventory-search{max-width:280px;width:100%}
+.receivable-filters{border-bottom:1px solid #e9eee7;display:flex;flex-wrap:wrap;gap:8px;margin-top:18px;padding-bottom:12px}
+.receivable-filters button{background:#f7faf6;border:1px solid #e0e9de;border-radius:20px;color:#718076;font-size:10px;padding:8px 13px}
+.receivable-filters button.selected{background:#eaf6d9;border-color:#b2d17d;color:#62843f;font-weight:800}
+.receivable-table-wrap{overflow-x:auto;width:100%}
+.receivable-table{border-collapse:collapse;min-width:760px;width:100%}
+.receivable-table th{color:#8a968e;font-size:9px;font-weight:800;padding:14px 10px;text-align:left;text-transform:uppercase;letter-spacing:.45px}
+.receivable-table td{border-top:1px solid #edf1ec;color:#66746a;font-size:10px;padding:13px 10px;vertical-align:middle}
+.receivable-customer{align-items:center;display:flex;gap:10px;min-width:190px}
+.receivable-customer .contact-avatar{flex:none;height:35px;width:35px}
+.receivable-customer b,.receivable-customer small{display:block}
+.receivable-customer b{color:#37473b;font-size:10px}
+.receivable-customer small{color:#89958d;font-size:9px;margin-top:4px}
+.receivable-status{border-radius:18px;display:inline-flex;font-size:9px;font-weight:800;padding:6px 9px;white-space:nowrap}
+.receivable-status.status-current{background:#edf6e5;color:#668744}
+.receivable-status.status-upcoming{background:#fff4df;color:#9c742d}
+.receivable-status.status-overdue{background:#fdecea;color:#a34b3e}
+.receivable-status.status-paid{background:#eef1ee;color:#758078}
+.receivable-late-days{color:#ae6254;display:block;font-size:8px;margin-top:4px}
+.receivable-balance-pending{color:#b46d38}
+.receivable-balance-paid,.receivable-settled-label{color:#6f8e51}
+.receivables-pagination-note{align-items:center;color:#89958d;display:flex;flex-wrap:wrap;font-size:9px;gap:12px;justify-content:space-between;margin:14px 0 0}
+.collection-customer-list{margin-top:12px}
+.collection-customer-list .balance-row>strong{color:#b66f36}
+.collection-history-list{display:grid;margin-top:12px}
+.collection-history-row{align-items:flex-start;border-top:1px solid #edf1ec;display:flex;gap:12px;padding:15px 0}
+.collection-history-icon{align-items:center;background:#edf6e5;border-radius:50%;color:#6a9146;display:flex;flex:none;font-size:12px;font-weight:900;height:30px;justify-content:center;width:30px}
+.collection-history-row:has(.delivery-failed) .collection-history-icon{background:#fdecea;color:#ad5146}
+.collection-history-main{flex:1;min-width:0}
+.collection-history-main>div{align-items:center;display:flex;flex-wrap:wrap;gap:9px}
+.collection-history-main>div>b{color:#46564a;font-size:10px}
+.collection-history-main>small{color:#8a968e;display:block;font-size:9px;margin-top:5px}
+.collection-history-main>p{color:#718076;font-size:9px;line-height:1.55;margin:7px 0 0;overflow-wrap:anywhere}
+.collection-delivery-status{background:#eef1ee;border-radius:16px;color:#78847b;font-size:8px;font-weight:800;padding:5px 8px}
+.collection-delivery-status.delivery-sent{background:#eaf6df;color:#5e813d}
+.collection-delivery-status.delivery-failed{background:#fdecea;color:#a34b3e}
+.collection-delivery-status.delivery-pending{background:#fff4df;color:#9c742d}
+.collection-response-note{color:#628641!important}
+.collection-error-note{color:#aa5145!important}
+.collection-provider{color:#9aa49d;font-size:8px;margin-left:auto;text-transform:uppercase}
+.collection-payment-note{color:#7c897f;font-size:10px;line-height:1.5;margin:-5px 0 16px}
+.receivable-error{background:#fdecea;border-color:#f3c9c4;color:#9c3b31}
+@media(max-width:980px){.receivables-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.collection-agent-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.collection-agent-connection{grid-template-columns:1fr}}
+@media(max-width:720px){.receivables-header-actions{width:100%}.receivables-header-actions .button{flex:1}.receivables-metrics{grid-template-columns:1fr}.collection-agent-panel{padding:17px}.collection-agent-heading,.collection-accounts-heading{align-items:flex-start;flex-direction:column}.collection-agent-badge{align-self:flex-start}.collection-agent-grid{grid-template-columns:1fr}.collection-agent-wide{grid-column:auto}.collection-agent-save{align-items:stretch;flex-direction:column}.collection-agent-save .button{width:100%}.collection-accounts-heading .inventory-search{max-width:none}.receivable-table-wrap{margin-right:-10px;width:calc(100% + 20px)}.collection-provider{display:none}}

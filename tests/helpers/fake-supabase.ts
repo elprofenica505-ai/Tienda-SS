@@ -40,7 +40,7 @@ function matches(row: FakeRow, column: string, expression: string): boolean {
   const dot = expression.indexOf('.');
   const operator = expression.slice(0, dot);
   const value = expression.slice(dot + 1);
-  const actual = row[column];
+  const actual = column.split('.').reduce<unknown>((value, part) => value && typeof value === 'object' ? (value as FakeRow)[part] : undefined, row);
   const isNull = actual === null || actual === undefined;
   switch (operator) {
     case 'eq': return !isNull && String(actual) === value;

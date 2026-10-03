@@ -19,6 +19,8 @@ const protectedTenantRoutes = [
   '/api/permissions',
   '/api/receivables',
   '/api/receivables/credit-notes',
+  '/api/receivables/reminders',
+  '/api/receivables/reminders/settings',
   '/api/reports',
   '/api/reports/export',
   '/api/stats/daily',
@@ -36,7 +38,7 @@ const superadminRoutes = [
 ];
 
 const discoveredTenantRoutes = ['/api/tenants/me'];
-const publicRoutes = ['/api/health', '/api/auth/login-attempt', '/api/tenants', '/api/billing/webhook', '/api/cron/daily-alerts'];
+const publicRoutes = ['/api/health', '/api/auth/login-attempt', '/api/tenants', '/api/billing/webhook', '/api/cron/daily-alerts', '/api/cron/receivables-reminders', '/api/webhooks/whatsapp'];
 
 function request(path: string, method = 'GET', headers?: Record<string, string>) {
   return new NextRequest(`http://localhost${path}`, { method, headers });
@@ -93,6 +95,8 @@ test('matriz reconoce únicamente las excepciones públicas documentadas', () =>
   }
   assert.equal(isPublicApiRoute('/api/catalog', 'GET'), false);
   assert.equal(isPublicApiRoute('/api/billing/webhook', 'GET'), false);
+  assert.equal(isPublicApiRoute('/api/webhooks/whatsapp', 'POST'), true);
+  assert.equal(middleware(request('/api/webhooks/whatsapp', 'POST')).status, 200);
 });
 
 test('matriz rechaza una ruta no registrada aunque tenga token y tenant', async () => {

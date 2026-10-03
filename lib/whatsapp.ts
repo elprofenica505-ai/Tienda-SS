@@ -141,6 +141,112 @@ async function sendWithTwilio(input: { to: string; text: string }, fetchImpl: ty
   }
 }
 
+async function sendTemplateWithMeta(input: { to: string; text: string; templateName: string; language: string }, fetchImpl: typeof fetch, timeoutMs: number): Promise<{ messageId: string | null }> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN!.trim();
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID!.trim();
+  const version = (process.env.WHATSAPP_GRAPH_VERSION || 'v21.0').trim();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`https://graph.facebook.com/${version}/${encodeURIComponent(phoneNumberId)}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: input.to.replace(/^\+/, ''),
+        type: 'template',
+        template: {
+          name: input.templateName,
+          language: { code: input.language },
+          components: [{ type: 'body', parameters: [{ type: 'text', text: input.text }] }],
+        },
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(await readProviderError(response));
+    const data = await response.json().catch(() => ({})) as { messages?: Array<{ id?: string }> };
+    return { messageId: data.messages?.[0]?.id || null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sendTemplateWithTwilio(input: { to: string; text: string; contentSid: string }, fetchImpl: typeof fetch, timeoutMs: number): Promise<{ messageId: string | null }> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID!.trim();
+  const authToken = process.env.TWILIO_AUTH_TOKEN!.trim();
+  const from = process.env.TWILIO_WHATSAPP_FROM!.trim();
+  const fromAddress = from.startsWith('whatsapp:') ? from : `whatsapp:${from.startsWith('+') ? from : `+${from.replace(/\D/g, '')}`}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        From: fromAddress,
+        To: `whatsapp:${input.to}`,
+        ContentSid: input.contentSid,
+        ContentVariables: JSON.stringify({ '1': input.text }),
+      }).toString(),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(await readProviderError(response));
+    const data = await response.json().catch(() => ({})) as { sid?: string };
+    return { messageId: data.sid || null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Verifica si el proveedor tiene una plantilla aprobada para mensajes proactivos de cobranza. */
+export function isWhatsAppAutomationConfigured(env: EnvironmentLike = process.env): boolean {
+  const provider = resolveWhatsAppProvider(env);
+  if (provider === 'meta') return /^[a-z0-9_]{1,128}$/i.test(env.WHATSAPP_REMINDER_TEMPLATE_NAME?.trim() || '');
+  if (provider === 'twilio') return Boolean(env.TWILIO_WHATSAPP_REMINDER_CONTENT_SID?.trim());
+  return false;
+}
+
+/** Envía un mensaje proactivo usando una plantilla previamente aprobada por WhatsApp. */
+export async function sendWhatsAppAutomatedMessage(input: {
+  to: unknown;
+  text: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<WhatsAppSendResult> {
+  const phone = normalizeWhatsAppPhone(input.to);
+  const provider = resolveWhatsAppProvider();
+  if (!provider) {
+    return { status: 'skipped', provider: null, messageId: null, phone, error: 'WHATSAPP_NOT_CONFIGURED' };
+  }
+  if (!phone) {
+    return { status: 'failed', provider, messageId: null, phone: '', error: 'WHATSAPP_PHONE_INVALID' };
+  }
+  const text = (input.text || '').trim().slice(0, 1024);
+  if (!text) {
+    return { status: 'failed', provider, messageId: null, phone, error: 'WHATSAPP_EMPTY_MESSAGE' };
+  }
+  const templateName = process.env.WHATSAPP_REMINDER_TEMPLATE_NAME?.trim() || '';
+  const templateLanguage = process.env.WHATSAPP_REMINDER_TEMPLATE_LANGUAGE?.trim() || 'es';
+  const contentSid = process.env.TWILIO_WHATSAPP_REMINDER_CONTENT_SID?.trim() || '';
+  if ((provider === 'meta' && (!templateName || !/^[a-z0-9_]{1,128}$/i.test(templateName))) || (provider === 'twilio' && !contentSid)) {
+    return { status: 'skipped', provider, messageId: null, phone, error: 'WHATSAPP_REMINDER_TEMPLATE_NOT_CONFIGURED' };
+  }
+  try {
+    const fetchImpl = input.fetchImpl || fetch;
+    const timeoutMs = Number.isFinite(input.timeoutMs) ? Number(input.timeoutMs) : 12_000;
+    const result = provider === 'meta'
+      ? await sendTemplateWithMeta({ to: phone, text, templateName, language: templateLanguage }, fetchImpl, timeoutMs!)
+      : await sendTemplateWithTwilio({ to: phone, text, contentSid }, fetchImpl, timeoutMs!);
+    return { status: 'sent', provider, messageId: result.messageId, phone, error: null };
+  } catch (error: unknown) {
+    return { status: 'failed', provider, messageId: null, phone, error: sanitizeProviderError(error) };
+  }
+}
+
 /**
  * Envía un mensaje de texto por WhatsApp. Nunca lanza: siempre devuelve un resultado
  * que el llamador puede guardar en `daily_summaries`.
