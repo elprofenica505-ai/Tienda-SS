@@ -8,6 +8,7 @@ const checkout = readFileSync('app/api/presales/checkout/route.ts', 'utf8');
 const sales = readFileSync('app/api/sales/route.ts', 'utf8');
 const receivables = readFileSync('app/api/receivables/route.ts', 'utf8');
 const reports = readFileSync('app/api/reports/route.ts', 'utf8');
+const reportService = readFileSync('lib/financial-reports-service.ts', 'utf8');
 const exportRoute = readFileSync('app/api/reports/export/route.ts', 'utf8');
 const dailyStats = readFileSync('app/api/stats/daily/route.ts', 'utf8');
 const tenant = readFileSync('lib/tenant.ts', 'utf8');
@@ -45,8 +46,12 @@ test('los endpoints no exponen secretos en el cliente', () => {
 });
 
 test('reportes y exportaciones respetan sucursal y rol administrativo', () => {
-  assert.match(reports, /const sales = .*branch_id/);
-  assert.match(reports, /context\.branchIds/);
-  assert.match(exportRoute, /context\.branchIds/);
+  assert.match(reports, /resolveFinancialReportScope/);
+  assert.match(reports, /loadFinancialReportDataset/);
+  assert.match(reportService, /context\.branchIds\.slice/);
+  assert.match(reportService, /branchFiltered\(query, scope\)/);
+  assert.match(reportService, /branchField: 'sales\.branch_id'/);
+  assert.match(exportRoute, /resolveFinancialReportScope/);
+  assert.match(exportRoute, /requireTenantPermission\(request, 'reports', 'export'\)/);
   assert.match(dailyStats, /Las estadísticas globales requieren un rol administrativo/);
 });
