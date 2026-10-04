@@ -24,6 +24,7 @@ type Product = {
   categoryId?: string;
 };
 
+type Category = { id: string; name: string; active: boolean };
 type CartLine = Product & { quantity: number };
 type PresaleItem = { productId?: string; name: string; sku?: string; quantity: number; unitPrice: number; total: number; description?: string };
 type PresalePayment = { method?: string; amount?: number };
@@ -63,6 +64,7 @@ function PresalesContent() {
   const router = useRouter();
   const { authUser, tenant, member, activeBranchId, organization, loading: tenantLoading } = useTenant();
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [customerId, setCustomerId] = useState('');
   const [suggestedPayment, setSuggestedPayment] = useState('');
@@ -76,6 +78,8 @@ function PresalesContent() {
   const [lastTicket, setLastTicket] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [productPage, setProductPage] = useState(0);
   const [evidence, setEvidence] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -88,6 +92,7 @@ function PresalesContent() {
   const timeZone = tenant?.timezone || 'America/Managua';
   const money = useCallback((value: number) => formatMoney(Number(value || 0), tenant?.currency || 'NIO', tenant?.locale || 'es-NI'), [tenant?.currency, tenant?.locale]);
   const selectedPresale = presales.find((item) => item.id === selectedPresaleId) || null;
+  const pageSize = 25;
 
   const load = useCallback(async () => {
     if (!authUser || !tenant || !activeBranchId) {
@@ -102,7 +107,7 @@ function PresalesContent() {
         'x-branch-id': activeBranchId,
       };
       const [catalogResponse, presalesResponse] = await Promise.all([
-        fetch('/api/catalog', { headers, cache: 'no-store' }),
+        fetch('/api/catalog?pageSize=25', { headers, cache: 'no-store' }),
         fetch('/api/presales', { headers, cache: 'no-store' }),
       ]);
       const catalog = await catalogResponse.json();
@@ -111,6 +116,7 @@ function PresalesContent() {
       if (!presalesResponse.ok) throw new Error(`Preventas (${presalesResponse.status}): ${data.error || 'respuesta rechazada'}`);
       const nextPresales = (data.presales || []) as PreSale[];
       setProducts(catalog.products || []);
+      setCategories((catalog.categories || []).filter((c: Category) => c.active !== false));
       setPresales(nextPresales);
       setPresaleNextCursor(typeof data.nextCursor === 'string' ? data.nextCursor : null);
       setSelectedPresaleId((current) => current && nextPresales.some((item) => item.id === current) ? current : '');
@@ -155,7 +161,22 @@ function PresalesContent() {
     return () => { active = false; };
   }, [tenant?.id]);
 
-  const filtered = products.filter((item) => `${item.name} ${item.sku || ''}`.toLowerCase().includes(query.toLowerCase()));
+  useEffect(() => { setProductPage(0); }, [query, categoryFilter]);
+
+  const filtered = useMemo(() => {
+    return products.filter((item) => {
+      const matchesQuery = `${item.name} ${item.sku || ''}`.toLowerCase().includes(query.toLowerCase());
+      const matchesCategory = !categoryFilter || item.categoryId === categoryFilter;
+      return matchesQuery && matchesCategory;
+    });
+  }, [products, query, categoryFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedProducts = useMemo(() => {
+    const start = productPage * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, productPage]);
+
   const total = useMemo(() => cart.reduce((sum, item) => sum + Number(item.price || 0) * item.quantity, 0), [cart]);
 
   function add(product: Product) {
@@ -280,9 +301,9 @@ function PresalesContent() {
             <button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button>
             <div className="eyebrow catalog-eyebrow">Tu espacio / Ventas</div>
             <h1>Preventa en piso</h1>
-            <p>Arma el ticket, adjunta evidencia y envíalo a caja para cobrarlo.</p>
+            <p>Arma el ticket, adjunta evidencia y envíalo a caja para cobrarlo. Filtros Todos y por categoría · Hasta 25 productos por página.</p>
           </div>
-          <span className="catalog-isolation">● Stock baja al cobrar</span>
+          <span className="catalog-isolation">● Stock baja al cobrar · 25 por página</span>
         </header>
 
         {message && <div className="catalog-message" role="status">{message}</div>}
@@ -304,9 +325,13 @@ function PresalesContent() {
                 <input aria-label="Buscar producto por nombre, SKU o código" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nombre, SKU o código" />
                 <button className="button button-secondary" type="button" onClick={() => setScannerOpen(true)}>Escanear</button>
               </div>
+              <div className="catalog-filter-row">
+                <button className={`catalog-filter ${!categoryFilter ? 'selected' : ''}`} type="button" onClick={() => setCategoryFilter('')}>Todos</button>
+                {categories.map((cat) => <button key={cat.id} className={`catalog-filter ${categoryFilter === cat.id ? 'selected' : ''}`} type="button" onClick={() => setCategoryFilter(cat.id)}>{cat.name}</button>)}
+              </div>
             </div>
             <div className="sales-product-grid">
-              {filtered.length === 0 ? <div className="catalog-empty"><h2>No hay productos disponibles</h2><p>Solicita al dueño que agregue productos al catálogo.</p></div> : filtered.map((product) => (
+              {paginatedProducts.length === 0 ? <div className="catalog-empty"><h2>No hay productos disponibles</h2><p>Solicita al dueño que agregue productos al catálogo.</p></div> : paginatedProducts.map((product) => (
                 <button className="sales-product" key={product.id} onClick={() => add(product)} disabled={product.itemType !== 'service' && product.stock <= 0}>
                   {product.imageUrl ? <img className="presale-product-image" src={product.imageUrl} alt="" /> : <span className="presale-product-placeholder" aria-hidden="true">◇</span>}
                   <b>{product.name}</b>
@@ -315,6 +340,13 @@ function PresalesContent() {
                 </button>
               ))}
             </div>
+            {filtered.length > pageSize && (
+              <div className="catalog-pagination">
+                <button className="button button-secondary" disabled={productPage === 0} onClick={() => setProductPage((p) => Math.max(0, p - 1))}>← Anterior</button>
+                <span className="pagination-label">Página {productPage + 1} de {totalPages} · {filtered.length} productos</span>
+                <button className="button button-secondary" disabled={productPage + 1 >= totalPages} onClick={() => setProductPage((p) => p + 1)}>Siguiente →</button>
+              </div>
+            )}
           </div>
 
           <aside className="sale-ticket">
@@ -344,7 +376,7 @@ function PresalesContent() {
 
         <section className="section-card presale-history-section">
           <div className="inventory-panel-header presale-history-header">
-            <div><div className="eyebrow">Mis preventas</div><h2>Actividad reciente</h2><p>Selecciona una fila para abrir el detalle. Las exportaciones de este módulo actualizan el mismo Excel maestro de la empresa.</p></div>
+            <div><div className="eyebrow">Mis preventas</div><h2>Actividad reciente</h2><p>Selecciona una fila para abrir el detalle en tabla. Impresión ajustada. Hasta 25 por página. Las exportaciones actualizan el mismo Excel maestro.</p></div>
             <button className="button button-secondary" type="button" onClick={() => void updateExcel()} disabled={exportingWorkbook || !workbookReady}>
               {exportingWorkbook ? 'Actualizando…' : workbookReady ? 'Actualizar Excel maestro' : 'Preparando…'}
             </button>
@@ -366,7 +398,7 @@ function PresalesContent() {
               ))}
             </div>
           )}
-          {presaleNextCursor && <button className="button button-secondary presale-history-more" type="button" onClick={() => void loadMorePresales()} disabled={loadingMorePresales}>{loadingMorePresales ? 'Cargando…' : 'Cargar más preventas'}</button>}
+          {presaleNextCursor && <button className="button button-secondary presale-history-more" type="button" onClick={() => void loadMorePresales()} disabled={loadingMorePresales}>{loadingMorePresales ? 'Cargando…' : 'Cargar más preventas (25)'}</button>}
         </section>
 
         {selectedPresale && (
@@ -388,16 +420,30 @@ function PresalesContent() {
                 <div className="presale-fact-wide"><small>Observaciones</small><b>{selectedPresale.metadata?.notes || '—'}</b></div>
                 {selectedPresale.paidAt && <div><small>Pagada el</small><b>{formatDateTime(selectedPresale.paidAt, timeZone)}</b></div>}
               </div>
+
               <div className="presale-detail-items">
-                <h3>Productos y cantidades</h3>
-                {(selectedPresale.items || []).length === 0 ? <p>No hay productos asociados.</p> : (selectedPresale.items || []).map((item, index) => (
-                  <div className="presale-detail-item" key={`${item.productId || item.name}-${index}`}>
-                    <div><b>{item.name}</b><small>{item.sku ? `SKU: ${item.sku} · ` : ''}{money(Number(item.unitPrice || 0))} por unidad</small></div>
-                    <span>{item.quantity} ×</span>
-                    <strong>{money(Number(item.total || 0))}</strong>
+                <h3>Productos y cantidades — tabla</h3>
+                {(selectedPresale.items || []).length === 0 ? <p>No hay productos asociados.</p> : (
+                  <div className="financial-table-scroll">
+                    <table className="financial-detail-table presale-detail-table">
+                      <thead><tr><th>Producto</th><th>SKU</th><th>Cantidad</th><th>Precio unit.</th><th>Total</th></tr></thead>
+                      <tbody>
+                        {(selectedPresale.items || []).map((item, index) => (
+                          <tr key={`${item.productId || item.name}-${index}`}>
+                            <td><b>{item.name}</b>{item.description && <small>{item.description}</small>}</td>
+                            <td>{item.sku || '—'}</td>
+                            <td>{item.quantity}</td>
+                            <td>{money(Number(item.unitPrice || 0))}</td>
+                            <td><strong>{money(Number(item.total || 0))}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot><tr><td colSpan={4}><b>Total</b></td><td><strong>{money(Number(selectedPresale.total || 0))}</strong></td></tr></tfoot>
+                    </table>
                   </div>
-                ))}
+                )}
               </div>
+
               {selectedPresale.sale && (
                 <div className="presale-related-sale">
                   <h3>Venta relacionada</h3>
