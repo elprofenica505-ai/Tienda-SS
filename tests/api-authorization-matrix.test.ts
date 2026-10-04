@@ -108,6 +108,11 @@ test('matriz rechaza una ruta no registrada aunque tenga token y tenant', async 
   assert.equal((await errorBody(response)).error, 'Ruta API no autorizada.');
 });
 
+test('la exportación de reportes requiere permiso de exportar, no sólo ver reportes', () => {
+  assert.deepEqual(getApiPolicy('/api/reports', 'GET'), { module: 'reports', action: 'view' });
+  assert.deepEqual(getApiPolicy('/api/reports/export', 'GET'), { module: 'reports', action: 'export' });
+});
+
 test('política API resuelve acciones por método para cada endpoint registrado', () => {
   for (const path of protectedTenantRoutes.filter((item) => item !== '/api/tenants')) {
     assert.ok(getApiPolicy(path, 'GET'), `GET ${path} debe tener política`);
