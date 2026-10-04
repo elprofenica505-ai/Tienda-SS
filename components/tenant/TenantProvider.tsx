@@ -10,7 +10,7 @@ export type TenantRole =
   | 'bodega' | 'compras' | 'chofer' | 'despachador' | 'solo_lectura' | 'jefe';
 
 export type Tenant = {
-  id: string; name: string; plan?: string; status?: string; currency?: string;
+  id: string; name: string; plan?: string; status?: string; currency?: string; timezone?: string;
   currencySymbol?: string; locale?: string; onboardingCompleted?: boolean;
 };
 
