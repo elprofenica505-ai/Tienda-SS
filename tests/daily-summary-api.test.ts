@@ -29,6 +29,12 @@ function tenMinutesAgoInManagua(): string {
   return `${String(local.getUTCHours()).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
 }
 
+/** Hora local futura: evita que el caso NOT_DUE coincida con la gracia del envío de ayer. */
+function oneHourInFutureInManagua(): string {
+  const local = new Date(Date.now() - 6 * 60 * 60 * 1000 + 60 * 60 * 1000);
+  return `${String(local.getUTCHours()).padStart(2, '0')}:${String(local.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 function summaryContent(overrides: Partial<DailySummaryContent> = {}): DailySummaryContent {
   return {
     tenantId: TENANT_A,
@@ -366,7 +372,7 @@ test('cron: no genera un resumen cuya hora todavía no llega', async () => {
     id: 'settings-a',
     tenant_id: TENANT_A,
     setting_key: 'daily_summary',
-    value: { enabled: true, sendAt: '23:59', timezone: 'America/Managua', mode: 'closing', whatsappEnabled: true, whatsappPhone: '+50588888888', includeAlerts: true },
+    value: { enabled: true, sendAt: oneHourInFutureInManagua(), timezone: 'America/Managua', mode: 'closing', whatsappEnabled: true, whatsappPhone: '+50588888888', includeAlerts: true },
     updated_at: '2026-10-01T12:00:00.000Z',
   }];
   fake.tables.daily_summaries[0].message = 'mensaje previo';

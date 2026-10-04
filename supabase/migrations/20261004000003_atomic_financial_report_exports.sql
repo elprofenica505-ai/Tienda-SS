@@ -1,8 +1,8 @@
 -- One atomic counter shared by financial report formats and workspace modules.
 -- It enforces the daily limit first, then the plan's existing monthly limit.
 -- The tenant row lock serializes simultaneous exports from different users.
--- Apply only after 20261003000002_atomic_report_exports.sql and
--- 20261004000001_daily_report_export_quota.sql have been reviewed and installed.
+-- Apply after 20261004000001_daily_report_export_quota.sql and
+-- 20261004000002_atomic_monthly_report_exports.sql have been reviewed and installed.
 -- Do not run this migration against a project until the owner authorizes it.
 begin;
 

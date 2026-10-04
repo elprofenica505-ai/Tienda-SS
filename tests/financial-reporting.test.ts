@@ -129,7 +129,7 @@ test('shared financial export quota reports company-local reset and monthly plan
 });
 
 test('the daily quota migration serializes by tenant, resets by local date, and calls the plan quota', () => {
-  const sql = readFileSync(new URL('../supabase/migrations/20261004000002_atomic_financial_report_exports.sql', import.meta.url), 'utf8');
+  const sql = readFileSync(new URL('../supabase/migrations/20261004000003_atomic_financial_report_exports.sql', import.meta.url), 'utf8');
   assert.match(sql, /for update/i);
   assert.match(sql, /current_instant at time zone tenant_timezone/i);
   assert.match(sql, /daily_limit constant integer := 3/i);
