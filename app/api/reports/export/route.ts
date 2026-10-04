@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { assertEntitlementCapacity, getEntitlementLimit } from '@/lib/entitlements';
-import { createFinancialReportPeriod, localDateKey, REPORT_PERIODS } from '@/lib/financial-reports';
+import { createFinancialReportPeriod, createFinancialReportRange, localDateKey, REPORT_PERIODS, type FinancialReportPeriod } from '@/lib/financial-reports';
 import {
   getFinancialTenantSettings,
   loadFinancialReportDataset,
@@ -14,7 +14,10 @@ export const runtime = 'nodejs';
 
 function exportError(error: unknown) {
   const message = error instanceof Error ? error.message : '';
-  if (message === 'REPORT_PERIOD_INVALID') return NextResponse.json({ error: 'Selecciona un período de 7, 30, 90 o 365 días.' }, { status: 400 });
+  if (message === 'REPORT_DATE_INVALID') return NextResponse.json({ error: 'La fecha del reporte no es válida.' }, { status: 400 });
+  if (message === 'REPORT_DATE_FUTURE') return NextResponse.json({ error: 'La fecha del reporte no puede estar en el futuro.' }, { status: 400 });
+  if (message === 'REPORT_TIME_INVALID') return NextResponse.json({ error: 'El rango de horas no es válido. La hora inicial debe ser anterior o igual a la final.' }, { status: 400 });
+  if (message === 'REPORT_PERIOD_INVALID') return NextResponse.json({ error: 'Selecciona un período de hasta 365 días.' }, { status: 400 });
   const response = tenantErrorResponse(error);
   return NextResponse.json(response.body, { status: response.status });
 }
@@ -27,9 +30,21 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
     const format = params.get('format') || 'csv';
     if (format !== 'csv' && format !== 'xlsx') return NextResponse.json({ error: 'Formato no válido. Usa csv o xlsx.' }, { status: 400 });
-    const rawDays = params.get('days');
-    const days = rawDays === null ? 30 : Number(rawDays);
-    if (!(REPORT_PERIODS as readonly number[]).includes(days)) throw new Error('REPORT_PERIOD_INVALID');
+    const fromTime = params.get('fromTime') || '00:00';
+    const toTime = params.get('toTime') || '23:59';
+    const requestedFromDate = params.get('fromDate');
+    const requestedToDate = params.get('toDate');
+    let period: FinancialReportPeriod;
+    if (requestedFromDate !== null || requestedToDate !== null) {
+      if (!requestedFromDate || !requestedToDate) throw new Error('REPORT_DATE_INVALID');
+      period = createFinancialReportRange(requestedFromDate, requestedToDate, settings.timezone, fromTime, toTime);
+    } else {
+      const rawDays = params.get('days');
+      const days = rawDays === null ? 30 : Number(rawDays);
+      if (!(REPORT_PERIODS as readonly number[]).includes(days)) throw new Error('REPORT_PERIOD_INVALID');
+      period = createFinancialReportPeriod(days, settings.timezone, new Date(), fromTime, toTime);
+    }
+    if (period.toDate > localDateKey(new Date(), settings.timezone)) throw new Error('REPORT_DATE_FUTURE');
 
     const branchId = (request.headers.get('x-branch-id') || params.get('branchId') || '').trim();
     const scope = await resolveFinancialReportScope(supabase, context, branchId);
@@ -40,7 +55,6 @@ export async function GET(request: NextRequest) {
     const monthlyExportLimit = getEntitlementLimit(settings.plan, 'monthlyExports');
     assertEntitlementCapacity(settings.plan, 'monthlyExports', currentExports);
 
-    const period = createFinancialReportPeriod(days, settings.timezone);
     const dataset = await loadFinancialReportDataset({ supabase, tenantId: context.tenantId, period, settings, scope });
     const tenantResult = await (supabase as any).from('tenants').select('name').eq('id', context.tenantId).maybeSingle();
     if (tenantResult.error) throw new Error(tenantResult.error.message);
@@ -67,7 +81,9 @@ export async function GET(request: NextRequest) {
     });
     if (usageIncrement.error) throw new Error(usageIncrement.error.message);
 
-    const filename = `reporte-financiero-${period.fromDate}-a-${period.toDate}.${extension}`;
+    const filename = period.fromDate === period.toDate
+      ? `reporte-financiero-${period.fromDate}.${extension}`
+      : `reporte-financiero-${period.fromDate}-a-${period.toDate}.${extension}`;
     const responseBody = format === 'xlsx'
       ? new Blob([Uint8Array.from(content).buffer], { type: contentType })
       : new TextDecoder().decode(content);
@@ -77,7 +93,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': contentType,
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store',
-        'X-Report-Period': String(days),
+        'X-Report-Period': String(period.days),
       },
     });
   } catch (error: unknown) {

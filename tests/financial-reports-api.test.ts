@@ -162,6 +162,37 @@ test('el reporte diario desglosa costo histórico, gasto y cartera ConexiaX', as
   assert.equal(body.details.credit.currentOpenBalanceForDay, 70);
 });
 
+test('los calendarios y filtros horarios producen resúmenes y detalles de una fecha exacta', async () => {
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(recent));
+  const params = new URLSearchParams({ fromDate: reportDate, toDate: reportDate, fromTime: time, toTime: time });
+  const summaryResponse = await reportsRoute.GET(request(`/api/reports?${params.toString()}`));
+  assert.equal(summaryResponse.status, 200);
+  const summary = await summaryResponse.json() as Record<string, any>;
+  assert.equal(summary.period.days, 1);
+  assert.equal(summary.period.from, reportDate);
+  assert.equal(summary.period.to, reportDate);
+  assert.equal(summary.period.fromTime, time);
+  assert.equal(summary.period.toTime, time);
+  assert.equal(summary.summary.sales, 125);
+  assert.equal(summary.hourly.length, 1);
+
+  const detailResponse = await reportsRoute.GET(request(`/api/reports?date=${reportDate}&fromTime=${time}&toTime=${time}`, { branch: BRANCH_A }));
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json() as Record<string, any>;
+  assert.equal(detail.day.grossSales, 100);
+  assert.equal(detail.details.sales.length, 1);
+  assert.equal(detail.details.expenses.length, 1);
+  assert.equal(detail.hourly.length, 1);
+
+  const invalidTime = await reportsRoute.GET(request('/api/reports?days=7&fromTime=18:00&toTime=09:00'));
+  assert.equal(invalidTime.status, 400);
+});
+
 test('el resumen limita ventas y costos a la sucursal seleccionada', async () => {
   const response = await reportsRoute.GET(request('/api/reports?days=7', { branch: BRANCH_A }));
   assert.equal(response.status, 200);
@@ -222,6 +253,21 @@ test('CSV y Excel se descargan con la autorización de exportación y plantilla 
   const usageCall = fake.rpcCalls.find((call) => call.name === 'increment_entitlement_monthly_exports');
   assert.ok(usageCall);
   assert.equal((usageCall.body as Record<string, unknown>).target_month, localDateKey(new Date(), TIME_ZONE).slice(0, 7));
+});
+
+test('la exportación respeta la fecha y el horario seleccionados en el calendario', async () => {
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(recent));
+  const params = new URLSearchParams({ format: 'xlsx', fromDate: reportDate, toDate: reportDate, fromTime: time, toTime: time });
+  const response = await exportRoute.GET(request(`/api/reports/export?${params.toString()}`, { branch: BRANCH_A }));
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-disposition') || '', new RegExp(`reporte-financiero-${reportDate}\\.xlsx`));
+  assert.equal(response.headers.get('x-report-period'), '1');
+  assert.equal(fake.tables.entitlement_usage[0].monthly_exports, 1);
 });
 
 test('exportaciones simultáneas no pueden rebasar la cuota mensual del plan', async () => {

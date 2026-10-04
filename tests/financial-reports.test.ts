@@ -5,6 +5,7 @@ import {
   calculateFinancialReport,
   createFinancialReportDay,
   createFinancialReportPeriod,
+  createFinancialReportRange,
   isValidDateKey,
   localDateKey,
 } from '@/lib/financial-reports';
@@ -57,6 +58,62 @@ test('los límites diarios usan la zona horaria de la empresa, no la del servido
   assert.equal(isValidDateKey('2026-10-03'), true);
 });
 
+test('los períodos personalizados validan fechas y horas según la zona de la empresa', () => {
+  const range = createFinancialReportRange('2026-10-01', DAY, TIME_ZONE, '08:30', '17:45');
+  assert.equal(range.days, 3);
+  assert.deepEqual(range.dateKeys, ['2026-10-01', '2026-10-02', DAY]);
+  assert.equal(range.fromTime, '08:30');
+  assert.equal(range.toTime, '17:45');
+  assert.throws(() => createFinancialReportDay(DAY, TIME_ZONE, '18:00', '09:00'), /REPORT_TIME_INVALID/);
+  assert.throws(() => createFinancialReportRange('2026-10-04', DAY, TIME_ZONE), /REPORT_PERIOD_INVALID/);
+});
+
+test('el filtro horario local actualiza los totales, el detalle y las barras por hora', () => {
+  const period = createFinancialReportDay(DAY, TIME_ZONE, '09:00', '12:00');
+  const sale = (id: string, total: number, createdAt: string) => ({
+    id, branchId: 'branch-a', invoiceNumber: id, status: 'completed', total, createdAt,
+    items: [], payments: [{ paymentMethod: 'cash', amount: total }],
+  });
+  const dataset = calculateFinancialReport({
+    period,
+    sales: [
+      sale('before', 100, '2026-10-03T14:59:00.000Z'),
+      sale('at-start', 50, '2026-10-03T15:00:00.000Z'),
+      sale('at-end', 25, '2026-10-03T18:00:00.000Z'),
+      sale('after', 200, '2026-10-03T18:01:00.000Z'),
+    ],
+    movements: [],
+    returns: [{ id: 'return-1', saleId: 'at-start', invoiceNumber: 'at-start', refundMethod: 'cash', amount: 10, status: 'completed', createdAt: '2026-10-03T16:00:00.000Z', items: [] }],
+    expenses: [
+      { id: 'expense-in', branchId: 'branch-a', description: 'Dentro', category: 'Local', paymentMethod: 'cash', amount: 8, createdAt: '2026-10-03T15:30:00.000Z' },
+      { id: 'expense-out', branchId: 'branch-a', description: 'Fuera', category: 'Local', paymentMethod: 'cash', amount: 50, createdAt: '2026-10-03T18:01:00.000Z' },
+    ],
+    creditIssues: [
+      { id: 'credit-out', saleId: 'before', saleNumber: 'before', customerName: 'Ana', originalAmount: 100, outstandingAmount: 100, status: 'open', createdAt: '2026-10-03T14:00:00.000Z' },
+      { id: 'credit-in', saleId: 'at-end', saleNumber: 'at-end', customerName: 'Ana', originalAmount: 15, outstandingAmount: 15, status: 'open', createdAt: '2026-10-03T17:00:00.000Z' },
+    ],
+    creditCollections: [
+      { id: 'payment-in', paymentId: 'payment-in', saleId: 'at-end', saleNumber: 'at-end', customerName: 'Ana', receiptNumber: 'R-1', paymentMethod: 'cash', amount: 5, createdAt: '2026-10-03T18:00:00.000Z' },
+      { id: 'payment-out', paymentId: 'payment-out', saleId: 'after', saleNumber: 'after', customerName: 'Ana', receiptNumber: 'R-2', paymentMethod: 'cash', amount: 20, createdAt: '2026-10-03T18:01:00.000Z' },
+    ],
+    openReceivables: [],
+  });
+
+  assert.equal(dataset.daily[0].grossSales, 75);
+  assert.equal(dataset.daily[0].returns, 10);
+  assert.equal(dataset.daily[0].sales, 65);
+  assert.equal(dataset.daily[0].expenses, 8);
+  assert.equal(dataset.daily[0].creditIssued, 15);
+  assert.equal(dataset.daily[0].creditCollected, 5);
+  assert.equal(dataset.sales.length, 2);
+  assert.equal(dataset.expenses.length, 1);
+  assert.equal(dataset.creditIssues.length, 1);
+  assert.equal(dataset.creditCollections.length, 1);
+  assert.deepEqual(dataset.hourly.map((row) => row.hour), [9, 10, 11, 12]);
+  assert.equal(dataset.hourly[0].grossSales, 50);
+  assert.equal(dataset.hourly[3].sales, 25);
+});
+
 test('la utilidad usa el costo histórico del kardex y la cartera existente', () => {
   const dataset = sampleDataset();
   assert.equal(dataset.daily[0].grossSales, 100);
@@ -69,6 +126,7 @@ test('la utilidad usa el costo histórico del kardex y la cartera existente', ()
   assert.equal(dataset.daily[0].creditCollected, 30);
   assert.equal(dataset.summary.openCredit, 70);
   assert.equal(dataset.sales[0].items[0].historicalUnitCost, 30.5);
+  assert.deepEqual(dataset.paymentMethods, [{ method: 'cash', total: 30 }]);
   assert.equal(dataset.summary.costCoverage, 100);
 });
 
@@ -125,15 +183,39 @@ test('CSV mantiene negativos numéricos y Excel trae plantilla, filtros y fórmu
   const archive = unzipSync(bytes);
   const workbook = strFromU8(archive['xl/workbook.xml']);
   const dailySheet = strFromU8(archive['xl/worksheets/sheet2.xml']);
+  const hourlySheet = strFromU8(archive['xl/worksheets/sheet3.xml']);
+  const salesSheet = strFromU8(archive['xl/worksheets/sheet4.xml']);
   const dailyTable = strFromU8(archive['xl/tables/table1.xml']);
+  const hourlyTable = strFromU8(archive['xl/tables/table2.xml']);
   const template = strFromU8(archive['xl/worksheets/sheet1.xml']);
   assert.match(workbook, /name="Plantilla"/);
   assert.match(workbook, /name="Diario"/);
+  assert.match(workbook, /name="Horas"/);
   assert.match(workbook, /fullCalcOnLoad="1"/);
   assert.match(dailySheet, /SUBTOTAL\(109,\[Ventas netas\]\)/);
   assert.match(dailyTable, /totalsRowFunction="sum"/);
   assert.match(dailyTable, /<autoFilter/);
+  assert.match(hourlyTable, /Hora local/);
+  assert.match(hourlyTable, /Ganancia neta/);
+  assert.match(hourlySheet, /12:00/);
+  assert.match(salesSheet, /Hora local/);
   assert.match(template, /SUM\(Diario!D5:D5\)/);
+  assert.match(template, /SUM\(Cartera!F5:F5\)/);
   assert.match(template, /Tienda &amp; Café/);
-  assert.equal(Object.keys(archive).filter((name) => /^xl\/tables\/table\d+\.xml$/.test(name)).length, 6);
+  assert.match(template, /00:00–23:59/);
+  const tableFiles = Object.keys(archive).filter((name) => /^xl\/tables\/table\d+\.xml$/.test(name));
+  const relationshipFiles = Object.keys(archive).filter((name) => /^xl\/worksheets\/_rels\/sheet\d+\.xml\.rels$/.test(name));
+  assert.equal(tableFiles.length, 7);
+  assert.equal(relationshipFiles.length, 7);
+  for (const relationshipPath of relationshipFiles) {
+    const sheetNumber = /sheet(\d+)\.xml\.rels$/.exec(relationshipPath)?.[1];
+    assert.ok(sheetNumber);
+    const sheetXml = strFromU8(archive[`xl/worksheets/sheet${sheetNumber}.xml`]);
+    const relationshipXml = strFromU8(archive[relationshipPath]);
+    const partId = /<tablePart r:id="([^"]+)"/.exec(sheetXml)?.[1];
+    const relationship = /<Relationship Id="([^"]+)"[^>]*Target="\.\.\/tables\/([^\"]+)"/.exec(relationshipXml);
+    assert.ok(relationship);
+    assert.equal(partId, relationship[1]);
+    assert.ok(archive[`xl/tables/${relationship[2]}`]);
+  }
 });

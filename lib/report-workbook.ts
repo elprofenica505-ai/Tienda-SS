@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { localDateKey, type FinancialReportDataset } from '@/lib/financial-reports';
+import { localDateKey, localTimeKey, type FinancialReportDataset } from '@/lib/financial-reports';
 
 const SHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -15,7 +15,7 @@ type WorkbookOptions = {
 type WorkbookCell = string | number | { formula: string; result: number } | null;
 type TableColumn = {
   name: string;
-  kind?: 'date' | 'money' | 'integer' | 'text';
+  kind?: 'date' | 'time' | 'money' | 'integer' | 'text';
   sum?: boolean;
 };
 type TableSheet = {
@@ -113,7 +113,7 @@ function tableSheetXml(sheet: TableSheet, tableId: number): SheetBuild {
         if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) value = excelDate(value);
       } else if (column.kind === 'money') style = 4;
       else if (column.kind === 'integer') style = 6;
-      else if (column.kind === 'text') style = 10;
+      else if (column.kind === 'time' || column.kind === 'text') style = 10;
       return cellXml(`${columnName(columnIndex)}${rowNumber}`, value, style);
     });
     rows.push(rowXml(rowNumber, cells));
@@ -160,11 +160,11 @@ function summarySheetXml(dataset: FinancialReportDataset, options: WorkbookOptio
     ['Ganancia neta', `SUM(Diario!H${dailyDataStart}:H${dailyDataEnd})`, dataset.summary.netProfit],
     ['Crédito otorgado', `SUM(Diario!I${dailyDataStart}:I${dailyDataEnd})`, dataset.summary.creditIssued],
     ['Abonos aplicados a crédito', `SUM(Diario!J${dailyDataStart}:J${dailyDataEnd})`, dataset.summary.creditCollected],
-    ['Cartera abierta actual', `SUM(Cartera!E5:E${carteraDataEnd})`, dataset.summary.openCredit],
+    ['Cartera abierta actual', `SUM(Cartera!F5:F${carteraDataEnd})`, dataset.summary.openCredit],
   ];
   const rows: string[] = [];
   rows.push(rowXml(1, [cellXml('A1', 'Reporte financiero · Plantilla', 1)], 30));
-  rows.push(rowXml(2, [cellXml('A2', `${options.tenantName} · ${options.branchLabel} · ${dataset.period.fromDate} a ${dataset.period.toDate} · ${dataset.currency} · Zona horaria ${dataset.period.timeZone}`, 2)], 24));
+  rows.push(rowXml(2, [cellXml('A2', `${options.tenantName} · ${options.branchLabel} · ${dataset.period.fromDate} a ${dataset.period.toDate} · ${dataset.period.fromTime}–${dataset.period.toTime} · ${dataset.currency} · Zona horaria ${dataset.period.timeZone}`, 2)], 24));
   rows.push(rowXml(4, [cellXml('A4', 'Indicador', 3), cellXml('B4', 'Total del período', 3)], 24));
   reports.forEach(([label, formula, result], index) => {
     const rowNumber = index + 5;
@@ -181,8 +181,9 @@ function summarySheetXml(dataset: FinancialReportDataset, options: WorkbookOptio
 }
 
 function worksheetRelationships(tableId: number): string {
+  // Each worksheet owns its own relationship namespace, so its table part is always rId1.
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId${tableId}" Type="${TABLE_REL_TYPE}" Target="../tables/table${tableId}.xml"/></Relationships>`;
+    `<Relationships xmlns="${PKG_REL_NS}"><Relationship Id="rId1" Type="${TABLE_REL_TYPE}" Target="../tables/table${tableId}.xml"/></Relationships>`;
 }
 
 function stylesXml(): string {
@@ -250,56 +251,67 @@ function tableSheets(dataset: FinancialReportDataset): TableSheet[] {
     ],
     rows: dataset.daily.map((row) => [row.date, row.grossSales, row.returns, row.sales, row.costOfGoodsSold, row.grossProfit, row.expenses, row.netProfit, row.creditIssued, row.creditCollected, row.salesCount]),
   };
+  const hourly: TableSheet = {
+    sheetName: 'Horas', tableName: 'TablaHoras', title: 'Desglose financiero por hora local',
+    columns: [
+      { name: 'Hora local', kind: 'time' }, { name: 'Ventas brutas', kind: 'money', sum: true },
+      { name: 'Devoluciones', kind: 'money', sum: true }, { name: 'Ventas netas', kind: 'money', sum: true },
+      { name: 'Costo histórico', kind: 'money', sum: true }, { name: 'Ganancia bruta', kind: 'money', sum: true },
+      { name: 'Gastos', kind: 'money', sum: true }, { name: 'Ganancia neta', kind: 'money', sum: true },
+      { name: 'Cantidad de ventas', kind: 'integer', sum: true },
+    ],
+    rows: dataset.hourly.map((row) => [row.label, row.grossSales, row.returns, row.sales, row.costOfGoodsSold, row.grossProfit, row.expenses, row.netProfit, row.salesCount]),
+  };
   const sales: TableSheet = {
     sheetName: 'Ventas', tableName: 'TablaVentas', title: 'Ventas y costo histórico por transacción',
     columns: [
-      { name: 'Fecha', kind: 'date' }, { name: 'Factura', kind: 'text' }, { name: 'Estado', kind: 'text' },
+      { name: 'Fecha', kind: 'date' }, { name: 'Hora local', kind: 'time' }, { name: 'Factura', kind: 'text' }, { name: 'Estado', kind: 'text' },
       { name: 'Venta', kind: 'money', sum: true }, { name: 'Costo histórico', kind: 'money', sum: true },
       { name: 'Ganancia bruta', kind: 'money', sum: true }, { name: 'Líneas sin costo histórico', kind: 'integer', sum: true },
     ],
-    rows: dataset.sales.map((row) => [row.date, row.invoiceNumber, row.status, row.total, row.historicalCost, row.grossProfit, row.missingCostLines]),
+    rows: dataset.sales.map((row) => [row.date, localTimeKey(row.createdAt, dataset.period.timeZone), row.invoiceNumber, row.status, row.total, row.historicalCost, row.grossProfit, row.missingCostLines]),
   };
   const expenses: TableSheet = {
     sheetName: 'Gastos', tableName: 'TablaGastos', title: 'Gastos registrados por fecha',
     columns: [
-      { name: 'Fecha', kind: 'date' }, { name: 'Descripción', kind: 'text' }, { name: 'Categoría', kind: 'text' },
+      { name: 'Fecha', kind: 'date' }, { name: 'Hora local', kind: 'time' }, { name: 'Descripción', kind: 'text' }, { name: 'Categoría', kind: 'text' },
       { name: 'Método de pago', kind: 'text' }, { name: 'Importe', kind: 'money', sum: true },
     ],
-    rows: dataset.expenses.map((row) => [localDateKey(row.createdAt, dataset.period.timeZone), row.description, row.category, row.paymentMethod, row.amount]),
+    rows: dataset.expenses.map((row) => [localDateKey(row.createdAt, dataset.period.timeZone), localTimeKey(row.createdAt, dataset.period.timeZone), row.description, row.category, row.paymentMethod, row.amount]),
   };
-  const creditEvents: Array<{ date: string; type: string; reference: string; customer: string; method: string; issued: number; collected: number }> = [
-    ...dataset.creditIssues.map((row) => ({ date: localDateKey(row.createdAt, dataset.period.timeZone), type: 'Crédito otorgado', reference: row.saleNumber, customer: row.customerName, method: '—', issued: row.originalAmount, collected: 0 })),
-    ...dataset.creditCollections.map((row) => ({ date: localDateKey(row.createdAt, dataset.period.timeZone), type: 'Abono aplicado', reference: row.receiptNumber || row.saleNumber, customer: row.customerName, method: row.paymentMethod, issued: 0, collected: row.amount })),
-  ].sort((a, b) => a.date.localeCompare(b.date) || a.reference.localeCompare(b.reference));
+  const creditEvents: Array<{ date: string; time: string; type: string; reference: string; customer: string; method: string; issued: number; collected: number }> = [
+    ...dataset.creditIssues.map((row) => ({ date: localDateKey(row.createdAt, dataset.period.timeZone), time: localTimeKey(row.createdAt, dataset.period.timeZone), type: 'Crédito otorgado', reference: row.saleNumber, customer: row.customerName, method: '—', issued: row.originalAmount, collected: 0 })),
+    ...dataset.creditCollections.map((row) => ({ date: localDateKey(row.createdAt, dataset.period.timeZone), time: localTimeKey(row.createdAt, dataset.period.timeZone), type: 'Abono aplicado', reference: row.receiptNumber || row.saleNumber, customer: row.customerName, method: row.paymentMethod, issued: 0, collected: row.amount })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.reference.localeCompare(b.reference));
   const credits: TableSheet = {
     sheetName: 'Crédito', tableName: 'TablaMovimientosCredito', title: 'Movimientos de la cartera de crédito ConexiaX',
     columns: [
-      { name: 'Fecha', kind: 'date' }, { name: 'Movimiento', kind: 'text' }, { name: 'Factura o recibo', kind: 'text' },
+      { name: 'Fecha', kind: 'date' }, { name: 'Hora local', kind: 'time' }, { name: 'Movimiento', kind: 'text' }, { name: 'Factura o recibo', kind: 'text' },
       { name: 'Cliente', kind: 'text' }, { name: 'Método', kind: 'text' },
       { name: 'Crédito otorgado', kind: 'money', sum: true }, { name: 'Abono aplicado', kind: 'money', sum: true },
     ],
-    rows: creditEvents.map((row) => [row.date, row.type, row.reference, row.customer, row.method, row.issued, row.collected]),
+    rows: creditEvents.map((row) => [row.date, row.time, row.type, row.reference, row.customer, row.method, row.issued, row.collected]),
   };
   const returns: TableSheet = {
     sheetName: 'Devoluciones', tableName: 'TablaDevoluciones', title: 'Devoluciones y costo histórico recuperado',
     columns: [
-      { name: 'Fecha', kind: 'date' }, { name: 'Factura', kind: 'text' }, { name: 'Método de reembolso', kind: 'text' },
+      { name: 'Fecha', kind: 'date' }, { name: 'Hora local', kind: 'time' }, { name: 'Factura', kind: 'text' }, { name: 'Método de reembolso', kind: 'text' },
       { name: 'Importe devuelto', kind: 'money', sum: true }, { name: 'Costo histórico recuperado', kind: 'money', sum: true },
       { name: 'Líneas sin costo histórico', kind: 'integer', sum: true },
     ],
-    rows: dataset.returns.map((row) => [row.date, row.invoiceNumber, row.refundMethod, row.amount, row.historicalCostRecovered, row.missingCostLines]),
+    rows: dataset.returns.map((row) => [row.date, localTimeKey(row.createdAt, dataset.period.timeZone), row.invoiceNumber, row.refundMethod, row.amount, row.historicalCostRecovered, row.missingCostLines]),
   };
   const cartera: TableSheet = {
     sheetName: 'Cartera', tableName: 'TablaCarteraAbierta', title: 'Cartera de crédito abierta al momento de generar el archivo',
     columns: [
-      { name: 'Fecha de origen', kind: 'date' }, { name: 'Factura', kind: 'text' }, { name: 'Cliente', kind: 'text' },
+      { name: 'Fecha de origen', kind: 'date' }, { name: 'Hora local', kind: 'time' }, { name: 'Factura', kind: 'text' }, { name: 'Cliente', kind: 'text' },
       { name: 'Monto original', kind: 'money', sum: true }, { name: 'Saldo abierto actual', kind: 'money', sum: true }, { name: 'Estado', kind: 'text' },
     ],
     rows: [...dataset.openReceivables]
       .sort((a, b) => b.outstandingAmount - a.outstandingAmount || a.createdAt.localeCompare(b.createdAt))
-      .map((row) => [localDateKey(row.createdAt, dataset.period.timeZone), row.saleNumber, row.customerName, row.originalAmount, row.outstandingAmount, row.status]),
+      .map((row) => [localDateKey(row.createdAt, dataset.period.timeZone), localTimeKey(row.createdAt, dataset.period.timeZone), row.saleNumber, row.customerName, row.originalAmount, row.outstandingAmount, row.status]),
   };
-  return [daily, sales, expenses, credits, returns, cartera].map((sheet) => ({
+  return [daily, hourly, sales, expenses, credits, returns, cartera].map((sheet) => ({
     ...sheet,
     rows: sheet.rows.map((row) => row.map((value, index) => cellWithKind(value as string | number | null, sheet.columns[index]?.kind))),
   }));

@@ -10,6 +10,9 @@ const receivables = readFileSync('app/api/receivables/route.ts', 'utf8');
 const reports = readFileSync('app/api/reports/route.ts', 'utf8');
 const reportService = readFileSync('lib/financial-reports-service.ts', 'utf8');
 const exportRoute = readFileSync('app/api/reports/export/route.ts', 'utf8');
+const reportPage = readFileSync('app/workspace/reports/page.tsx', 'utf8');
+const reportInsights = readFileSync('components/workspace/FinancialReportInsights.tsx', 'utf8');
+const reportWorkbook = readFileSync('lib/report-workbook.ts', 'utf8');
 const dailyStats = readFileSync('app/api/stats/daily/route.ts', 'utf8');
 const tenant = readFileSync('lib/tenant.ts', 'utf8');
 const cashier = readFileSync('app/workspace/cashier/page.tsx', 'utf8');
@@ -30,6 +33,18 @@ test('rate limit permanece centralizado en la guarda de tenant', () => {
   assert.match(tenant, /consumeDistributedRateLimits/);
   assert.match(tenant, /endpoint: request\.nextUrl\.pathname/);
   assert.match(tenant, /tenant: 1_000/);
+});
+
+test('reportes incluyen calendario, filtro horario, barras y gráfico circular exportable', () => {
+  assert.match(reportPage, /type="date"/);
+  assert.match(reportPage, /type="time"/);
+  assert.match(reportPage, /fromDate/);
+  assert.match(reportPage, /toDate/);
+  assert.match(reportPage, /FinancialReportInsights/);
+  assert.match(reportInsights, /conic-gradient/);
+  assert.match(reportInsights, /financial-hourly-column/);
+  assert.match(reportWorkbook, /sheetName: 'Horas'/);
+  assert.match(reportWorkbook, /Hora local/);
 });
 
 test('tickets tienen código visible y acciones imprimibles/copiables', () => {

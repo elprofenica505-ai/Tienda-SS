@@ -8,7 +8,22 @@ export type FinancialReportPeriod = {
   from: string;
   to: string;
   timeZone: string;
+  fromTime: string;
+  toTime: string;
   dateKeys: string[];
+};
+
+export type FinancialHourlyRow = {
+  hour: number;
+  label: string;
+  grossSales: number;
+  returns: number;
+  sales: number;
+  costOfGoodsSold: number;
+  grossProfit: number;
+  expenses: number;
+  netProfit: number;
+  salesCount: number;
 };
 
 export type FinancialSaleItemInput = {
@@ -143,6 +158,7 @@ export type FinancialReportDataset = {
   currency: string;
   branchId: string | null;
   daily: FinancialDailyRow[];
+  hourly: FinancialHourlyRow[];
   summary: {
     grossSales: number;
     returns: number;
@@ -211,6 +227,18 @@ export function localDateKey(value: Date | string, timeZone = 'America/Managua')
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+export function localTimeKey(value: Date | string, timeZone = 'America/Managua'): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.hour}:${parts.minute}`;
+}
+
 export function isValidDateKey(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const [year, month, day] = value.split('-').map(Number);
@@ -223,9 +251,26 @@ export function shiftDateKey(value: string, amount: number): string {
   return new Date(Date.UTC(year, month - 1, day + amount)).toISOString().slice(0, 10);
 }
 
-function utcAtLocalMidnight(dateKey: string, timeZone: string): Date {
+function timeMinutes(value: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : null;
+}
+
+function validatedTimeRange(fromTime: string, toTime: string) {
+  const start = timeMinutes(fromTime);
+  const end = timeMinutes(toTime);
+  if (start === null || end === null || start > end) throw new Error('REPORT_TIME_INVALID');
+  return { fromTime, toTime, start, end };
+}
+
+function utcAtLocalTime(dateKey: string, time: string, timeZone: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
-  const target = Date.UTC(year, month - 1, day, 0, 0, 0);
+  const minutes = timeMinutes(time);
+  if (minutes === null) throw new Error('REPORT_TIME_INVALID');
+  const target = Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60, 0);
   let instant = target;
   const partsFormatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -248,38 +293,65 @@ function utcAtLocalMidnight(dateKey: string, timeZone: string): Date {
   return new Date(instant);
 }
 
+function utcAtLocalMidnight(dateKey: string, timeZone: string): Date {
+  return utcAtLocalTime(dateKey, '00:00', timeZone);
+}
+
 function dateKeysBetween(fromDate: string, toDate: string): string[] {
   const result: string[] = [];
   for (let key = fromDate; key <= toDate; key = shiftDateKey(key, 1)) result.push(key);
   return result;
 }
 
-export function createFinancialReportPeriod(days: number, timeZone = 'America/Managua', now = new Date()): FinancialReportPeriod {
-  if (!(REPORT_PERIODS as readonly number[]).includes(days)) throw new Error('REPORT_PERIOD_INVALID');
-  const toDate = localDateKey(now, timeZone);
-  const fromDate = shiftDateKey(toDate, -(days - 1));
+function createPeriod(fromDate: string, toDate: string, timeZone: string, fromTime: string, toTime: string): FinancialReportPeriod {
+  if (!isValidDateKey(fromDate) || !isValidDateKey(toDate)) throw new Error('REPORT_DATE_INVALID');
+  if (fromDate > toDate) throw new Error('REPORT_PERIOD_INVALID');
+  const times = validatedTimeRange(fromTime, toTime);
+  const dateKeys = dateKeysBetween(fromDate, toDate);
+  if (dateKeys.length > 365) throw new Error('REPORT_PERIOD_INVALID');
   return {
-    days,
+    days: dateKeys.length,
     fromDate,
     toDate,
     from: utcAtLocalMidnight(fromDate, timeZone).toISOString(),
     to: utcAtLocalMidnight(shiftDateKey(toDate, 1), timeZone).toISOString(),
     timeZone,
-    dateKeys: dateKeysBetween(fromDate, toDate),
+    fromTime: times.fromTime,
+    toTime: times.toTime,
+    dateKeys,
   };
 }
 
-export function createFinancialReportDay(date: string, timeZone = 'America/Managua'): FinancialReportPeriod {
-  if (!isValidDateKey(date)) throw new Error('REPORT_DATE_INVALID');
-  return {
-    days: 1,
-    fromDate: date,
-    toDate: date,
-    from: utcAtLocalMidnight(date, timeZone).toISOString(),
-    to: utcAtLocalMidnight(shiftDateKey(date, 1), timeZone).toISOString(),
-    timeZone,
-    dateKeys: [date],
-  };
+export function createFinancialReportPeriod(
+  days: number,
+  timeZone = 'America/Managua',
+  now = new Date(),
+  fromTime = '00:00',
+  toTime = '23:59',
+): FinancialReportPeriod {
+  if (!(REPORT_PERIODS as readonly number[]).includes(days)) throw new Error('REPORT_PERIOD_INVALID');
+  const toDate = localDateKey(now, timeZone);
+  const fromDate = shiftDateKey(toDate, -(days - 1));
+  return createPeriod(fromDate, toDate, timeZone, fromTime, toTime);
+}
+
+export function createFinancialReportDay(
+  date: string,
+  timeZone = 'America/Managua',
+  fromTime = '00:00',
+  toTime = '23:59',
+): FinancialReportPeriod {
+  return createPeriod(date, date, timeZone, fromTime, toTime);
+}
+
+export function createFinancialReportRange(
+  fromDate: string,
+  toDate: string,
+  timeZone = 'America/Managua',
+  fromTime = '00:00',
+  toTime = '23:59',
+): FinancialReportPeriod {
+  return createPeriod(fromDate, toDate, timeZone, fromTime, toTime);
 }
 
 function finiteNumber(value: unknown): number {
@@ -340,9 +412,45 @@ function emptyDay(date: string): FinancialDailyRow {
   return { date, grossSales: 0, returns: 0, sales: 0, costOfGoodsSold: 0, grossProfit: 0, expenses: 0, netProfit: 0, creditIssued: 0, creditCollected: 0, salesCount: 0 };
 }
 
+type HourAccumulator = FinancialHourlyRow;
+
+function emptyHour(hour: number): HourAccumulator {
+  return {
+    hour,
+    label: `${String(hour).padStart(2, '0')}:00`,
+    grossSales: 0,
+    returns: 0,
+    sales: 0,
+    costOfGoodsSold: 0,
+    grossProfit: 0,
+    expenses: 0,
+    netProfit: 0,
+    salesCount: 0,
+  };
+}
+
+function withinSelectedHours(value: string, period: FinancialReportPeriod): boolean {
+  const localTime = localTimeKey(value, period.timeZone);
+  const minute = timeMinutes(localTime);
+  const start = timeMinutes(period.fromTime);
+  const end = timeMinutes(period.toTime);
+  return minute !== null && start !== null && end !== null && minute >= start && minute <= end;
+}
+
+function localHour(value: string, timeZone: string): number | null {
+  const minute = timeMinutes(localTimeKey(value, timeZone));
+  return minute === null ? null : Math.floor(minute / 60);
+}
+
 export function calculateFinancialReport(input: CalculateFinancialReportInput): FinancialReportDataset {
   const movementCosts = createMovementCostIndex(input.movements);
   const dayByDate = new Map(input.period.dateKeys.map((date) => [date, emptyDay(date)]));
+  const startHour = Math.floor(timeMinutes(input.period.fromTime)! / 60);
+  const endHour = Math.floor(timeMinutes(input.period.toTime)! / 60);
+  const hourByTime = new Map(Array.from({ length: endHour - startHour + 1 }, (_, index) => {
+    const hour = startHour + index;
+    return [hour, emptyHour(hour)] as const;
+  }));
   const sales: FinancialSaleDetail[] = [];
   const returns: FinancialReturnDetail[] = [];
   const productTotals = new Map<string, { name: string; quantity: number; revenue: number }>();
@@ -352,10 +460,11 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
   let missingCostQuantity = 0;
 
   for (const sale of input.sales) {
-    if (!['completed', 'returned'].includes(sale.status)) continue;
+    if (!['completed', 'returned'].includes(sale.status) || !withinSelectedHours(sale.createdAt, input.period)) continue;
     const date = localDateKey(sale.createdAt, input.period.timeZone);
     const day = dayByDate.get(date);
     if (!day) continue;
+    const hour = hourByTime.get(localHour(sale.createdAt, input.period.timeZone) ?? -1);
     const lines: FinancialSaleLine[] = sale.items.map((item) => {
       const lineRevenue = roundMoney(finiteNumber(item.lineTotal) || finiteNumber(item.quantity) * finiteNumber(item.unitPrice));
       const cost = costForQuantity(movementCosts, sale.id, item.productId, item.warehouseId, item.quantity, item.itemType);
@@ -379,18 +488,27 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
     day.grossSales += finiteNumber(sale.total);
     day.costOfGoodsSold += historicalCost;
     day.salesCount += 1;
+    if (hour) {
+      hour.grossSales += finiteNumber(sale.total);
+      hour.costOfGoodsSold += historicalCost;
+      hour.salesCount += 1;
+    }
     for (const payment of sale.payments) {
-      const method = payment.paymentMethod || 'other';
-      paymentTotals.set(method, (paymentTotals.get(method) || 0) + finiteNumber(payment.amount));
+      const method = (payment.paymentMethod || 'other').toLowerCase();
+      const amount = finiteNumber(payment.amount);
+      // El crédito otorgado no es dinero recibido: sus abonos se contabilizan por separado abajo.
+      if (method === 'credit' || amount <= 0) continue;
+      paymentTotals.set(method, (paymentTotals.get(method) || 0) + amount);
     }
     sales.push({ ...sale, date, historicalCost, grossProfit, missingCostLines: lines.filter((item) => item.missingCostQuantity > 0.00001).length, missingCostQuantity: roundMoney(lines.reduce((sum, item) => sum + item.missingCostQuantity, 0)), items: lines });
   }
 
   for (const item of input.returns) {
-    if (item.status !== 'completed') continue;
+    if (item.status !== 'completed' || !withinSelectedHours(item.createdAt, input.period)) continue;
     const date = localDateKey(item.createdAt, input.period.timeZone);
     const day = dayByDate.get(date);
     if (!day) continue;
+    const hour = hourByTime.get(localHour(item.createdAt, input.period.timeZone) ?? -1);
     const lines = item.items.map((line) => {
       const cost = costForQuantity(movementCosts, line.saleId, line.productId, line.warehouseId, line.quantity);
       if (cost.missingQuantity > 0.00001) {
@@ -409,23 +527,35 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
     const historicalCostRecovered = roundMoney(lines.reduce((sum, line) => sum + line.historicalCostRecovered, 0));
     day.returns += finiteNumber(item.amount);
     day.costOfGoodsSold -= historicalCostRecovered;
+    if (hour) {
+      hour.returns += finiteNumber(item.amount);
+      hour.costOfGoodsSold -= historicalCostRecovered;
+    }
     returns.push({ ...item, date, historicalCostRecovered, missingCostLines: lines.filter((line) => line.missingCostQuantity > 0.00001).length, items: lines });
   }
 
   for (const expense of input.expenses) {
+    if (!withinSelectedHours(expense.createdAt, input.period)) continue;
     const date = localDateKey(expense.createdAt, input.period.timeZone);
     const day = dayByDate.get(date);
     if (day) day.expenses += finiteNumber(expense.amount);
+    const hour = hourByTime.get(localHour(expense.createdAt, input.period.timeZone) ?? -1);
+    if (hour) hour.expenses += finiteNumber(expense.amount);
   }
   for (const issue of input.creditIssues) {
+    if (!withinSelectedHours(issue.createdAt, input.period)) continue;
     const date = localDateKey(issue.createdAt, input.period.timeZone);
     const day = dayByDate.get(date);
     if (day) day.creditIssued += finiteNumber(issue.originalAmount);
   }
   for (const collection of input.creditCollections) {
+    if (!withinSelectedHours(collection.createdAt, input.period)) continue;
     const date = localDateKey(collection.createdAt, input.period.timeZone);
     const day = dayByDate.get(date);
-    if (day) day.creditCollected += finiteNumber(collection.amount);
+    const amount = Math.max(0, finiteNumber(collection.amount));
+    if (day) day.creditCollected += amount;
+    const method = (collection.paymentMethod || 'other').toLowerCase();
+    if (amount > 0) paymentTotals.set(method, (paymentTotals.get(method) || 0) + amount);
   }
 
   const daily = Array.from(dayByDate.values()).map((row) => {
@@ -446,6 +576,25 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
       netProfit: roundMoney(grossProfit - expenses),
       creditIssued: roundMoney(row.creditIssued),
       creditCollected: roundMoney(row.creditCollected),
+    };
+  });
+
+  const hourly = Array.from(hourByTime.values()).map((row) => {
+    const grossSales = roundMoney(row.grossSales);
+    const returns = roundMoney(row.returns);
+    const sales = roundMoney(grossSales - returns);
+    const costOfGoodsSold = roundMoney(row.costOfGoodsSold);
+    const grossProfit = roundMoney(sales - costOfGoodsSold);
+    const expenses = roundMoney(row.expenses);
+    return {
+      ...row,
+      grossSales,
+      returns,
+      sales,
+      costOfGoodsSold,
+      grossProfit,
+      expenses,
+      netProfit: roundMoney(grossProfit - expenses),
     };
   });
 
@@ -482,12 +631,13 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
     currency: input.currency || 'NIO',
     branchId: input.branchId || null,
     daily,
+    hourly,
     summary,
     sales: sales.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.invoiceNumber.localeCompare(b.invoiceNumber)),
     returns: returns.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    expenses: [...input.expenses].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    creditIssues: [...input.creditIssues].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    creditCollections: [...input.creditCollections].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    expenses: input.expenses.filter((expense) => withinSelectedHours(expense.createdAt, input.period)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    creditIssues: input.creditIssues.filter((issue) => withinSelectedHours(issue.createdAt, input.period)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    creditCollections: input.creditCollections.filter((collection) => withinSelectedHours(collection.createdAt, input.period)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     openReceivables: [...input.openReceivables],
     topProducts: Array.from(productTotals.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10),
     paymentMethods: Array.from(paymentTotals, ([method, total]) => ({ method, total: roundMoney(total) })).sort((a, b) => b.total - a.total),

@@ -3,17 +3,19 @@
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import { FinancialReportChart } from '@/components/workspace/FinancialReportChart';
 import { useTenant } from '@/components/tenant/TenantProvider';
-import type { FinancialDailyRow, FinancialReportDataset, FinancialSaleDetail, FinancialCreditIssueInput, FinancialCreditCollectionInput, FinancialExpenseInput, FinancialReturnDetail } from '@/lib/financial-reports';
+import { localDateKey, type FinancialDailyRow, type FinancialHourlyRow, type FinancialReportDataset, type FinancialSaleDetail, type FinancialCreditIssueInput, type FinancialCreditCollectionInput, type FinancialExpenseInput, type FinancialReturnDetail } from '@/lib/financial-reports';
+import { FinancialReportInsights } from '@/components/workspace/FinancialReportInsights';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 type ReportResponse = {
   ok: boolean;
-  period: { days: number; from: string; to: string; timeZone: string };
+  period: { days: number; from: string; to: string; timeZone: string; fromTime: string; toTime: string };
   currency: string;
   branchId: string | null;
   summary: FinancialReportDataset['summary'];
   daily: FinancialDailyRow[];
+  hourly: FinancialHourlyRow[];
   paymentMethods: FinancialReportDataset['paymentMethods'];
   topProducts: FinancialReportDataset['topProducts'];
 };
@@ -23,6 +25,7 @@ type DayResponse = {
   date: string;
   currency: string;
   day: FinancialDailyRow;
+  hourly: FinancialHourlyRow[];
   details: {
     sales: FinancialSaleDetail[];
     returns: FinancialReturnDetail[];
@@ -63,6 +66,10 @@ function ReportsContent() {
   const router = useRouter();
   const { authUser, tenant, member, organization, loading: tenantLoading } = useTenant();
   const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
+  const [specificDateMode, setSpecificDateMode] = useState(false);
+  const [specificDate, setSpecificDate] = useState('');
+  const [fromTime, setFromTime] = useState('00:00');
+  const [toTime, setToTime] = useState('23:59');
   const [branchFilter, setBranchFilter] = useState('');
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [detail, setDetail] = useState<DayResponse['details'] | null>(null);
@@ -71,6 +78,20 @@ function ReportsContent() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [exporting, setExporting] = useState('');
   const [message, setMessage] = useState('');
+  const today = localDateKey(new Date(), tenant?.timezone || 'America/Managua');
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (specificDateMode) {
+      const date = specificDate || today;
+      params.set('fromDate', date);
+      params.set('toDate', date);
+    } else {
+      params.set('days', String(days));
+    }
+    params.set('fromTime', fromTime);
+    params.set('toTime', toTime);
+    return params.toString();
+  }, [days, specificDateMode, specificDate, fromTime, toTime, today]);
 
   const headersFor = useCallback(async () => {
     if (!authUser || !tenant) throw new Error('Inicia sesión para consultar los reportes.');
@@ -90,12 +111,13 @@ function ReportsContent() {
     void (async () => {
       try {
         const headers = await headersFor();
-        const response = await fetch(`/api/reports?days=${days}`, { headers, cache: 'no-store' });
+        const response = await fetch(`/api/reports?${queryString}`, { headers, cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los reportes.');
         if (!active) return;
         setReport(data as ReportResponse);
-        setSelectedDate((current) => data.daily?.some((row: FinancialDailyRow) => row.date === current) ? current : data.daily?.at(-1)?.date || '');
+        const preferredDate = specificDateMode ? (specificDate || today) : (data.daily?.at(-1)?.date || '');
+        setSelectedDate((current) => data.daily?.some((row: FinancialDailyRow) => row.date === current) ? current : preferredDate);
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : 'Error cargando reportes.');
       } finally {
@@ -103,7 +125,7 @@ function ReportsContent() {
       }
     })();
     return () => { active = false; };
-  }, [authUser, tenant, days, branchFilter, headersFor]);
+  }, [authUser, tenant, queryString, branchFilter, headersFor, specificDateMode, specificDate, today]);
 
   useEffect(() => {
     if (!authUser || !tenant || !selectedDate) return;
@@ -113,7 +135,8 @@ function ReportsContent() {
     void (async () => {
       try {
         const headers = await headersFor();
-        const response = await fetch(`/api/reports?date=${encodeURIComponent(selectedDate)}`, { headers, cache: 'no-store' });
+        const params = new URLSearchParams({ date: selectedDate, fromTime, toTime });
+        const response = await fetch(`/api/reports?${params.toString()}`, { headers, cache: 'no-store' });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'No se pudo cargar el desglose del día.');
         if (active) setDetail((data as DayResponse).details);
@@ -124,7 +147,7 @@ function ReportsContent() {
       }
     })();
     return () => { active = false; };
-  }, [authUser, tenant, selectedDate, branchFilter, headersFor]);
+  }, [authUser, tenant, selectedDate, branchFilter, headersFor, fromTime, toTime]);
 
   const formatMoney = useCallback((value: number) => currencyFormatter(value, report?.currency || tenant?.currency || 'NIO'), [report?.currency, tenant?.currency]);
   const isManager = Boolean(member && MANAGER_ROLES.has(member.role));
@@ -140,7 +163,9 @@ function ReportsContent() {
     setMessage('');
     try {
       const headers = await headersFor();
-      const response = await fetch(`/api/reports/export?format=${format}&days=${days}`, { headers, cache: 'no-store' });
+      const params = new URLSearchParams(queryString);
+      params.set('format', format);
+      const response = await fetch(`/api/reports/export?${params.toString()}`, { headers, cache: 'no-store' });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'No se pudo generar la descarga.');
@@ -149,7 +174,9 @@ function ReportsContent() {
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = `reporte-financiero-${report?.period.from || ''}-a-${report?.period.to || ''}.${format}`;
+      const disposition = response.headers.get('content-disposition') || '';
+      link.download = /filename="([^"]+)"/i.exec(disposition)?.[1]
+        || `reporte-financiero-${report?.period.from || ''}-a-${report?.period.to || ''}.${format}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -190,11 +217,27 @@ function ReportsContent() {
         <section className="finance-report-controlbar no-print" aria-label="Filtros del reporte">
           <div className="finance-period-control" role="group" aria-label="Período del reporte">
             {PERIODS.map((period) => (
-              <button key={period} className={days === period ? 'selected' : ''} aria-pressed={days === period} onClick={() => setDays(period)}>
+              <button key={period} className={!specificDateMode && days === period ? 'selected' : ''} aria-pressed={!specificDateMode && days === period} onClick={() => { setSpecificDateMode(false); setDays(period); }}>
                 {`${period} días`}
               </button>
             ))}
+            <button className={specificDateMode ? 'selected' : ''} aria-pressed={specificDateMode} onClick={() => {
+              setSpecificDateMode(true);
+              setSpecificDate((current) => current || today);
+            }}>Fecha</button>
           </div>
+          {specificDateMode && <label className="finance-date-control">
+            <span>Fecha específica</span>
+            <input type="date" value={specificDate || today} max={today} onChange={(event) => setSpecificDate(event.target.value)} aria-label="Seleccionar fecha del reporte" />
+          </label>}
+          <label className="finance-time-control">
+            <span>Hora desde</span>
+            <input type="time" value={fromTime} max={toTime} onChange={(event) => setFromTime(event.target.value)} aria-label="Hora inicial del reporte" />
+          </label>
+          <label className="finance-time-control">
+            <span>Hora hasta</span>
+            <input type="time" value={toTime} min={fromTime} onChange={(event) => setToTime(event.target.value)} aria-label="Hora final del reporte" />
+          </label>
           <label className="finance-branch-control">
             <span>Sucursal</span>
             <select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)} aria-label="Filtrar por sucursal">
@@ -202,7 +245,7 @@ function ReportsContent() {
               {organization.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` · ${branch.code}` : ''}</option>)}
             </select>
           </label>
-          {report && <span className="finance-period-caption">{visibleDate(report.period.from)} — {visibleDate(report.period.to)} · {report.period.timeZone}</span>}
+          {report && <span className="finance-period-caption">{visibleDate(report.period.from)} — {visibleDate(report.period.to)} · {report.period.fromTime}–{report.period.toTime} · {report.period.timeZone}</span>}
         </section>
 
         {loading || !report ? (
@@ -237,6 +280,7 @@ function ReportsContent() {
             </section>
 
             <FinancialReportChart data={report.daily} selectedDate={selectedDate} currency={report.currency} onSelectDate={setSelectedDate} />
+            <FinancialReportInsights hourly={report.hourly} paymentMethods={report.paymentMethods} currency={report.currency} />
 
             {report.summary.uncostedLines > 0 && (
               <div className="financial-cost-warning" role="status">
