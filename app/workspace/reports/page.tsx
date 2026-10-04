@@ -1,24 +1,367 @@
 'use client';
 
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
-
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { FinancialReportChart } from '@/components/workspace/FinancialReportChart';
 import { useTenant } from '@/components/tenant/TenantProvider';
+import { localDateKey, type FinancialDailyRow, type FinancialHourlyRow, type FinancialReportDataset, type FinancialSaleDetail, type FinancialCreditIssueInput, type FinancialCreditCollectionInput, type FinancialExpenseInput, type FinancialReturnDetail } from '@/lib/financial-reports';
+import { FinancialReportInsights } from '@/components/workspace/FinancialReportInsights';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
-type Daily = { date: string; income: number; expenses: number; net: number };
-type Report = { summary: { income: number; expenses: number; cashAdjustments: number; net: number; sales: number; averageSale: number; openCredit: number; collectedCredit: number }; daily: Daily[]; paymentMethods: { method: string; total: number }[]; topProducts: { name: string; quantity: number; revenue: number }[]; recentExpenses: { id: string; description: string; amount: number; category?: string }[] };
+type ReportResponse = {
+  ok: boolean;
+  period: { days: number; from: string; to: string; timeZone: string; fromTime: string; toTime: string };
+  currency: string;
+  branchId: string | null;
+  summary: FinancialReportDataset['summary'];
+  daily: FinancialDailyRow[];
+  hourly: FinancialHourlyRow[];
+  paymentMethods: FinancialReportDataset['paymentMethods'];
+  topProducts: FinancialReportDataset['topProducts'];
+};
+
+type DayResponse = {
+  ok: boolean;
+  date: string;
+  currency: string;
+  day: FinancialDailyRow;
+  hourly: FinancialHourlyRow[];
+  details: {
+    sales: FinancialSaleDetail[];
+    returns: FinancialReturnDetail[];
+    expenses: FinancialExpenseInput[];
+    credit: {
+      issued: FinancialCreditIssueInput[];
+      collections: FinancialCreditCollectionInput[];
+      currentOpenBalanceForDay: number;
+      currentOpenBalance: number;
+    };
+  };
+};
+
+const PERIODS = [7, 30, 90, 365] as const;
+const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
+const PAYMENT_LABELS: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Crédito', other: 'Otro' };
+
+function currencyFormatter(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat('es-NI', { style: 'currency', currency }).format(value);
+  } catch {
+    return `${currency} ${value.toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+}
+
+function visibleDate(value: string, options?: Intl.DateTimeFormatOptions) {
+  const date = new Date(`${value}T12:00:00Z`);
+  return new Intl.DateTimeFormat('es-NI', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC', ...options }).format(date);
+}
+
+function dateTimeLabel(value: string, timeZone: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('es-NI', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone }).format(date);
+}
 
 function ReportsContent() {
-  const router = useRouter(); const { authUser, tenant, member, loading: tenantLoading } = useTenant();
-  const [days, setDays] = useState(30); const [report, setReport] = useState<Report | null>(null); const [loading, setLoading] = useState(true); const [message, setMessage] = useState('');
-  const load = useCallback(async () => { if (!authUser || !tenant) return; setLoading(true); try { const response = await fetch(`/api/reports?days=${days}`, { headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, cache: 'no-store' }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los reportes.'); setReport(data); } catch (error) { setMessage(error instanceof Error ? error.message : 'Error cargando reportes.'); } finally { setLoading(false); } }, [authUser, tenant, days]);
-  useEffect(() => { void load(); }, [load]);
-  if (tenantLoading || loading || !report) return <div className="workspace-loading">Generando análisis financiero...</div>;
-  if (!authUser || !tenant || !member) { router.replace('/'); return null; }
-  const maxChart = Math.max(...report.daily.map((item) => Math.max(item.income, item.expenses)), 1); const maxProduct = Math.max(...report.topProducts.map((item) => item.revenue), 1); const methodNames: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Crédito' };
-  return <main className="workspace-page"><WorkspaceSidebar /><section className="workspace-main reports-main"><header className="reports-header"><div><button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button><div className="eyebrow catalog-eyebrow">Tu espacio / Analítica</div><h1>Reportes financieros</h1><p>Decisiones basadas en datos de <strong>{tenant.name}</strong>.</p></div><select className="period-select" value={days} onChange={(event) => setDays(Number(event.target.value))}><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="365">Último año</option></select></header>{message && <div className="catalog-message">{message}</div>}<div className="reports-metrics"><div><small>Ingresos cobrados</small><strong>${report.summary.income.toFixed(2)}</strong><span>{report.summary.sales} ventas</span></div><div><small>Gastos</small><strong>${report.summary.expenses.toFixed(2)}</strong><span>egresos registrados</span></div><div className={report.summary.net < 0 ? 'metric-alert' : ''}><small>Utilidad neta</small><strong>${report.summary.net.toFixed(2)}</strong><span>flujo del período</span></div><div><small>Ticket promedio</small><strong>${report.summary.averageSale.toFixed(2)}</strong><span>por venta cobrada</span></div></div><div className="report-chart-panel"><div className="report-panel-head"><div><div className="eyebrow">Tendencia</div><h2>Ingresos y gastos</h2></div><div className="chart-legend"><span className="legend-income">Ingresos</span><span className="legend-expense">Gastos</span></div></div><div className="bar-chart">{report.daily.map((item) => <div className="chart-day" key={item.date} title={`${item.date}: ingresos $${item.income.toFixed(2)}, gastos $${item.expenses.toFixed(2)}`}><div className="bars"><i className="bar-income" style={{ height: `${Math.max(2, item.income / maxChart * 145)}px` }} /><i className="bar-expense" style={{ height: `${Math.max(2, item.expenses / maxChart * 145)}px` }} /></div><small>{item.date.slice(8)}</small></div>)}</div></div><div className="reports-grid"><div className="report-panel"><div className="report-panel-head"><div><div className="eyebrow">Rendimiento</div><h2>Productos más vendidos</h2></div></div>{report.topProducts.length === 0 ? <div className="inventory-empty">Aún no hay ventas con productos.</div> : report.topProducts.map((item, index) => <div className="ranking-row" key={`${item.name}-${index}`}><span>{index + 1}</span><div><b>{item.name}</b><small>{item.quantity} unidades</small><div className="ranking-bar"><i style={{ width: `${item.revenue / maxProduct * 100}%` }} /></div></div><strong>${item.revenue.toFixed(2)}</strong></div>)}</div><div className="report-panel"><div className="report-panel-head"><div><div className="eyebrow">Cobros</div><h2>Métodos de pago</h2></div></div>{report.paymentMethods.length === 0 ? <div className="inventory-empty">Aún no hay pagos registrados.</div> : report.paymentMethods.map((item) => <div className="payment-report-row" key={item.method}><span>{methodNames[item.method] || item.method}</span><div><i style={{ width: `${item.total / Math.max(report.summary.income, 1) * 100}%` }} /></div><strong>${item.total.toFixed(2)}</strong></div>)}<div className="credit-summary"><span>Saldo de crédito pendiente</span><strong>${report.summary.openCredit.toFixed(2)}</strong></div><div className="credit-summary"><span>Crédito cobrado en período</span><strong>${report.summary.collectedCredit.toFixed(2)}</strong></div></div></div></section></main>;
+  const router = useRouter();
+  const { authUser, tenant, member, organization, loading: tenantLoading } = useTenant();
+  const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
+  const [specificDateMode, setSpecificDateMode] = useState(false);
+  const [specificDate, setSpecificDate] = useState('');
+  const [fromTime, setFromTime] = useState('00:00');
+  const [toTime, setToTime] = useState('23:59');
+  const [branchFilter, setBranchFilter] = useState('');
+  const [report, setReport] = useState<ReportResponse | null>(null);
+  const [detail, setDetail] = useState<DayResponse['details'] | null>(null);
+  const [selectedDate, setSelectedDate] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [exporting, setExporting] = useState('');
+  const [message, setMessage] = useState('');
+  const today = localDateKey(new Date(), tenant?.timezone || 'America/Managua');
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (specificDateMode) {
+      const date = specificDate || today;
+      params.set('fromDate', date);
+      params.set('toDate', date);
+    } else {
+      params.set('days', String(days));
+    }
+    params.set('fromTime', fromTime);
+    params.set('toTime', toTime);
+    return params.toString();
+  }, [days, specificDateMode, specificDate, fromTime, toTime, today]);
+
+  const headersFor = useCallback(async () => {
+    if (!authUser || !tenant) throw new Error('Inicia sesión para consultar los reportes.');
+    const headers: Record<string, string> = { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id };
+    if (branchFilter) headers['x-branch-id'] = branchFilter;
+    return headers;
+  }, [authUser, tenant, branchFilter]);
+
+  useEffect(() => {
+    if (!authUser || !tenant) return;
+    let active = true;
+    setLoading(true);
+    setMessage('');
+    setReport(null);
+    setDetail(null);
+    setSelectedDate('');
+    void (async () => {
+      try {
+        const headers = await headersFor();
+        const response = await fetch(`/api/reports?${queryString}`, { headers, cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los reportes.');
+        if (!active) return;
+        setReport(data as ReportResponse);
+        const preferredDate = specificDateMode ? (specificDate || today) : (data.daily?.at(-1)?.date || '');
+        setSelectedDate((current) => data.daily?.some((row: FinancialDailyRow) => row.date === current) ? current : preferredDate);
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'Error cargando reportes.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [authUser, tenant, queryString, branchFilter, headersFor, specificDateMode, specificDate, today]);
+
+  useEffect(() => {
+    if (!authUser || !tenant || !selectedDate) return;
+    let active = true;
+    setDetail(null);
+    setDetailLoading(true);
+    void (async () => {
+      try {
+        const headers = await headersFor();
+        const params = new URLSearchParams({ date: selectedDate, fromTime, toTime });
+        const response = await fetch(`/api/reports?${params.toString()}`, { headers, cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'No se pudo cargar el desglose del día.');
+        if (active) setDetail((data as DayResponse).details);
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'No se pudo cargar el desglose del día.');
+      } finally {
+        if (active) setDetailLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [authUser, tenant, selectedDate, branchFilter, headersFor, fromTime, toTime]);
+
+  const formatMoney = useCallback((value: number) => currencyFormatter(value, report?.currency || tenant?.currency || 'NIO'), [report?.currency, tenant?.currency]);
+  const isManager = Boolean(member && MANAGER_ROLES.has(member.role));
+  const branchLabel = useMemo(() => {
+    if (branchFilter) return organization?.branches.find((branch) => branch.id === branchFilter)?.name || 'Sucursal seleccionada';
+    return isManager ? 'Todas las sucursales' : 'Todas mis sucursales autorizadas';
+  }, [branchFilter, organization, isManager]);
+  const selectedDay = report?.daily.find((row) => row.date === selectedDate) || null;
+
+  async function download(format: 'csv' | 'xlsx') {
+    if (!authUser || !tenant) return;
+    setExporting(format);
+    setMessage('');
+    try {
+      const headers = await headersFor();
+      const params = new URLSearchParams(queryString);
+      params.set('format', format);
+      const response = await fetch(`/api/reports/export?${params.toString()}`, { headers, cache: 'no-store' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'No se pudo generar la descarga.');
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      const disposition = response.headers.get('content-disposition') || '';
+      link.download = /filename="([^"]+)"/i.exec(disposition)?.[1]
+        || `reporte-financiero-${report?.period.from || ''}-a-${report?.period.to || ''}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo generar la descarga.');
+    } finally {
+      setExporting('');
+    }
+  }
+
+  if (tenantLoading) return <div className="workspace-loading">Cargando Reportes Financieros...</div>;
+  if (!authUser || !tenant || !member || !organization) {
+    router.replace('/');
+    return null;
+  }
+
+  return (
+    <main className="workspace-page">
+      <WorkspaceSidebar />
+      <section className="workspace-main finance-reports-main">
+        <header className="finance-reports-header">
+          <div>
+            <button className="text-link no-print" onClick={() => router.push('/workspace')}>← Resumen</button>
+            <div className="eyebrow catalog-eyebrow">Tu espacio / Analítica financiera</div>
+            <h1>Reportes Financieros</h1>
+            <p>Ventas, utilidad y cartera de <strong>{tenant.name}</strong> · {branchLabel}.</p>
+          </div>
+          <div className="finance-report-actions no-print">
+            <button className="report-action-button" disabled={Boolean(exporting) || loading || !report} onClick={() => void download('csv')}>{exporting === 'csv' ? 'Preparando CSV…' : '↓ CSV'}</button>
+            <button className="report-action-button report-action-primary" disabled={Boolean(exporting) || loading || !report} onClick={() => void download('xlsx')}>{exporting === 'xlsx' ? 'Preparando Excel…' : '▦ Excel'}</button>
+            <button className="report-action-button" onClick={() => window.print()}>⎙ Imprimir</button>
+          </div>
+        </header>
+
+        {message && <div className="catalog-message" role="status">{message}</div>}
+
+        <section className="finance-report-controlbar no-print" aria-label="Filtros del reporte">
+          <div className="finance-period-control" role="group" aria-label="Período del reporte">
+            {PERIODS.map((period) => (
+              <button key={period} className={!specificDateMode && days === period ? 'selected' : ''} aria-pressed={!specificDateMode && days === period} onClick={() => { setSpecificDateMode(false); setDays(period); }}>
+                {`${period} días`}
+              </button>
+            ))}
+            <button className={specificDateMode ? 'selected' : ''} aria-pressed={specificDateMode} onClick={() => {
+              setSpecificDateMode(true);
+              setSpecificDate((current) => current || today);
+            }}>Fecha</button>
+          </div>
+          {specificDateMode && <label className="finance-date-control">
+            <span>Fecha específica</span>
+            <input type="date" value={specificDate || today} max={today} onChange={(event) => setSpecificDate(event.target.value)} aria-label="Seleccionar fecha del reporte" />
+          </label>}
+          <label className="finance-time-control">
+            <span>Hora desde</span>
+            <input type="time" value={fromTime} max={toTime} onChange={(event) => setFromTime(event.target.value)} aria-label="Hora inicial del reporte" />
+          </label>
+          <label className="finance-time-control">
+            <span>Hora hasta</span>
+            <input type="time" value={toTime} min={fromTime} onChange={(event) => setToTime(event.target.value)} aria-label="Hora final del reporte" />
+          </label>
+          <label className="finance-branch-control">
+            <span>Sucursal</span>
+            <select value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)} aria-label="Filtrar por sucursal">
+              <option value="">{isManager ? 'Todas las sucursales de la empresa' : 'Todas mis sucursales autorizadas'}</option>
+              {organization.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.code ? ` · ${branch.code}` : ''}</option>)}
+            </select>
+          </label>
+          {report && <span className="finance-period-caption">{visibleDate(report.period.from)} — {visibleDate(report.period.to)} · {report.period.fromTime}–{report.period.toTime} · {report.period.timeZone}</span>}
+        </section>
+
+        {loading || !report ? (
+          <div className="financial-report-loading" role="status">{loading ? 'Calculando movimientos y costos históricos…' : 'No se pudieron cargar los reportes.'}</div>
+        ) : (
+          <>
+            <section className="financial-report-metrics" aria-label="Resumen del período">
+              <article className="financial-report-metric">
+                <span>Ventas netas</span><strong>{formatMoney(report.summary.sales)}</strong>
+                <small>{formatMoney(report.summary.grossSales)} brutas · {formatMoney(report.summary.returns)} en devoluciones</small>
+              </article>
+              <article className="financial-report-metric">
+                <span>Ganancia bruta</span><strong>{formatMoney(report.summary.grossProfit)}</strong>
+                <small>Después del costo histórico del inventario</small>
+              </article>
+              <article className="financial-report-metric">
+                <span>Gastos</span><strong>{formatMoney(report.summary.expenses)}</strong>
+                <small>Registrados en el período</small>
+              </article>
+              <article className={`financial-report-metric ${report.summary.netProfit < 0 ? 'is-negative' : 'is-highlight'}`}>
+                <span>Ganancia neta</span><strong>{formatMoney(report.summary.netProfit)}</strong>
+                <small>Ganancia bruta menos gastos</small>
+              </article>
+              <article className="financial-report-metric financial-credit-metric">
+                <span>Crédito otorgado</span><strong>{formatMoney(report.summary.creditIssued)}</strong>
+                <small>{formatMoney(report.summary.creditCollected)} en abonos aplicados</small>
+              </article>
+              <article className="financial-report-metric financial-credit-metric">
+                <span>Cartera abierta actual</span><strong>{formatMoney(report.summary.openCredit)}</strong>
+                <small>Saldo de la cartera de ConexiaX</small>
+              </article>
+            </section>
+
+            <FinancialReportChart data={report.daily} selectedDate={selectedDate} currency={report.currency} onSelectDate={setSelectedDate} />
+            <FinancialReportInsights hourly={report.hourly} paymentMethods={report.paymentMethods} currency={report.currency} />
+
+            {report.summary.uncostedLines > 0 && (
+              <div className="financial-cost-warning" role="status">
+                <strong>Cobertura de costos históricos: {report.summary.costCoverage?.toFixed(1) ?? '0'}%.</strong>
+                {' '}{report.summary.uncostedLines} línea(s) no tienen un movimiento histórico de salida asociado. No se sustituyeron por el costo actual del catálogo; la ganancia se muestra con los costos históricos disponibles.
+              </div>
+            )}
+
+            <section className="financial-day-panel" aria-labelledby="financial-day-title">
+              <div className="financial-day-heading">
+                <div>
+                  <div className="eyebrow">Desglose seleccionado</div>
+                  <h2 id="financial-day-title">{selectedDate ? visibleDate(selectedDate) : 'Selecciona un día'}</h2>
+                </div>
+                {selectedDay && <div className="financial-day-quick-summary"><span>{selectedDay.salesCount} venta(s)</span><span>Ganancia neta <b>{formatMoney(selectedDay.netProfit)}</b></span></div>}
+              </div>
+
+              {detailLoading || !detail ? (
+                <div className="financial-detail-loading" role="status">{detailLoading ? 'Cargando el detalle del día…' : 'Selecciona un día del gráfico.'}</div>
+              ) : (
+                <>
+                  <div className="financial-day-metrics">
+                    <div><span>Ventas netas</span><strong>{formatMoney(selectedDay?.sales || 0)}</strong><small>{formatMoney(selectedDay?.grossSales || 0)} brutas − {formatMoney(selectedDay?.returns || 0)} devoluciones</small></div>
+                    <div><span>Costo histórico</span><strong>{formatMoney(selectedDay?.costOfGoodsSold || 0)}</strong><small>De inventory_movements</small></div>
+                    <div><span>Ganancia bruta</span><strong>{formatMoney(selectedDay?.grossProfit || 0)}</strong><small>Ventas netas − costo de ventas</small></div>
+                    <div><span>Gastos</span><strong>{formatMoney(selectedDay?.expenses || 0)}</strong><small>Comprobantes del día</small></div>
+                    <div className={(selectedDay?.netProfit || 0) < 0 ? 'is-negative' : ''}><span>Ganancia neta</span><strong>{formatMoney(selectedDay?.netProfit || 0)}</strong><small>Ganancia bruta − gastos</small></div>
+                    <div className="financial-day-credit"><span>Crédito otorgado</span><strong>{formatMoney(selectedDay?.creditIssued || 0)}</strong><small>{formatMoney(selectedDay?.creditCollected || 0)} recibidos · {formatMoney(detail.credit.currentOpenBalanceForDay)} saldo actual de esos créditos</small></div>
+                  </div>
+
+                  <div className="financial-detail-grid">
+                    <section className="financial-detail-card">
+                      <div className="financial-detail-card-heading"><div><span className="eyebrow">Actividad comercial</span><h3>Ventas y ganancias</h3></div><b>{detail.sales.length}</b></div>
+                      {detail.sales.length === 0 ? <p className="financial-empty-note">No hay ventas registradas este día.</p> : (
+                        <div className="financial-table-scroll"><table className="financial-detail-table"><thead><tr><th>Factura</th><th>Hora</th><th>Venta</th><th>Costo histórico</th><th>Ganancia bruta</th></tr></thead><tbody>
+                          {detail.sales.map((sale) => <tr key={sale.id}><td><b>{sale.invoiceNumber}</b><small>{sale.status === 'returned' ? 'Devuelta' : 'Completada'}</small></td><td>{dateTimeLabel(sale.createdAt, report.period.timeZone)}</td><td>{formatMoney(sale.total)}</td><td>{formatMoney(sale.historicalCost)}{sale.missingCostLines > 0 && <small className="financial-table-warning">Costo parcial</small>}</td><td>{formatMoney(sale.grossProfit)}</td></tr>)}
+                        </tbody></table></div>
+                      )}
+                      {detail.returns.length > 0 && <div className="financial-inline-list"><b>Devoluciones del día</b>{detail.returns.map((item) => <span key={item.id}>{item.invoiceNumber} · {formatMoney(item.amount)} reembolsado · {formatMoney(item.historicalCostRecovered)} de costo histórico recuperado</span>)}</div>}
+                    </section>
+
+                    <section className="financial-detail-card">
+                      <div className="financial-detail-card-heading"><div><span className="eyebrow">Egresos</span><h3>Gastos del día</h3></div><b>{detail.expenses.length}</b></div>
+                      {detail.expenses.length === 0 ? <p className="financial-empty-note">No hay gastos registrados este día.</p> : (
+                        <div className="financial-table-scroll"><table className="financial-detail-table"><thead><tr><th>Descripción</th><th>Categoría</th><th>Método</th><th>Importe</th></tr></thead><tbody>
+                          {detail.expenses.map((expense) => <tr key={expense.id}><td>{expense.description}</td><td>{expense.category}</td><td>{PAYMENT_LABELS[expense.paymentMethod] || expense.paymentMethod}</td><td>{formatMoney(expense.amount)}</td></tr>)}
+                        </tbody></table></div>
+                      )}
+                    </section>
+
+                    <section className="financial-detail-card financial-credit-detail-card">
+                      <div className="financial-detail-card-heading"><div><span className="eyebrow">Cartera ConexiaX</span><h3>Créditos y abonos aplicados</h3></div><b>{detail.credit.issued.length + detail.credit.collections.length}</b></div>
+                      <div className="financial-credit-summary-row"><span>Crédito otorgado este día</span><strong>{formatMoney(selectedDay?.creditIssued || 0)}</strong></div>
+                      <div className="financial-credit-summary-row"><span>Abonos aplicados este día</span><strong>{formatMoney(selectedDay?.creditCollected || 0)}</strong></div>
+                      <div className="financial-credit-summary-row"><span>Saldo actual de créditos otorgados este día</span><strong>{formatMoney(detail.credit.currentOpenBalanceForDay)}</strong></div>
+                      {detail.credit.issued.length > 0 && <div className="financial-credit-events"><b>Créditos otorgados</b>{detail.credit.issued.map((credit) => <span key={credit.id}>{credit.saleNumber} · {credit.customerName} · {formatMoney(credit.originalAmount)} · saldo {formatMoney(credit.outstandingAmount)}</span>)}</div>}
+                      {detail.credit.collections.length > 0 && <div className="financial-credit-events"><b>Abonos recibidos</b>{detail.credit.collections.map((payment) => <span key={payment.id}>{payment.receiptNumber} · {payment.saleNumber} · {payment.customerName} · {PAYMENT_LABELS[payment.paymentMethod] || payment.paymentMethod} · {formatMoney(payment.amount)}</span>)}</div>}
+                      {!detail.credit.issued.length && !detail.credit.collections.length && <p className="financial-empty-note">No hubo nuevos créditos ni abonos aplicados este día.</p>}
+                    </section>
+                  </div>
+                </>
+              )}
+            </section>
+
+            <section className="financial-support-grid">
+              <div className="financial-detail-card">
+                <div className="financial-detail-card-heading"><div><span className="eyebrow">Inventario</span><h3>Productos con más ventas</h3></div></div>
+                {report.topProducts.length === 0 ? <p className="financial-empty-note">Aún no hay ventas con productos.</p> : report.topProducts.map((product, index) => <div className="financial-ranking-row" key={`${product.name}-${index}`}><span>{index + 1}</span><b>{product.name}</b><small>{product.quantity} u.</small><strong>{formatMoney(product.revenue)}</strong></div>)}
+              </div>
+              <div className="financial-detail-card">
+                <div className="financial-detail-card-heading"><div><span className="eyebrow">Cobros</span><h3>Métodos de pago</h3></div></div>
+                {report.paymentMethods.length === 0 ? <p className="financial-empty-note">No hay cobros registrados en el período.</p> : report.paymentMethods.map((payment) => <div className="financial-payment-row" key={payment.method}><span>{PAYMENT_LABELS[payment.method] || payment.method}</span><strong>{formatMoney(payment.total)}</strong></div>)}
+              </div>
+            </section>
+          </>
+        )}
+      </section>
+    </main>
+  );
 }
 
 export default function ReportsPage() {
-  return <ReportsContent />; }
+  return <ReportsContent />;
+}

@@ -1,33 +1,102 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import type { TenantRole } from '@/lib/tenant';
-import { toCsv } from '@/lib/integrations';
-import { assertEntitlementCapacity } from '@/lib/entitlements';
+import { assertEntitlementCapacity, getEntitlementLimit } from '@/lib/entitlements';
+import { createFinancialReportPeriod, createFinancialReportRange, localDateKey, REPORT_PERIODS, type FinancialReportPeriod } from '@/lib/financial-reports';
+import {
+  getFinancialTenantSettings,
+  loadFinancialReportDataset,
+  resolveFinancialReportScope,
+} from '@/lib/financial-reports-service';
+import { createFinancialReportCsv, createFinancialReportWorkbook } from '@/lib/report-workbook';
 
 export const runtime = 'nodejs';
-const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
+
+function exportError(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'REPORT_DATE_INVALID') return NextResponse.json({ error: 'La fecha del reporte no es válida.' }, { status: 400 });
+  if (message === 'REPORT_DATE_FUTURE') return NextResponse.json({ error: 'La fecha del reporte no puede estar en el futuro.' }, { status: 400 });
+  if (message === 'REPORT_TIME_INVALID') return NextResponse.json({ error: 'El rango de horas no es válido. La hora inicial debe ser anterior o igual a la final.' }, { status: 400 });
+  if (message === 'REPORT_PERIOD_INVALID') return NextResponse.json({ error: 'Selecciona un período de hasta 365 días.' }, { status: 400 });
+  const response = tenantErrorResponse(error);
+  return NextResponse.json(response.body, { status: response.status });
+}
 
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'reports', 'export');
     const supabase = getSupabaseServer();
-    const month = new Date().toISOString().slice(0, 7);
-    const [tenantResult, usageResult] = await Promise.all([
-      supabase.from('tenants').select('plan').eq('id', context.tenantId).single(),
-      supabase.from('entitlement_usage').select('monthly_exports').eq('tenant_id', context.tenantId).eq('month', month).maybeSingle(),
-    ]);
-    if (tenantResult.error) throw new Error(tenantResult.error.message);
+    const settings = await getFinancialTenantSettings(supabase, context.tenantId);
+    const params = request.nextUrl.searchParams;
+    const format = params.get('format') || 'csv';
+    if (format !== 'csv' && format !== 'xlsx') return NextResponse.json({ error: 'Formato no válido. Usa csv o xlsx.' }, { status: 400 });
+    const fromTime = params.get('fromTime') || '00:00';
+    const toTime = params.get('toTime') || '23:59';
+    const requestedFromDate = params.get('fromDate');
+    const requestedToDate = params.get('toDate');
+    let period: FinancialReportPeriod;
+    if (requestedFromDate !== null || requestedToDate !== null) {
+      if (!requestedFromDate || !requestedToDate) throw new Error('REPORT_DATE_INVALID');
+      period = createFinancialReportRange(requestedFromDate, requestedToDate, settings.timezone, fromTime, toTime);
+    } else {
+      const rawDays = params.get('days');
+      const days = rawDays === null ? 30 : Number(rawDays);
+      if (!(REPORT_PERIODS as readonly number[]).includes(days)) throw new Error('REPORT_PERIOD_INVALID');
+      period = createFinancialReportPeriod(days, settings.timezone, new Date(), fromTime, toTime);
+    }
+    if (period.toDate > localDateKey(new Date(), settings.timezone)) throw new Error('REPORT_DATE_FUTURE');
+
+    const branchId = (request.headers.get('x-branch-id') || params.get('branchId') || '').trim();
+    const scope = await resolveFinancialReportScope(supabase, context, branchId);
+    const month = localDateKey(new Date(), settings.timezone).slice(0, 7);
+    const usageResult = await supabase.from('entitlement_usage').select('monthly_exports').eq('tenant_id', context.tenantId).eq('month', month).maybeSingle();
     if (usageResult.error) throw new Error(usageResult.error.message);
-    assertEntitlementCapacity(tenantResult.data.plan, 'monthlyExports', Number(usageResult.data?.monthly_exports || 0));
-    const result = await supabase.from('sales').select('id,branch_id,invoice_number,total,status,created_at,metadata,sale_payments(payment_method,amount)').eq('tenant_id', context.tenantId).order('created_at', { ascending: false }).limit(500);
-    if (result.error) throw new Error(result.error.message);
-    const rows = (result.data || []).filter((item) => TENANT_WIDE_ROLES.has(context.role) || context.branchIds.includes(item.branch_id)).map((item) => {
-      const payment = Array.isArray(item.sale_payments) ? item.sale_payments[0] : null;
-      return { id: item.id, saleNumber: item.invoice_number || '', total: item.total || 0, paymentMethod: payment?.payment_method || item.metadata?.paymentMethod || '', status: item.status || '', createdAt: item.created_at || '' };
+    const currentExports = Number(usageResult.data?.monthly_exports || 0);
+    const monthlyExportLimit = getEntitlementLimit(settings.plan, 'monthlyExports');
+    assertEntitlementCapacity(settings.plan, 'monthlyExports', currentExports);
+
+    const dataset = await loadFinancialReportDataset({ supabase, tenantId: context.tenantId, period, settings, scope });
+    const tenantResult = await (supabase as any).from('tenants').select('name').eq('id', context.tenantId).maybeSingle();
+    if (tenantResult.error) throw new Error(tenantResult.error.message);
+    const tenantName = typeof tenantResult.data?.name === 'string' ? tenantResult.data.name : 'Empresa';
+    let branchLabel = 'Todas las sucursales autorizadas';
+    if (scope.branchId) {
+      const branchResult = await (supabase as any).from('branches').select('name').eq('tenant_id', context.tenantId).eq('id', scope.branchId).maybeSingle();
+      if (branchResult.error) throw new Error(branchResult.error.message);
+      branchLabel = typeof branchResult.data?.name === 'string' ? branchResult.data.name : `Sucursal ${scope.branchId}`;
+    }
+
+    const extension = format === 'xlsx' ? 'xlsx' : 'csv';
+    const contentType = format === 'xlsx'
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : 'text/csv; charset=utf-8';
+    const content = format === 'xlsx'
+      ? createFinancialReportWorkbook(dataset, { tenantName, branchLabel })
+      : new TextEncoder().encode(createFinancialReportCsv(dataset));
+
+    const usageIncrement = await (supabase as any).rpc('increment_entitlement_monthly_exports', {
+      target_tenant_id: context.tenantId,
+      target_month: month,
+      target_limit: Number.isFinite(monthlyExportLimit) ? monthlyExportLimit : null,
     });
-    const usage = await supabase.from('entitlement_usage').upsert({ tenant_id: context.tenantId, month, monthly_exports: Number(usageResult.data?.monthly_exports || 0) + 1, updated_at: new Date().toISOString() }, { onConflict: 'tenant_id,month' });
-    if (usage.error) throw new Error(usage.error.message);
-    return new NextResponse(toCsv(rows, ['id', 'saleNumber', 'total', 'paymentMethod', 'status', 'createdAt']), { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="ventas.csv"', 'Cache-Control': 'no-store' } });
-  } catch (error: unknown) { const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
+    if (usageIncrement.error) throw new Error(usageIncrement.error.message);
+
+    const filename = period.fromDate === period.toDate
+      ? `reporte-financiero-${period.fromDate}.${extension}`
+      : `reporte-financiero-${period.fromDate}-a-${period.toDate}.${extension}`;
+    const responseBody = format === 'xlsx'
+      ? new Blob([Uint8Array.from(content).buffer], { type: contentType })
+      : new TextDecoder().decode(content);
+    return new NextResponse(responseBody, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-store',
+        'X-Report-Period': String(period.days),
+      },
+    });
+  } catch (error: unknown) {
+    return exportError(error);
+  }
 }
