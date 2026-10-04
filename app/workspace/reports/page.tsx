@@ -7,6 +7,7 @@ import { localDateKey, type FinancialDailyRow, type FinancialHourlyRow, type Fin
 import { FinancialReportInsights } from '@/components/workspace/FinancialReportInsights';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { FinancialWorkbookExportError, prepareMasterWorkbookHandle, updateMasterWorkbook } from '@/lib/financial-workbook-storage';
 
 type ReportResponse = {
   ok: boolean;
@@ -77,6 +78,8 @@ function ReportsContent() {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [exporting, setExporting] = useState('');
+  const [exportingMasterWorkbook, setExportingMasterWorkbook] = useState(false);
+  const [masterWorkbookReady, setMasterWorkbookReady] = useState(false);
   const [message, setMessage] = useState('');
   const today = localDateKey(new Date(), tenant?.timezone || 'America/Managua');
   const queryString = useMemo(() => {
@@ -149,6 +152,34 @@ function ReportsContent() {
     return () => { active = false; };
   }, [authUser, tenant, selectedDate, branchFilter, headersFor, fromTime, toTime]);
 
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let active = true;
+    setMasterWorkbookReady(false);
+    void prepareMasterWorkbookHandle(tenant.id).finally(() => {
+      if (active) setMasterWorkbookReady(true);
+    });
+    return () => { active = false; };
+  }, [tenant?.id]);
+
+  async function updateMasterWorkbookFile() {
+    if (!authUser || !tenant) return;
+    setExportingMasterWorkbook(true);
+    setMessage('Preparando el Excel maestro de la empresa…');
+    try {
+      const result = await updateMasterWorkbook({
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        token: () => authUser.getIdToken(),
+      });
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof FinancialWorkbookExportError ? error.message : error instanceof Error ? error.message : 'No se pudo actualizar el Excel maestro.');
+    } finally {
+      setExportingMasterWorkbook(false);
+    }
+  }
+
   const formatMoney = useCallback((value: number) => currencyFormatter(value, report?.currency || tenant?.currency || 'NIO'), [report?.currency, tenant?.currency]);
   const isManager = Boolean(member && MANAGER_ROLES.has(member.role));
   const branchLabel = useMemo(() => {
@@ -207,7 +238,8 @@ function ReportsContent() {
           </div>
           <div className="finance-report-actions no-print">
             <button className="report-action-button" disabled={Boolean(exporting) || loading || !report} onClick={() => void download('csv')}>{exporting === 'csv' ? 'Preparando CSV…' : '↓ CSV'}</button>
-            <button className="report-action-button report-action-primary" disabled={Boolean(exporting) || loading || !report} onClick={() => void download('xlsx')}>{exporting === 'xlsx' ? 'Preparando Excel…' : '▦ Excel'}</button>
+            <button className="report-action-button report-action-primary" disabled={Boolean(exporting) || exportingMasterWorkbook || loading || !report} onClick={() => void download('xlsx')}>{exporting === 'xlsx' ? 'Preparando Excel…' : '▦ Excel'}</button>
+            <button className="report-action-button" disabled={Boolean(exporting) || exportingMasterWorkbook || !masterWorkbookReady} onClick={() => void updateMasterWorkbookFile()}>{exportingMasterWorkbook ? 'Actualizando libro…' : masterWorkbookReady ? 'Actualizar libro maestro' : 'Preparando libro…'}</button>
             <button className="report-action-button" onClick={() => window.print()}>⎙ Imprimir</button>
           </div>
         </header>

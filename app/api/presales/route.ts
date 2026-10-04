@@ -31,7 +31,62 @@ function errorResponse(error: unknown) {
   return NextResponse.json(response.body, { status: response.status });
 }
 function productImage(product: Record<string, unknown> | undefined) { const metadata = product?.metadata && typeof product.metadata === 'object' ? product.metadata as Record<string, unknown> : {}; const value = metadata.imageUrl || metadata.image_url || metadata.photoUrl || metadata.photo_url; return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null; }
-function serialize(row: Record<string, unknown>, productById = new Map<string, Record<string, unknown>>()) { const items = Array.isArray(row.items) ? row.items.map((item: any) => { const product = productById.get(String(item.productId)); return { ...item, name: item.name || product?.name || 'Producto', sku: item.sku || product?.sku || '', description: item.description || product?.description || '', imageUrl: item.imageUrl || productImage(product) }; }) : []; return { id: row.id, ticketCode: row.ticket_code, items, total: row.total, vendedorUid: row.seller_uid, vendedorEmail: row.seller_email, vendedorRole: row.seller_role, status: row.status, evidenceRefs: row.evidence_refs || [], metadata: row.metadata || {}, saleId: row.sale_id, branchId: row.branch_id, createdAt: row.created_at, updatedAt: row.updated_at, paidBy: row.paid_by, paidAt: row.paid_at }; }
+function serialize(
+  row: Record<string, unknown>,
+  productById = new Map<string, Record<string, unknown>>(),
+  profileById = new Map<string, Record<string, unknown>>(),
+  branchById = new Map<string, Record<string, unknown>>(),
+  saleById = new Map<string, Record<string, unknown>>(),
+  customerById = new Map<string, Record<string, unknown>>(),
+) {
+  const items = Array.isArray(row.items) ? row.items.map((item: any) => {
+    const product = productById.get(String(item.productId));
+    return { ...item, name: item.name || product?.name || 'Producto', sku: item.sku || product?.sku || '', description: item.description || product?.description || '', imageUrl: item.imageUrl || productImage(product) };
+  }) : [];
+  const sellerUid = String(row.seller_uid || '');
+  const profile = profileById.get(sellerUid);
+  const branch = branchById.get(String(row.branch_id || ''));
+  const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
+  const customerId = String(metadata.customerId || '');
+  const customer = customerById.get(customerId);
+  const linkedSale = saleById.get(String(row.sale_id || ''));
+  const linkedSaleMetadata = linkedSale?.metadata && typeof linkedSale.metadata === 'object' ? linkedSale.metadata as Record<string, unknown> : {};
+  const linkedPayments = Array.isArray(linkedSale?.sale_payments) ? linkedSale.sale_payments as Array<Record<string, unknown>> : [];
+  const sale = linkedSale ? {
+    id: linkedSale.id,
+    saleNumber: linkedSale.invoice_number || linkedSaleMetadata.saleNumber || linkedSale.id,
+    status: linkedSale.status,
+    total: linkedSale.total,
+    createdAt: linkedSale.created_at,
+    paymentMethod: linkedSaleMetadata.paymentMethod || linkedPayments.map((payment) => payment.payment_method).filter(Boolean).join(', '),
+    payments: linkedPayments.map((payment) => ({ method: payment.payment_method, amount: payment.amount })),
+  } : null;
+  return {
+    id: row.id,
+    ticketCode: row.ticket_code,
+    items,
+    total: row.total,
+    vendedorUid: row.seller_uid,
+    vendedorEmail: row.seller_email,
+    vendedorRole: row.seller_role,
+    sellerName: profile?.display_name || profile?.email || row.seller_email || 'Usuario de origen',
+    sellerEmail: profile?.email || row.seller_email || '',
+    status: row.status,
+    evidenceRefs: row.evidence_refs || [],
+    metadata,
+    customerId,
+    customerName: customer?.name || customer?.document_id || metadata.customerName || '',
+    saleId: row.sale_id,
+    sale,
+    saleNumber: sale?.saleNumber || row.sale_id || '',
+    branchId: row.branch_id,
+    branchName: branch?.name || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    paidBy: row.paid_by,
+    paidAt: row.paid_at,
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -75,9 +130,28 @@ export async function GET(request: NextRequest) {
     if (products.error) throw new Error(products.error.message);
     const productById = new Map<string, Record<string, unknown>>((products.data || []).map((product: any) => [String(product.id), product]));
     const docs = code ? rows : rows.slice(0, 20);
+    const sellerIds = Array.from(new Set(docs.map((row: any) => String(row.seller_uid || '')).filter(Boolean)));
+    const branchIds = Array.from(new Set(docs.map((row: any) => String(row.branch_id || '')).filter(Boolean)));
+    const saleIds = Array.from(new Set(docs.map((row: any) => String(row.sale_id || '')).filter(Boolean)));
+    const customerIds = Array.from(new Set(docs.map((row: any) => {
+      const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
+      const id = String(metadata.customerId || '');
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : '';
+    }).filter(Boolean)));
+    const [profiles, branches, sales, customers] = await Promise.all([
+      sellerIds.length ? supabase.from('profiles').select('auth_user_id,display_name,email').in('auth_user_id', sellerIds) : Promise.resolve({ data: [], error: null } as any),
+      branchIds.length ? supabase.from('branches').select('id,name').eq('tenant_id', context.tenantId).in('id', branchIds) : Promise.resolve({ data: [], error: null } as any),
+      saleIds.length ? supabase.from('sales').select('id,invoice_number,total,status,metadata,created_at,sale_payments(payment_method,amount)').eq('tenant_id', context.tenantId).in('id', saleIds) : Promise.resolve({ data: [], error: null } as any),
+      customerIds.length ? supabase.from('customers').select('id,name,document_id').eq('tenant_id', context.tenantId).in('id', customerIds) : Promise.resolve({ data: [], error: null } as any),
+    ]);
+    for (const result of [profiles, branches, sales, customers]) if (result.error) throw new Error(result.error.message);
+    const profileById = new Map<string, Record<string, unknown>>((profiles.data || []).map((profile: any) => [String(profile.auth_user_id), profile]));
+    const branchById = new Map<string, Record<string, unknown>>((branches.data || []).map((branch: any) => [String(branch.id), branch]));
+    const saleById = new Map<string, Record<string, unknown>>((sales.data || []).map((sale: any) => [String(sale.id), sale]));
+    const customerById = new Map<string, Record<string, unknown>>((customers.data || []).map((customer: any) => [String(customer.id), customer]));
     const last = docs.at(-1);
     const nextCursor = !code && rows.length > 20 && last ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url') : null;
-    return NextResponse.json(code ? { ok: true, presale: serialize(rows[0], productById) } : { ok: true, presales: docs.map((row) => serialize(row, productById)), nextCursor }, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(code ? { ok: true, presale: serialize(rows[0], productById, profileById, branchById, saleById, customerById) } : { ok: true, presales: docs.map((row) => serialize(row, productById, profileById, branchById, saleById, customerById)), nextCursor }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) { reportError(error, { correlationId: request.headers.get('x-correlation-id') || 'unknown', tenantId: request.headers.get('x-tenant-id') || undefined, routePath: '/api/presales', method: request.method }); return errorResponse(error); }
 }
 

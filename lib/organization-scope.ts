@@ -46,6 +46,11 @@ export function assertResolvedBranchAccess(context: Pick<TenantContext, 'role' |
   if (!context.branchIds.includes(requestedId) && !context.branchIds.includes(resolvedId)) throw new Error('BRANCH_OUT_OF_SCOPE');
 }
 
+export async function resolveTenantBranchIds(tenantId: string, requestedIds: string[]) {
+  const resolved = await Promise.all(requestedIds.map((id) => resolveTenantBranchId(tenantId, id)));
+  return Array.from(new Set(resolved.filter(Boolean)));
+}
+
 export async function resolveAuthorizedBranchId(context: Pick<TenantContext, 'tenantId' | 'role' | 'branchIds'>, requestedId?: string) {
   const requested = safe(requestedId || '');
   const admin = new Set(['owner', 'admin', 'gerente', 'jefe']);

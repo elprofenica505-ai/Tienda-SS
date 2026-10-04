@@ -147,6 +147,27 @@ test('no sustituye un costo histórico ausente por el costo actual del producto'
   assert.equal(dataset.summary.costCoverage, 0);
 });
 
+test('solo las devoluciones a crédito reducen el crédito en Reportes', () => {
+  const period = createFinancialReportPeriod(7, TIME_ZONE, new Date('2026-10-04T12:00:00.000Z'));
+  const reportForRefundMethod = (refundMethod: string) => calculateFinancialReport({
+    period,
+    sales: [],
+    movements: [],
+    returns: [{ id: `return-${refundMethod}`, saleId: SALE_ID, invoiceNumber: 'F-001', refundMethod, amount: 20, status: 'completed', createdAt: '2026-10-04T18:00:00.000Z', items: [] }],
+    expenses: [],
+    creditIssues: [{ id: RECEIVABLE_ID, saleId: SALE_ID, saleNumber: 'F-001', customerName: 'Ana', originalAmount: 50, outstandingAmount: 30, status: 'partial', createdAt: '2026-10-03T18:00:00.000Z' }],
+    creditCollections: [],
+    openReceivables: [],
+  });
+
+  const cashRefund = reportForRefundMethod('cash');
+  const creditRefund = reportForRefundMethod('credit');
+  assert.equal(cashRefund.daily.find((row) => row.date === '2026-10-04')?.creditIssued, 0);
+  assert.equal(cashRefund.summary.creditIssued, 50);
+  assert.equal(creditRefund.daily.find((row) => row.date === '2026-10-04')?.creditIssued, -20);
+  assert.equal(creditRefund.summary.creditIssued, 30);
+});
+
 test('las devoluciones revierten el ingreso y recuperan costo con el kardex de la venta original', () => {
   const period = createFinancialReportPeriod(7, TIME_ZONE, new Date('2026-10-04T12:00:00.000Z'));
   const dataset = calculateFinancialReport({

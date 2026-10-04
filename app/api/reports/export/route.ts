@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import { assertEntitlementCapacity, getEntitlementLimit } from '@/lib/entitlements';
+import { reportExportQuotaFailure } from '@/lib/report-export-quota';
 import { createFinancialReportPeriod, createFinancialReportRange, localDateKey, REPORT_PERIODS, type FinancialReportPeriod } from '@/lib/financial-reports';
 import {
   getFinancialTenantSettings,
@@ -48,17 +48,21 @@ export async function GET(request: NextRequest) {
 
     const branchId = (request.headers.get('x-branch-id') || params.get('branchId') || '').trim();
     const scope = await resolveFinancialReportScope(supabase, context, branchId);
-    const month = localDateKey(new Date(), settings.timezone).slice(0, 7);
-    const usageResult = await supabase.from('entitlement_usage').select('monthly_exports').eq('tenant_id', context.tenantId).eq('month', month).maybeSingle();
-    if (usageResult.error) throw new Error(usageResult.error.message);
-    const currentExports = Number(usageResult.data?.monthly_exports || 0);
-    const monthlyExportLimit = getEntitlementLimit(settings.plan, 'monthlyExports');
-    assertEntitlementCapacity(settings.plan, 'monthlyExports', currentExports);
-
-    const dataset = await loadFinancialReportDataset({ supabase, tenantId: context.tenantId, period, settings, scope });
     const tenantResult = await (supabase as any).from('tenants').select('name').eq('id', context.tenantId).maybeSingle();
     if (tenantResult.error) throw new Error(tenantResult.error.message);
     const tenantName = typeof tenantResult.data?.name === 'string' ? tenantResult.data.name : 'Empresa';
+    const exportQuota = await supabase.rpc('consume_financial_report_export', {
+      target_tenant_id: context.tenantId,
+      target_user_id: context.uid,
+    });
+    if (exportQuota.error) throw new Error(exportQuota.error.message);
+    const quotaData = exportQuota.data && typeof exportQuota.data === 'object'
+      ? exportQuota.data as Record<string, unknown>
+      : {};
+    const blocked = reportExportQuotaFailure(quotaData, tenantName, settings.timezone);
+    if (blocked) return blocked;
+
+    const dataset = await loadFinancialReportDataset({ supabase, tenantId: context.tenantId, period, settings, scope });
     let branchLabel = 'Todas las sucursales autorizadas';
     if (scope.branchId) {
       const branchResult = await (supabase as any).from('branches').select('name').eq('tenant_id', context.tenantId).eq('id', scope.branchId).maybeSingle();
@@ -73,13 +77,6 @@ export async function GET(request: NextRequest) {
     const content = format === 'xlsx'
       ? createFinancialReportWorkbook(dataset, { tenantName, branchLabel })
       : new TextEncoder().encode(createFinancialReportCsv(dataset));
-
-    const usageIncrement = await (supabase as any).rpc('increment_entitlement_monthly_exports', {
-      target_tenant_id: context.tenantId,
-      target_month: month,
-      target_limit: Number.isFinite(monthlyExportLimit) ? monthlyExportLimit : null,
-    });
-    if (usageIncrement.error) throw new Error(usageIncrement.error.message);
 
     const filename = period.fromDate === period.toDate
       ? `reporte-financiero-${period.fromDate}.${extension}`

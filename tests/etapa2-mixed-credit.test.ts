@@ -84,7 +84,7 @@ test('POS y preventa conservan datos operativos para la sucursal', () => {
   assert.match(presalesRoute, /suggestedPayment/);
   assert.match(presalesRoute, /documentType/);
   assert.match(presalesPage, /Condición sugerida de pago/);
-  assert.match(presalesPage, /Imprimir ticket de preventa/);
+  assert.match(presalesPage, /Imprimir detalle/);
   assert.match(salesPage, /Tipo de comprobante/);
   assert.match(salesPage, /Impuestos estimados/);
 });

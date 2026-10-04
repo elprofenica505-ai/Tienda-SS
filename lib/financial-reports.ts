@@ -526,6 +526,7 @@ export function calculateFinancialReport(input: CalculateFinancialReportInput): 
     });
     const historicalCostRecovered = roundMoney(lines.reduce((sum, line) => sum + line.historicalCostRecovered, 0));
     day.returns += finiteNumber(item.amount);
+    if (item.refundMethod === 'credit') day.creditIssued -= finiteNumber(item.amount);
     day.costOfGoodsSold -= historicalCostRecovered;
     if (hour) {
       hour.returns += finiteNumber(item.amount);

@@ -100,21 +100,35 @@ function resetData() {
   fake.tables.sale_returns = [];
   fake.tables.sale_return_items = [];
   fake.tables.entitlement_usage = [];
+  fake.tables.financial_report_export_daily_usage = [];
   fake.tables.tenant_settings = [];
   fake.failTables.clear();
   fake.requests.length = 0;
   fake.rpcCalls.length = 0;
   fake.rpc = {
-    increment_entitlement_monthly_exports: (payload) => {
-      const input = payload as { target_tenant_id: string; target_month: string; target_limit: number | null };
-      const row = fake.tables.entitlement_usage.find((item) => item.tenant_id === input.target_tenant_id && item.month === input.target_month);
-      const current = Number(row?.monthly_exports || 0);
-      if (input.target_limit !== null && current >= input.target_limit) {
-        return { status: 400, body: { code: 'P0001', message: `ENTITLEMENT_EXCEEDED:monthlyExports:${input.target_limit}`, details: null, hint: null } };
+    consume_financial_report_export: (payload) => {
+      const input = payload as { target_tenant_id: string; target_user_id: string };
+      const tenant = fake.tables.tenants.find((item) => item.id === input.target_tenant_id);
+      const timezone = String(tenant?.timezone || TIME_ZONE);
+      const date = localDateKey(new Date(), timezone);
+      const month = date.slice(0, 7);
+      const dailyRow = fake.tables.financial_report_export_daily_usage.find((item) => item.tenant_id === input.target_tenant_id && item.local_date === date);
+      const dailyUsed = Number(dailyRow?.export_count || 0);
+      if (dailyUsed >= 3) {
+        return { body: { allowed: false, code: 'DAILY_EXPORT_LIMIT', used: dailyUsed, limit: 3, resetAt: new Date(Date.now() + 60_000).toISOString(), timezone } };
       }
-      if (row) row.monthly_exports = current + 1;
-      else fake.tables.entitlement_usage.push({ tenant_id: input.target_tenant_id, month: input.target_month, monthly_exports: 1 });
-      return { body: current + 1 };
+      const monthlyRow = fake.tables.entitlement_usage.find((item) => item.tenant_id === input.target_tenant_id && item.month === month);
+      const monthlyUsed = Number(monthlyRow?.monthly_exports || 0);
+      const plan = String(tenant?.plan || 'starter');
+      const monthlyLimit = plan === 'growth' ? 100 : plan === 'scale' ? Number.MAX_SAFE_INTEGER : 10;
+      if (monthlyUsed >= monthlyLimit) {
+        return { body: { allowed: false, code: 'MONTHLY_EXPORT_LIMIT', used: monthlyUsed, limit: monthlyLimit, month, timezone } };
+      }
+      if (monthlyRow) monthlyRow.monthly_exports = monthlyUsed + 1;
+      else fake.tables.entitlement_usage.push({ tenant_id: input.target_tenant_id, month, monthly_exports: 1 });
+      if (dailyRow) dailyRow.export_count = dailyUsed + 1;
+      else fake.tables.financial_report_export_daily_usage.push({ tenant_id: input.target_tenant_id, local_date: date, export_count: 1 });
+      return { body: { allowed: true, used: monthlyUsed + 1, limit: monthlyLimit, dailyUsed: dailyUsed + 1, dailyLimit: 3, month, localDate: date, timezone } };
     },
   };
 }
@@ -250,9 +264,10 @@ test('CSV y Excel se descargan con la autorización de exportación y plantilla 
   assert.equal(bytes[1], 0x4b);
   assert.match(xlsxResponse.headers.get('content-disposition') || '', /\.xlsx/);
   assert.equal(fake.tables.entitlement_usage[0].monthly_exports, 2);
-  const usageCall = fake.rpcCalls.find((call) => call.name === 'increment_entitlement_monthly_exports');
-  assert.ok(usageCall);
-  assert.equal((usageCall.body as Record<string, unknown>).target_month, localDateKey(new Date(), TIME_ZONE).slice(0, 7));
+  assert.equal(fake.tables.financial_report_export_daily_usage[0].export_count, 2);
+  const quotaCalls = fake.rpcCalls.filter((call) => call.name === 'consume_financial_report_export');
+  assert.equal(quotaCalls.length, 2);
+  assert.equal((quotaCalls[0].body as Record<string, unknown>).target_tenant_id, TENANT_A);
 });
 
 test('la exportación respeta la fecha y el horario seleccionados en el calendario', async () => {
@@ -268,6 +283,7 @@ test('la exportación respeta la fecha y el horario seleccionados en el calendar
   assert.match(response.headers.get('content-disposition') || '', new RegExp(`reporte-financiero-${reportDate}\\.xlsx`));
   assert.equal(response.headers.get('x-report-period'), '1');
   assert.equal(fake.tables.entitlement_usage[0].monthly_exports, 1);
+  assert.equal(fake.tables.financial_report_export_daily_usage[0].export_count, 1);
 });
 
 test('exportaciones simultáneas no pueden rebasar la cuota mensual del plan', async () => {
@@ -283,4 +299,17 @@ test('exportaciones simultáneas no pueden rebasar la cuota mensual del plan', a
   ]);
   assert.deepEqual(responses.map((response) => response.status).sort((a, b) => a - b), [200, 402]);
   assert.equal(fake.tables.entitlement_usage[0].monthly_exports, 10);
+  assert.equal(fake.tables.financial_report_export_daily_usage[0].export_count, 1);
+});
+
+test('las exportaciones comparten tres permisos diarios por empresa y zona horaria local', async () => {
+  const localDate = localDateKey(new Date(), TIME_ZONE);
+  fake.tables.financial_report_export_daily_usage = [{ tenant_id: TENANT_A, local_date: localDate, export_count: 3 }];
+
+  const response = await exportRoute.GET(request('/api/reports/export?days=7&format=csv'));
+  assert.equal(response.status, 429);
+  const body = await response.json() as Record<string, unknown>;
+  assert.equal(body.code, 'DAILY_EXPORT_LIMIT');
+  assert.equal(fake.tables.entitlement_usage.length, 0, 'si se agota la cuota diaria no consume la mensual');
+  assert.equal(fake.tables.financial_report_export_daily_usage[0].export_count, 3);
 });
