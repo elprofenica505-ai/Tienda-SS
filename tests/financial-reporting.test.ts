@@ -112,11 +112,12 @@ test('master workbook includes dedicated Ventas, Caja, Preventas sheets and all 
   assert.match(entries.get('xl/worksheets/sheet4.xml') || '', /P-0001/);
 });
 
-test('shared financial export quota reports company-local reset and monthly plan limits', async () => {
+test('shared financial export quota reports company-local reset and daily shared limit', async () => {
   const daily = reportExportQuotaFailure({ allowed: false, code: 'DAILY_EXPORT_LIMIT', used: 3, resetAt: '2026-10-05T06:00:00.000Z' }, 'Tienda de prueba', 'America/Managua');
   assert.equal(daily?.status, 429);
   const dailyBody = await daily!.json();
-  assert.match(dailyBody.error, /3 exportaciones financieras diarias compartidas por Tienda de prueba/);
+  assert.match(dailyBody.error, /3 exportaciones diarias compartidas.*Tienda de prueba/);
+  assert.match(dailyBody.error, /reportes, catálogo y Excel maestro/);
   assert.match(dailyBody.error, /2026-10-05 a las 00:00/);
 
   const monthly = reportExportQuotaFailure({ allowed: false, code: 'MONTHLY_EXPORT_LIMIT', used: 10, limit: 10, month: '2026-10' }, 'Tienda de prueba', 'America/Managua');
@@ -128,10 +129,12 @@ test('shared financial export quota reports company-local reset and monthly plan
   assert.equal((await unavailable!.json()).code, 'EXPORT_QUOTA_UNAVAILABLE');
 });
 
-test('the daily quota migration serializes by tenant, resets by local date, and calls the plan quota', () => {
-  const sql = readFileSync(new URL('../supabase/migrations/20261004000003_atomic_financial_report_exports.sql', import.meta.url), 'utf8');
+test('the daily quota migration serializes by tenant, resets by local date, and shares quota', () => {
+  const sql = readFileSync(new URL('../supabase/migrations/20261004000004_daily_only_report_export_quota.sql', import.meta.url), 'utf8');
   assert.match(sql, /for update/i);
   assert.match(sql, /current_instant at time zone tenant_timezone/i);
   assert.match(sql, /daily_limit constant integer := 3/i);
-  assert.match(sql, /consume_monthly_report_export\(target_tenant_id, current_instant\)/i);
+  assert.match(sql, /consume_financial_report_export/);
+  assert.match(sql, /consume_catalog_export/);
+  assert.doesNotMatch(sql, /consume_monthly_report_export/);
 });

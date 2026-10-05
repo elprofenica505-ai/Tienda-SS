@@ -10,12 +10,13 @@ export function reportExportQuotaFailure(quota: QuotaResult, tenantName: string,
     const resetDate = resetAt ? localDateOfInstant(resetAt, timeZone) : '';
     const resetLabel = resetDate ? `${resetDate} a las 00:00 (${timeZone})` : 'a las 00:00, según la zona horaria de la empresa';
     return NextResponse.json({
-      error: `Se agotaron las 3 exportaciones financieras diarias compartidas por ${tenantName}. El límite se reanuda el ${resetLabel}.`,
+      error: `Se agotaron las 3 exportaciones diarias compartidas (reportes, catálogo y Excel maestro) de ${tenantName}. El límite se reanuda el ${resetLabel}.`,
       code: 'DAILY_EXPORT_LIMIT',
       limit: 3,
-      used: Number(quota.used || 3),
+      used: Number(quota.used || quota.dailyUsed || 3),
       resetAt,
       timezone: timeZone,
+      localDate: typeof quota.localDate === 'string' ? quota.localDate : undefined,
     }, { status: 429, headers: { 'Cache-Control': 'no-store' } });
   }
   if (quota.code === 'MONTHLY_EXPORT_LIMIT') {
