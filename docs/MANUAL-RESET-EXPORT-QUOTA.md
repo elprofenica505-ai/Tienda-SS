@@ -2,7 +2,7 @@
 
 **Fecha:** 2026-10-04
 **Migración:** `supabase/migrations/20261004000004_daily_only_report_export_quota.sql`
-**Rama:** `arena/01a10939-tienda-ss`
+**Rama:** `arena/db094158-tienda-ss` (seguimiento de `arena/01a10939-tienda-ss`, PR #16 mergeado en `fece7e8`)
 
 ## Objetivo
 
@@ -44,60 +44,141 @@ select * from public.financial_report_export_daily_usage order by local_date des
 
 ## Reset del contador de la cuenta de prueba (solo un tenant)
 
-> No hacer reset global.
+> No hacer reset global. Script completo: `supabase/manual/RESET_DAILY_QUOTA_FOR_TENANT.sql`.
 
-Si el contador no se reinició para la cuenta de prueba, usa el tenant ID que indiques. Si aún no tienes el UUID, deja el marcador `<TENANT_UUID>` y reemplázalo.
+### ⚠️ Error `22P02 invalid input syntax for type uuid`
 
-### Opción A — Reset solo del día actual (recomendado)
+Este error se produce al ejecutar el SQL **sin reemplazar el marcador** por un UUID real
+(se dejó `<TU_TENANT_UUID>` / `<TENANT_UUID>` en la consulta). PostgreSQL intenta convertir
+ese texto a `uuid` y aborta.
+
+Un UUID válido tiene el formato 8-4-4-4-12 hexadecimal, por ejemplo
+`3f2b1c7e-9a84-4d1f-b0c2-15e6a7d8e9f0`. Si el valor que vas a pegar contiene `<`, `>` o la
+palabra `TENANT`, todavía es un marcador.
+
+### Paso 0 — Obtener el UUID real del tenant
 
 ```sql
--- Reemplaza <TENANT_UUID> por el UUID real del tenant de prueba
--- Usa la zona horaria de la empresa para calcular la fecha local si es necesario,
--- o simplemente borra el registro de hoy.
+select id, name, slug, timezone, plan
+from public.tenants
+order by created_at desc
+limit 50;
 
--- Ver fecha local de Managua (ajusta si tu empresa usa otra zona)
--- select (now() at time zone 'America/Managua')::date;
-
--- Reset del día actual para un tenant específico:
-delete from public.financial_report_export_daily_usage
-where tenant_id = '<TENANT_UUID>'::uuid
-  and local_date = (now() at time zone 'America/Managua')::date;
-
--- Alternativa si quieres resetear a 0 en lugar de borrar:
--- update public.financial_report_export_daily_usage
--- set export_count = 0, updated_at = now()
--- where tenant_id = '<TENANT_UUID>'::uuid
---   and local_date = (now() at time zone 'America/Managua')::date;
+-- O filtrando por nombre/slug de la empresa de prueba:
+-- select id, name, slug, timezone, plan
+-- from public.tenants
+-- where name ilike '%nombre parcial%' or slug ilike '%slug parcial%';
 ```
 
-### Opción B — Reset de todos los días para ese tenant (si quieres limpiar histórico de pruebas)
+Copia el valor de la columna `id`.
+
+### Paso 1 — Reset idempotente del día actual (recomendado)
+
+Bloque autocontenido: cambia **únicamente** el valor de `v_tenant_text`. Valida el UUID
+antes de tocar datos (mensaje claro en lugar de `22P02`), resuelve la zona horaria real del
+tenant igual que `consume_financial_report_export`, y usa `INSERT ... ON CONFLICT DO UPDATE`,
+por lo que puede ejecutarse tantas veces como se quiera con el mismo resultado: 0 usadas hoy.
 
 ```sql
-delete from public.financial_report_export_daily_usage
-where tenant_id = '<TENANT_UUID>'::uuid;
+do $$
+declare
+  -- 👇 PEGA AQUÍ EL UUID REAL OBTENIDO EN EL PASO 0
+  v_tenant_text text := '00000000-0000-0000-0000-000000000000';
+  v_tenant_id   uuid;
+  v_local_date  date;
+  v_timezone    text;
+begin
+  if v_tenant_text !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+    raise exception
+      'v_tenant_id no es un UUID válido: %. Ejecuta el PASO 0 y pega el id real del tenant (sin < >).',
+      v_tenant_text;
+  end if;
 
--- Opcional: limpiar también el uso mensual antiguo (ya no se usa, pero por limpieza)
-delete from public.entitlement_usage
-where tenant_id = '<TENANT_UUID>'::uuid;
+  v_tenant_id := v_tenant_text::uuid;
+
+  select coalesce(nullif(t.timezone, ''), 'America/Managua')
+    into v_timezone
+  from public.tenants t
+  where t.id = v_tenant_id;
+
+  if not found then
+    raise exception 'No existe ningún tenant con id %. Verifica el UUID en el PASO 0.', v_tenant_id;
+  end if;
+
+  v_local_date := (now() at time zone v_timezone)::date;
+
+  insert into public.financial_report_export_daily_usage (tenant_id, local_date, export_count, updated_at)
+  values (v_tenant_id, v_local_date, 0, now())
+  on conflict (tenant_id, local_date)
+  do update set export_count = 0, updated_at = now();
+
+  raise notice 'Cuota diaria reseteada a 0 para tenant % en la fecha local % (zona %).',
+    v_tenant_id, v_local_date, v_timezone;
+end;
+$$;
 ```
 
-### Opción C — Ver estado actual antes de resetear
+### Paso 2 — Verificación
 
 ```sql
-select tenant_id, local_date, export_count, last_exported_by, updated_at
+select tenant_id, local_date, export_count, updated_at
 from public.financial_report_export_daily_usage
-where tenant_id = '<TENANT_UUID>'::uuid
-order by local_date desc;
-
--- Ver tenant y zona horaria
-select id, name, timezone, plan from public.tenants where id = '<TENANT_UUID>'::uuid;
+where tenant_id = '00000000-0000-0000-0000-000000000000'::uuid  -- UUID real
+order by local_date desc
+limit 5;
 ```
+
+`export_count` debe ser `0` para la fecha local de hoy.
+
+### Paso 3 — Limpiezas opcionales (solo entornos de prueba)
+
+```sql
+-- Histórico diario completo de ese tenant
+delete from public.financial_report_export_daily_usage
+where tenant_id = '00000000-0000-0000-0000-000000000000'::uuid;
+
+-- Contadores mensuales antiguos (ya no se usan tras la migración daily-only)
+delete from public.entitlement_usage
+where tenant_id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+
+> Nunca ejecutes un `DELETE` sin la cláusula `where tenant_id = ...`: sería un reset global
+> que afectaría a todas las empresas del SaaS.
+
+## Fix 403 "Ruta API no autorizada." en Caja (`lib/api-policy.ts`)
+
+**Síntoma:** en producción, `/api/cash-sessions` y `/api/cash-sessions/movements` devolvían
+`403 {"error":"Ruta API no autorizada."}` y la pantalla de Caja no cargaba.
+
+**Causa:** `routePolicies` sólo registraba raíces exactas (`/^\/api\/cash-sessions$/`). El
+middleware llama a `getApiPolicy(pathname, method)` y, al no coincidir ninguna subruta,
+recibía `null` y cortaba con 403 antes de llegar al handler.
+
+**Corrección:** cada familia de rutas usa ahora el sufijo `(?:\/.*)?` para cubrir sus
+subrutas (`cash-sessions`, `reports`, `payables`, `deliveries`, `purchases`, `fiscal`,
+`daily-summaries`, `inventory`, `sales`, `presales`, `catalog`, `receivables`,
+`organization`, `invitations`, `members`/`usuarios`, `stats`, `billing`, `finance`,
+`contacts`, `notifications`, `permissions`).
+
+El orden del array importa: las rutas con acción distinta a la de su familia se declaran
+primero. `/api/reports/export` y `/api/reports/workbook` exigen `reports:export`, mientras
+que el patrón general `/api/reports(?:/.*)?` sólo concede `reports:view`. Igual con
+`/api/catalog/(import|export)` frente a `/api/catalog(?:/.*)?`.
+
+También se registró `/api/payables`, que no tenía política alguna (`finance`).
+
+Las rutas inexistentes siguen devolviendo 403: `tests/api-authorization-matrix.test.ts`
+verifica tanto que las subrutas reales respondan 200 como que `/api/not-registered`,
+`/api/cash-sessions-fake` y `/api/reportes` sigan rechazadas.
 
 ## Qué cambió en el código
 
 - `app/api/catalog/export/route.ts` ahora usa `consume_financial_report_export` y `reportExportQuotaFailure`, compartiendo cuota con reportes.
 - `lib/report-export-quota.ts` mensaje actualizado a: “3 exportaciones diarias compartidas (reportes, catálogo y Excel maestro)”.
 - `tests/financial-reporting.test.ts` y `tests/financial-reports-api.test.ts` actualizados a lógica diaria sin límite mensual.
+- `lib/api-policy.ts`: patrones por familia con `(?:/.*)?` y específicos primero (fix 403 en Caja).
+- `supabase/manual/RESET_DAILY_QUOTA_FOR_TENANT.sql`: reset idempotente `INSERT ... ON CONFLICT DO UPDATE` con validación de UUID (fix 22P02).
+- `tests/api-authorization-matrix.test.ts`: cobertura de subrutas y de rutas inexistentes.
 - Páginas:
   - Ventas (`sales/page.tsx`): historial seleccionable con detalle e impresión, botón actualizar Excel maestro, filtros Todos/categoría, paginación 25.
   - Preventas (`presales/page.tsx`): detalle en tabla con `tfoot`, impresión ajustada, filtros Todos/categoría, paginación 25.

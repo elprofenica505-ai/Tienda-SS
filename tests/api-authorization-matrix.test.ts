@@ -31,6 +31,23 @@ const protectedTenantRoutes = [
   '/api/usuarios',
 ];
 
+// Subrutas reales que antes devolvían 403 "Ruta API no autorizada." porque
+// `getApiPolicy()` resolvía `null` al existir sólo el patrón de la raíz exacta.
+const protectedSubRoutes = [
+  '/api/cash-sessions/movements',
+  '/api/reports/workbook',
+  '/api/reports/consolidated',
+  '/api/daily-summaries',
+  '/api/daily-summaries/settings',
+  '/api/payables',
+  '/api/purchases',
+  '/api/deliveries',
+  '/api/presales',
+  '/api/presales/checkout',
+  '/api/organization',
+  '/api/invitations',
+];
+
 const superadminRoutes = [
   '/api/superadmin/audit',
   '/api/superadmin/metrics',
@@ -119,5 +136,44 @@ test('política API resuelve acciones por método para cada endpoint registrado'
     assert.equal(getApiPolicy(path, 'POST')?.action, 'create', `POST ${path} debe mapear create`);
     assert.equal(getApiPolicy(path, 'PATCH')?.action, 'edit', `PATCH ${path} debe mapear edit`);
     assert.equal(getApiPolicy(path, 'DELETE')?.action, 'delete', `DELETE ${path} debe mapear delete`);
+  }
+});
+
+test('las subrutas de cada módulo resuelven política y no devuelven 403', async (t) => {
+  for (const path of protectedSubRoutes) {
+    await t.test(path, async () => {
+      assert.ok(getApiPolicy(path, 'GET'), `GET ${path} debe tener política`);
+      const response = middleware(request(path, 'GET', {
+        Authorization: 'Bearer test-token',
+        'x-tenant-id': 'tenant-a',
+      }));
+      assert.notEqual(response.status, 403, `${path} no debe responder 403`);
+      assert.equal(response.status, 200);
+    });
+  }
+});
+
+test('caja: sesiones y movimientos comparten el módulo finance', () => {
+  assert.deepEqual(getApiPolicy('/api/cash-sessions', 'GET'), { module: 'finance', action: 'view' });
+  assert.deepEqual(getApiPolicy('/api/cash-sessions/movements', 'GET'), { module: 'finance', action: 'view' });
+  assert.deepEqual(getApiPolicy('/api/cash-sessions', 'POST'), { module: 'finance', action: 'create' });
+});
+
+test('el Excel maestro exige permiso de exportar igual que la exportación de reportes', () => {
+  assert.deepEqual(getApiPolicy('/api/reports/workbook', 'GET'), { module: 'reports', action: 'export' });
+  assert.deepEqual(getApiPolicy('/api/reports/export', 'GET'), { module: 'reports', action: 'export' });
+  // Las subrutas de reportes sin acción propia siguen siendo sólo de lectura.
+  assert.deepEqual(getApiPolicy('/api/reports/consolidated', 'GET'), { module: 'reports', action: 'view' });
+});
+
+test('las rutas realmente inexistentes siguen devolviendo 403', async () => {
+  for (const path of ['/api/not-registered', '/api/cash-sessions-fake', '/api/reportes']) {
+    assert.equal(getApiPolicy(path, 'GET'), null, `${path} no debe tener política`);
+    const response = middleware(request(path, 'GET', {
+      Authorization: 'Bearer test-token',
+      'x-tenant-id': 'tenant-a',
+    }));
+    assert.equal(response.status, 403);
+    assert.equal((await errorBody(response)).error, 'Ruta API no autorizada.');
   }
 });
