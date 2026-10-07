@@ -15,6 +15,7 @@ const publicRoutes = new Set([
   'GET /api/cron/daily-alerts',
   'GET /api/cron/daily-summary',
   'GET /api/cron/receivables-reminders',
+  'GET /api/cron/crm-alerts',
   'GET /api/webhooks/whatsapp',
   'POST /api/webhooks/whatsapp',
 ]);
@@ -41,6 +42,8 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/purchases(?:\/.*)?$/, policy: { module: 'inventory', action: 'view' } },
   { pattern: /^\/api\/deliveries(?:\/.*)?$/, policy: { module: 'sales', action: 'view' } },
   { pattern: /^\/api\/contacts(?:\/.*)?$/, policy: { module: 'contacts', action: 'view' } },
+  { pattern: /^\/api\/quotes(?:\/.*)?$/, policy: { module: 'quotes', action: 'view' } },
+  { pattern: /^\/api\/crm(?:\/.*)?$/, policy: { module: 'crm', action: 'view' } },
   { pattern: /^\/api\/finance(?:\/.*)?$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/payables(?:\/.*)?$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/(?:members|usuarios)(?:\/.*)?$/, policy: { module: 'members', action: 'view' } },

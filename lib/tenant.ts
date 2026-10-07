@@ -79,7 +79,8 @@ export function tenantErrorResponse(error: unknown) {
   const code = error instanceof Error ? error.message : 'UNKNOWN';
   const entitlementResponse = entitlementErrorResponse(error);
   if (entitlementResponse) return entitlementResponse;
-  if (code.startsWith('SUPABASE_') || code.includes('relation') || code.includes('schema cache')) return { status: 503, body: { error: 'La conexión del servidor con Supabase no está configurada correctamente.' } };
+  if (/function .* does not exist|Could not find the function|Could not find the table|Could not find the .* column|relation .* does not exist|column .* does not exist|42883|42P01|42703|PGRST202|PGRST204|schema cache/i.test(code)) return { status: 503, body: { error: 'Este módulo todavía no está instalado en Supabase. Aplica la migración pendiente antes de usarlo.', code: 'DATABASE_MIGRATION_REQUIRED' } };
+  if (code.startsWith('SUPABASE_')) return { status: 503, body: { error: 'La conexión del servidor con Supabase no está configurada correctamente.' } };
   if (code === 'UNAUTHENTICATED') return { status: 401, body: { error: 'Autenticación requerida.' } };
   if (code === 'TENANT_REQUIRED') return { status: 400, body: { error: 'Falta identificar la empresa.' } };
   if (code === 'BRANCH_REQUIRED') return { status: 400, body: { error: 'Debes indicar una sucursal autorizada cuando tienes más de una disponible.', code } };

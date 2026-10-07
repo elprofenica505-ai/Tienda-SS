@@ -14,8 +14,10 @@ const operationItems: NavItem[] = [
   { href: '/workspace', icon: '▦', label: 'Resumen', exact: true },
   { href: '/workspace/cashier', icon: '$', label: 'Vender / Caja' },
   { href: '/workspace/presales', icon: '↗', label: 'Preventa en piso' },
+  { href: '/workspace/quotes', icon: '◉', label: 'Cotizaciones' },
   { href: '/workspace/catalog', icon: '▤', label: 'Productos' },
   { href: '/workspace/contacts', icon: '○', label: 'Clientes' },
+  { href: '/workspace/crm', icon: '◎', label: 'CRM' },
   { href: '/workspace/sales', icon: '◈', label: 'Ventas' },
   { href: '/workspace/returns', icon: '↩', label: 'Devoluciones' },
 ];
