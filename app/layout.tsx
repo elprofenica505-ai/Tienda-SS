@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { ConnectivityToast } from '@/components/workspace/ConnectivityToast';
 
 export const metadata: Metadata = {
   title: 'ConexiaX — Operaciones claras para negocios ambiciosos',
@@ -17,7 +18,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" dir="ltr">
-      <body>{children}</body>
+      <body>
+        {children}
+        <ConnectivityToast />
+      </body>
     </html>
   );
 }
