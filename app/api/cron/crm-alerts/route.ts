@@ -1,0 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+import { NextRequest,NextResponse } from 'next/server';
+import { getSupabaseServer } from '@/lib/supabase/server';
+export const runtime='nodejs';export const dynamic='force-dynamic';
+export async function GET(request:NextRequest){const expected=process.env.CRON_SECRET?.trim()||'';const supplied=/^Bearer\s+(.+)$/i.exec(request.headers.get('authorization')||'')?.[1]||'';if(!expected)return NextResponse.json({ok:false,error:'La tarea CRM no tiene clave configurada.'},{status:503});if(Buffer.byteLength(expected)!==Buffer.byteLength(supplied)||!timingSafeEqual(Buffer.from(expected),Buffer.from(supplied)))return NextResponse.json({ok:false,error:'No autorizado.'},{status:401});try{const result=await getSupabaseServer().rpc('generate_crm_daily_alerts');if(result.error)throw new Error(result.error.message);return NextResponse.json({ok:true,result:result.data})}catch(error){console.error('crm_alerts_failed',error);return NextResponse.json({ok:false,error:'No se pudieron actualizar las alertas CRM.'},{status:503})}}

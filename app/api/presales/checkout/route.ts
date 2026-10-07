@@ -29,6 +29,7 @@ function errorResponse(error: unknown) {
     CASH_RECEIVED_TOO_LOW: ['El efectivo recibido es menor que el total del ticket.', 400],
     BRANCH_NOT_FOUND: ['La sucursal no existe o no está activa.', 404],
     PRESALE_OTHER_BRANCH: ['La preventa es de otra sucursal.', 409],
+    QUOTE_EXPIRED: ['La cotización vinculada venció; crea una nueva antes de cobrar.', 409],
   };
   for (const [key, value] of Object.entries(known)) if (message.includes(key)) return NextResponse.json({ error: value[0] }, { status: value[1] });
   const response = tenantErrorResponse(error);
@@ -86,15 +87,21 @@ export async function POST(request: NextRequest) {
       const source = rawItems.find((item: Record<string, unknown>) => text(item.productId, 128) === productId) || {};
       return { productId, quantity, unitPrice: money(source.unitPrice) };
     });
-    const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160) };
-    // create_sale remains the underlying atomic RPC (compat: supabase.rpc('create_sale'));
-    // this wrapper recalculates price/tax server-side.
-    const saleArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items };
-    const result = splitPayments.length
-      ? await supabase.rpc('create_sale_with_payments_server_priced', { ...saleArgs, target_payments: splitPayments })
-      : await supabase.rpc('create_sale_server_priced', { ...saleArgs, target_payment_method: paymentMethod });
+    const presaleMetadata = presale.metadata && typeof presale.metadata === 'object' ? presale.metadata as Record<string, unknown> : {};
+    const quoteId = text(presaleMetadata.quoteId, 128);
+    const quote = quoteId ? await supabase.from('quotes').select('id,customer_id,tax_amount,valid_until,status,converted_presale_id').eq('tenant_id', context.tenantId).eq('id', quoteId).eq('converted_presale_id', presaleId).maybeSingle() : { data: null, error: null };
+    if (quote.error) throw new Error(quote.error.message);
+    const usesLockedQuotePrice = Boolean(quote.data && quote.data.status === 'converted' && quote.data.valid_until >= new Date().toISOString().slice(0, 10));
+    if (quoteId && !usesLockedQuotePrice) throw new Error('QUOTE_EXPIRED');
+    const metadata = { presaleId, ticketCode: text(presale.ticket_code, 80), cashReceived, changeAmount, sellerUid: text(presale.seller_uid, 128), sellerEmail: text(presale.seller_email, 160), ...(usesLockedQuotePrice ? { quoteId, taxAmount: Number(quote.data?.tax_amount || 0), priceSource: 'accepted_quote' } : {}) };
+    // Las preventas normales se recalculan en el servidor. Solo una cotización enlazada,
+    // vigente y bloqueada por la base conserva el precio que se prometió al cliente.
+    const saleArgs = { target_tenant_id: context.tenantId, target_branch_id: branchId, target_warehouse_id: warehouseId, target_cash_session_id: cashSessionId, target_customer_id: text(body.customerId, 128) || quote.data?.customer_id || null, target_user_id: context.uid, target_discount: money(body.discount), target_idempotency_key: `presale:${presaleId}`, target_metadata: metadata, target_items: items };
+    const result = usesLockedQuotePrice
+      ? (splitPayments.length ? await supabase.rpc('create_sale_with_payments', { ...saleArgs, target_payments: splitPayments }) : await supabase.rpc('create_sale', { ...saleArgs, target_payment_method: paymentMethod }))
+      : (splitPayments.length ? await supabase.rpc('create_sale_with_payments_server_priced', { ...saleArgs, target_payments: splitPayments }) : await supabase.rpc('create_sale_server_priced', { ...saleArgs, target_payment_method: paymentMethod }));
     let saleResult = result;
-    if (result.error && isMissingServerPricedRpc(result.error)) {
+    if (!usesLockedQuotePrice && result.error && isMissingServerPricedRpc(result.error)) {
       const fallbackPricing = await priceSaleItemsFromCatalog(context.tenantId, items);
       const fallbackArgs = { ...saleArgs, target_items: fallbackPricing.items, target_metadata: { ...metadata, taxAmount: fallbackPricing.taxAmount, priceSource: 'server_catalog_fallback' } };
       saleResult = splitPayments.length
