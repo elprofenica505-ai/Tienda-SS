@@ -147,6 +147,39 @@ test('toda función de public revoca EXECUTE de public, anon y authenticated', (
   );
 });
 
+/**
+ * Según la documentación de PostgreSQL, los privilegios por defecto por esquema
+ * se SUMAN a los globales: "no se puede revocar un privilegio por esquema si fue
+ * otorgado globalmente". Un `ALTER DEFAULT PRIVILEGES IN SCHEMA ... REVOKE
+ * EXECUTE ON FUNCTIONS` es por tanto un NO-OP silencioso que daría una falsa
+ * sensación de seguridad.
+ */
+test('los privilegios por defecto de funciones se revocan con la forma global, no con IN SCHEMA', () => {
+  const sql = readAll();
+  const perSchemaRevoke = /alter\s+default\s+privileges[^;]*?in\s+schema[^;]*?revoke[^;]*?execute[^;]*?on\s+functions/gi;
+  assert.doesNotMatch(
+    sql,
+    perSchemaRevoke,
+    'ALTER DEFAULT PRIVILEGES IN SCHEMA ... REVOKE EXECUTE ON FUNCTIONS no tiene efecto: usa la forma global (sin IN SCHEMA)',
+  );
+});
+
+test('el endurecimiento de funciones otorga EXECUTE a service_role antes de revocar', () => {
+  const sql = readAll();
+  assert.match(
+    sql,
+    /grant\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+to\s+service_role/i,
+    'debe garantizar el acceso del backend antes de revocar EXECUTE',
+  );
+  assert.match(
+    sql,
+    /revoke\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+from\s+public,\s*anon,\s*authenticated/i,
+  );
+  const grantAt = sql.search(/grant\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+to\s+service_role/i);
+  const revokeAt = sql.search(/revoke\s+execute\s+on\s+all\s+functions\s+in\s+schema\s+public\s+from\s+public,\s*anon,\s*authenticated/i);
+  assert.ok(grantAt < revokeAt, 'el GRANT a service_role debe ejecutarse ANTES del REVOKE');
+});
+
 test('ninguna vista del esquema public queda sin security_invoker (evita saltarse la RLS)', () => {
   const sql = readAll();
   const views = new Set<string>();
