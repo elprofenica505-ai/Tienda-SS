@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import NextImage from 'next/image';
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import { useRouter } from 'next/navigation';
@@ -19,6 +19,27 @@ type Session = { id: string; branchId: string; registerId: string; status: strin
 type CashMethod = 'cash' | 'card' | 'transfer';
 const labels: Record<CashMethod, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
 
+const CASH_DIRECTION_FILTERS: Array<{ id: string; label: string }> = [{ id: 'all', label: 'Todos' }, { id: 'in', label: 'Entradas' }, { id: 'out', label: 'Salidas' }];
+const CASH_METHOD_FILTERS: Array<{ id: string; label: string }> = [{ id: 'all', label: 'Todos' }, { id: 'cash', label: 'Efectivo' }, { id: 'card', label: 'Tarjeta' }, { id: 'transfer', label: 'Transferencia' }];
+const CASH_SORTS: Array<{ id: string; label: string }> = [{ id: 'recent', label: 'Más recientes' }, { id: 'oldest', label: 'Más antiguos' }, { id: 'amount', label: 'Mayor monto' }];
+const MOVEMENT_TONE: Record<string, string> = { sale: 'sale', refund: 'refund', deposit: 'deposit', withdrawal: 'withdrawal', adjustment: 'adjustment', payment: 'withdrawal', purchase: 'withdrawal' };
+const MOVEMENT_GLYPH: Record<string, string> = { sale: '\u2191', refund: '\u21ba', deposit: '+', withdrawal: '\u2193', adjustment: '\u21c5', payment: '\u2193', purchase: '\u2193' };
+const CASH_METHOD_LABEL: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Cr\u00e9dito' };
+function movementTone(item: { movementType: string; direction: 'in' | 'out' }) { return MOVEMENT_TONE[item.movementType] || (item.direction === 'in' ? 'deposit' : 'withdrawal'); }
+function movementGlyph(item: { movementType: string; direction: 'in' | 'out' }) { return MOVEMENT_GLYPH[item.movementType] || (item.direction === 'in' ? '\u2191' : '\u2193'); }
+function cashMethodLabel(value?: string) { return value ? CASH_METHOD_LABEL[value] || value : 'Sin m\u00e9todo'; }
+function dayStamp(date: Date, timezone: string) { return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); }
+function relativeDay(iso: string, locale: string, timezone: string) {
+  if (!iso) return 'Sin fecha';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
+  const now = new Date();
+  const stamp = dayStamp(date, timezone);
+  if (stamp === dayStamp(now, timezone)) return 'Hoy';
+  if (stamp === dayStamp(new Date(now.getTime() - 86_400_000), timezone)) return 'Ayer';
+  return new Intl.DateTimeFormat(locale, { timeZone: timezone, day: '2-digit', month: '2-digit', year: '2-digit' }).format(date);
+}
+
 function CashierContent() {
   const router = useRouter();
   const { authUser, tenant, member, organization, activeBranchId, loading: tenantLoading } = useTenant();
@@ -35,6 +56,26 @@ function CashierContent() {
   const [loading, setLoading] = useState(false); const [message, setMessage] = useState(''); const [receipt, setReceipt] = useState<{ ticketCode?: string; saleId?: string; saleNumber?: string; invoiceNumber?: string; total?: number; paymentMethod?: string; cashReceived?: number; changeAmount?: number; items?: ReceiptItem[]; seller?: { name?: string; email?: string }; cashier?: string; issuedAt?: string; issuer?: { legalName?: string; taxId?: string; address?: string; phone?: string; email?: string; logoDataUrl?: string }; fiscal?: { mode?: string; provider?: string; showBarcode?: boolean } } | null>(null);
   const movementPrintRef = useRef<HTMLElement | null>(null); const receiptPrintRef = useRef<HTMLElement | null>(null);
   const selectedMovement = cashMovements.find((item) => item.id === selectedMovementId) || null;
+  const [movementSearch, setMovementSearch] = useState(''); const [movementDirection, setMovementDirection] = useState('all'); const [movementMethod, setMovementMethod] = useState('all'); const [movementSort, setMovementSort] = useState('recent'); const [detailOpen, setDetailOpen] = useState(false);
+  const visibleMovements = useMemo(() => {
+    const needle = movementSearch.trim().toLowerCase();
+    const list = cashMovements.filter((item) => {
+      if (movementDirection !== 'all' && item.direction !== movementDirection) return false;
+      if (movementMethod !== 'all' && (item.paymentMethod || '') !== movementMethod) return false;
+      if (!needle) return true;
+      return [item.movementLabel, item.description, item.saleNumber, item.userName, cashMethodLabel(item.paymentMethod)].filter(Boolean).join(' ').toLowerCase().includes(needle);
+    });
+    if (movementSort === 'amount') return [...list].sort((a, b) => b.amount - a.amount);
+    if (movementSort === 'oldest') return [...list].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    return [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [cashMovements, movementSearch, movementDirection, movementMethod, movementSort]);
+  const movementTotals = useMemo(() => visibleMovements.reduce((totals, item) => {
+    if (item.direction === 'in') totals.in += item.amount; else totals.out += item.amount;
+    return totals;
+  }, { in: 0, out: 0 }), [visibleMovements]);
+  const movementFiltersActive = (movementDirection !== 'all' ? 1 : 0) + (movementMethod !== 'all' ? 1 : 0) + (movementSearch.trim() ? 1 : 0);
+  function resetMovementFilters() { setMovementDirection('all'); setMovementMethod('all'); setMovementSearch(''); setMovementSort('recent'); }
+  function openMovement(id: string) { setSelectedMovementId(id); setDetailOpen(true); }
 
   const load = useCallback(async () => {
     if (!authUser || !tenant || !activeBranchId) return;
@@ -150,12 +191,38 @@ function CashierContent() {
   {confirmMode === 'scanner' && Object.keys(verifiedItems).length > 0 && <div className="scanner-progress"><small>{Object.entries(verifiedItems).map(([pid, qty]) => { const name = presale.items?.find((i) => i.productId === pid)?.name || pid; return `${name}: ${qty}`; }).join(' · ')}</small></div>}
 </div><div className="presale-detail-meta">{presale.metadata.servicePoint && <span><b>Punto de servicio:</b> {presale.metadata.servicePoint}</span>}{presale.metadata.documentType && <span><b>Documento:</b> {presale.metadata.documentType}</span>}{presale.metadata.suggestedPayment && <span><b>Pago sugerido:</b> {presale.metadata.suggestedPayment}</span>}{presale.metadata.notes && <span><b>Notas:</b> {presale.metadata.notes}</span>}</div></>}<select value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Venta mostrador</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.name}</option>)}</select><div className="payment-options">{[['cash', 'Efectivo'], ['card', 'Tarjeta'], ['transfer', 'Transferencia'], ['credit', 'Crédito']].map(([value, label]) => <button type="button" key={value} className={paymentMethod === value ? 'selected' : ''} onClick={() => setPaymentMethod(value)}>{label}</button>)}</div>{paymentMethod === 'cash' && <label>Recibido en efectivo<input type="number" min={presale.total} step="0.01" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={String(presale.total)} /></label>}<button className="button" disabled={loading || !ticketVerified || presale.status !== 'sent_to_cashier' || (paymentMethod === 'credit' && !customerId)} onClick={() => void checkout()}>{ticketVerified ? 'Cobrar ticket ↗' : 'Confirma productos para cobrar'}</button></div>}</section></div>}<section className="section-card cash-movement-history">
 <div className="section-card-header cash-movement-section-header"><div><div className="eyebrow">Caja</div><h2>Movimientos recientes</h2><p>Abre cualquier movimiento para ver su fecha, venta, productos, pagos y usuario.</p></div><button className="button button-secondary" type="button" onClick={() => void updateExcel()} disabled={exportingWorkbook || !workbookReady}>{exportingWorkbook ? 'Actualizando…' : workbookReady ? 'Actualizar Excel maestro' : 'Preparando…'}</button></div>
+<div className="cash-toolbar">
+  <div className="cash-chip-row" role="group" aria-label="Filtrar por dirección">{CASH_DIRECTION_FILTERS.map((option) => <button key={option.id} type="button" className={`cash-chip ${movementDirection === option.id ? 'selected' : ''}`} aria-pressed={movementDirection === option.id} onClick={() => setMovementDirection(option.id)}>{option.label}</button>)}</div>
+  <div className="cash-chip-row" role="group" aria-label="Filtrar por método de pago">{CASH_METHOD_FILTERS.map((option) => <button key={option.id} type="button" className={`cash-chip ${movementMethod === option.id ? 'selected' : ''}`} aria-pressed={movementMethod === option.id} onClick={() => setMovementMethod(option.id)}>{option.label}</button>)}</div>
+  <div className="cash-toolbar-inputs">
+    <label className="cash-search"><span className="sr-only">Buscar movimiento</span><input type="search" value={movementSearch} onChange={(event) => setMovementSearch(event.target.value)} placeholder="Buscar por venta, descripción o usuario" /></label>
+    <label className="cash-select">Orden<select value={movementSort} onChange={(event) => setMovementSort(event.target.value)}>{CASH_SORTS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+    {movementFiltersActive > 0 && <button className="text-link cash-reset" type="button" onClick={resetMovementFilters}>Limpiar ({movementFiltersActive})</button>}
+  </div>
+</div>
+<div className="cash-filter-summary" role="status"><span>{visibleMovements.length} de {cashMovements.length} movimiento{cashMovements.length === 1 ? '' : 's'}</span><b className="is-in">Entradas {money(movementTotals.in)}</b><b className="is-out">Salidas {money(movementTotals.out)}</b><b className={movementTotals.in - movementTotals.out < 0 ? 'is-out' : 'is-in'}>Neto {money(movementTotals.in - movementTotals.out)}</b></div>
 <div className="cash-movement-layout"><div className="cash-movement-list" aria-label="Movimientos de caja">
-{cashMovements.length === 0 && !movementError ? <div className="inventory-empty">Todavía no hay movimientos registrados en esta sucursal.</div> : cashMovements.map((item) => <button className={`cash-movement-row ${selectedMovementId === item.id ? 'selected' : ''}`} type="button" key={item.id} aria-pressed={selectedMovementId === item.id} onClick={() => setSelectedMovementId(item.id)}><span className={`finance-icon ${item.direction === 'in' ? 'income' : 'expense'}`}>{item.direction === 'in' ? '↑' : '↓'}</span><span className="cash-movement-row-copy"><b>{item.movementLabel}</b><small>{new Intl.DateTimeFormat(tenant.locale || 'es-NI', { dateStyle: 'short', timeStyle: 'short', timeZone: tenant.timezone || 'America/Managua' }).format(new Date(item.createdAt))} · {item.saleNumber || item.description}</small></span><strong className={item.direction === 'in' ? 'finance-income' : ''}>{item.direction === 'in' ? '+' : '−'}{money(Number(item.amount || 0))}</strong></button>)}
+{visibleMovements.length === 0 && !movementError ? <div className="inventory-empty">{cashMovements.length === 0 ? 'Todavía no hay movimientos registrados en esta sucursal.' : 'Ningún movimiento coincide con los filtros.'}</div> : visibleMovements.map((item) => <button className={`cash-movement-row ${selectedMovementId === item.id ? 'selected' : ''}`} type="button" key={item.id} aria-pressed={selectedMovementId === item.id} onClick={() => openMovement(item.id)}><span className={`cash-movement-icon is-${movementTone(item)}`} aria-hidden="true">{movementGlyph(item)}</span><span className="cash-movement-row-copy"><b>{item.movementLabel}</b><small>{relativeDay(item.createdAt, tenant.locale || 'es-NI', tenant.timezone || 'America/Managua')} · {new Intl.DateTimeFormat(tenant.locale || 'es-NI', { timeStyle: 'short', timeZone: tenant.timezone || 'America/Managua' }).format(new Date(item.createdAt))} · {item.saleNumber || item.description}</small><span className={`cash-method-badge is-${item.paymentMethod || 'none'}`}>{cashMethodLabel(item.paymentMethod)}</span></span><strong className={item.direction === 'in' ? 'is-in' : 'is-out'}>{item.direction === 'in' ? '+' : '−'}{money(Number(item.amount || 0))}</strong></button>)}
 {movementError && <div className="catalog-message" role="status">{movementError} <button className="text-link" type="button" onClick={() => void load()}>Reintentar</button></div>}
 {movementNextCursor && <button className="button button-secondary cash-movement-more" type="button" onClick={() => void loadMoreCashMovements()} disabled={movementLoading}>{movementLoading ? 'Cargando…' : 'Cargar más movimientos'}</button>}
 </div>
-{selectedMovement && <article className="cash-movement-detail" ref={movementPrintRef}><header className="cash-movement-detail-header"><div><div className="eyebrow">Detalle del movimiento</div><h3>{selectedMovement.movementLabel}</h3><p>{selectedMovement.description}</p></div><button className="button button-secondary no-print" type="button" onClick={printCashMovement}>Imprimir detalle</button></header><div className="cash-movement-facts"><div><small>Fecha y hora</small><b>{new Intl.DateTimeFormat(tenant.locale || 'es-NI', { dateStyle: 'full', timeStyle: 'short', timeZone: tenant.timezone || 'America/Managua' }).format(new Date(selectedMovement.createdAt))}</b></div><div><small>Venta relacionada</small><b>{selectedMovement.saleNumber || selectedMovement.saleId || 'No aplica'}</b><span>{selectedMovement.sale?.status || ''}</span></div><div><small>Total de la venta</small><b>{selectedMovement.sale ? money(Number(selectedMovement.sale.total || 0)) : '—'}</b></div><div><small>Monto del movimiento</small><b>{selectedMovement.direction === 'in' ? '+' : '−'}{money(Number(selectedMovement.amount || 0))}</b></div><div><small>Usuario</small><b>{selectedMovement.userName || 'Usuario no disponible'}</b><span>{selectedMovement.userEmail || ''}</span></div><div><small>Sucursal / caja</small><b>{selectedMovement.branchName || branchName} · {selectedMovement.registerName || 'Caja'}</b></div><div><small>Turno</small><b>{selectedMovement.cashSessionId.slice(0, 8)} · {selectedMovement.sessionStatus || '—'}</b></div><div><small>Método de pago</small><b>{selectedMovement.paymentMethod || 'No especificado'}</b></div></div><div className="cash-movement-detail-block"><h4>Productos y cantidades</h4>{selectedMovement.items.length === 0 ? <p>No hay productos asociados a este movimiento.</p> : selectedMovement.items.map((item, index) => <div className="cash-movement-product" key={`${item.productId || item.name}-${index}`}><div><b>{item.name}</b><small>{item.sku ? `SKU: ${item.sku} · ` : ''}{money(Number(item.unitPrice || 0))} por unidad</small></div><span>{item.quantity} ×</span><strong>{money(Number(item.total || 0))}</strong></div>)}</div><div className="cash-movement-detail-block"><h4>Pagos relacionados</h4>{selectedMovement.payments?.length ? selectedMovement.payments.map((payment, index) => <div className="cash-movement-payment" key={`${payment.method}-${index}`}><span>{payment.method || 'Pago'}</span><strong>{money(Number(payment.amount || 0))}</strong></div>) : <p>{selectedMovement.paymentMethod || 'No hay pagos relacionados.'}</p>}</div></article>}
+{selectedMovement && <>
+<div className={`cash-detail-backdrop ${detailOpen ? 'is-open' : ''}`} onClick={() => setDetailOpen(false)} aria-hidden="true" />
+<article className={`cash-movement-detail ${detailOpen ? 'is-open' : ''}`} ref={movementPrintRef}>
+  <header className="cash-movement-detail-header">
+    <div className="cash-detail-identity"><span className={`cash-detail-icon is-${movementTone(selectedMovement)}`} aria-hidden="true">{movementGlyph(selectedMovement)}</span><div><div className="eyebrow">Detalle del movimiento</div><h3>{selectedMovement.movementLabel}</h3><p>{selectedMovement.description}</p></div></div>
+    <div className="cash-detail-actions no-print"><strong className={selectedMovement.direction === 'in' ? 'is-in' : 'is-out'}>{selectedMovement.direction === 'in' ? '+' : '−'}{money(Number(selectedMovement.amount || 0))}</strong><button className="button button-secondary" type="button" onClick={printCashMovement}>Imprimir detalle</button><button className="cash-detail-close" type="button" aria-label="Cerrar detalle" onClick={() => setDetailOpen(false)}>×</button></div>
+  </header>
+  <div className="cash-movement-facts">
+    <div><small><i aria-hidden="true">🕑</i>Fecha y hora</small><b>{new Intl.DateTimeFormat(tenant.locale || 'es-NI', { dateStyle: 'full', timeStyle: 'short', timeZone: tenant.timezone || 'America/Managua' }).format(new Date(selectedMovement.createdAt))}</b></div>
+    <div><small><i aria-hidden="true">🧾</i>Venta relacionada</small><b>{selectedMovement.saleNumber || selectedMovement.saleId || 'No aplica'}</b><span>{selectedMovement.sale?.status || ''}</span></div>
+    <div><small><i aria-hidden="true">∑</i>Total de la venta</small><b>{selectedMovement.sale ? money(Number(selectedMovement.sale.total || 0)) : '—'}</b></div>
+    <div><small><i aria-hidden="true">💳</i>Método de pago</small><b>{cashMethodLabel(selectedMovement.paymentMethod)}</b></div>
+  </div>
+  <div className="cash-movement-detail-block"><h4>Productos y cantidades</h4>{selectedMovement.items.length === 0 ? <p>No hay productos asociados a este movimiento.</p> : <div className="cash-product-grid">{selectedMovement.items.map((item, index) => <div className="cash-movement-product" key={`${item.productId || item.name}-${index}`}>{item.imageUrl ? <img className="cash-product-thumb" src={item.imageUrl} alt="" loading="lazy" /> : <span className="cash-product-thumb is-empty" aria-hidden="true">{(item.name || '?').slice(0, 1).toUpperCase()}</span>}<div><b>{item.name}</b><small>{item.sku ? `SKU: ${item.sku} · ` : ''}{money(Number(item.unitPrice || 0))} por unidad</small></div><span className="cash-product-qty">{item.quantity} ×</span><strong>{money(Number(item.total || 0))}</strong></div>)}</div>}</div>
+  <div className="cash-movement-detail-block"><h4>Pagos relacionados</h4>{selectedMovement.payments?.length ? selectedMovement.payments.map((payment, index) => <div className="cash-movement-payment" key={`${payment.method}-${index}`}><span className={`cash-method-badge is-${payment.method || 'none'}`}>{cashMethodLabel(payment.method)}</span><strong>{money(Number(payment.amount || 0))}</strong></div>) : <p>{cashMethodLabel(selectedMovement.paymentMethod)}</p>}</div>
+  <div className="cash-movement-detail-block"><h4>Responsable y turno</h4><div className="cash-actor"><span className="cash-avatar" aria-hidden="true">{(selectedMovement.userName || '?').slice(0, 1).toUpperCase()}</span><div><b>{selectedMovement.userName || 'Usuario no disponible'}</b><small>{selectedMovement.userEmail || 'Sin correo registrado'}</small></div></div><div className="cash-actor-facts"><div><small>Sucursal / caja</small><b>{selectedMovement.branchName || branchName} · {selectedMovement.registerName || 'Caja'}</b></div><div><small>Turno</small><b>{selectedMovement.cashSessionId.slice(0, 8)} · {selectedMovement.sessionStatus || '—'}</b></div></div></div>
+</article></>}
 </div></section>{sessions.length > 0 && <section className="section-card"><div className="eyebrow">Historial</div><h2>Turnos recientes</h2><div className="organization-grid">{sessions.slice(0, 6).map((item) => <div className="organization-row" key={item.id}><span>$</span><div><b>{item.status} · {item.id.slice(0, 8)}</b><small>Diferencia {money(Number(item.difference || 0))}</small></div></div>)}</div></section>}<BarcodeScanner open={scannerOpen} title="Confirmar productos del ticket" onDetected={verifyTicketProduct} onClose={() => setScannerOpen(false)} /></section></main>;
 }
 
