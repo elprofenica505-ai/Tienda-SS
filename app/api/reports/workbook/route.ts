@@ -8,6 +8,7 @@ import { financialFactsToSummaryFacts, loadFinancialFacts, salesCreditTotal, sal
 import { resolveTenantBranchIds } from '@/lib/organization-scope';
 import { readAllSupabasePages, readSupabaseInBatches } from '@/lib/supabase/read-pages';
 import { reportExportQuotaFailure } from '@/lib/report-export-quota';
+import { calculateCrmScore, crmScoreExplanation } from '@/lib/crm-scoring';
 
 export const runtime = 'nodejs';
 const TENANT_WIDE_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
@@ -91,7 +92,19 @@ export async function GET(request: NextRequest) {
       if (!wide) query = query.in('branch_id', branchIds);
       return query;
     });
-    const [facts, rawCashMovements, rawPresales] = await Promise.all([factsPromise, cashPromise, presalesPromise]);
+    const quotesPromise = noAccessibleBranches ? Promise.resolve([] as Row[]) : readAllSupabasePages<Row>((from, to) => {
+      let query = supabase.from('quotes').select('id,quote_number,branch_id,customer_id,seller_uid,status,valid_until,subtotal,tax_amount,total,currency,notes,terms,rejection_reason,sent_at,decided_at,converted_presale_id,converted_sale_id,created_at,updated_at,quote_items(id,product_id,description,sku,quantity,unit_price,tax_rate,line_subtotal,line_tax,line_total)').eq('tenant_id', context.tenantId).gte('created_at', period.from).lt('created_at', period.to).order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to);
+      if (!wide) query = query.in('branch_id', branchIds);
+      return query;
+    });
+    const leadsPromise = noAccessibleBranches ? Promise.resolve([] as Row[]) : readAllSupabasePages<Row>((from, to) => {
+      let query = supabase.from('crm_leads').select('id,branch_id,customer_id,owner_uid,stage,name,phone,email,source,estimated_value,last_contact_at,next_contact_at,created_at,updated_at').eq('tenant_id', context.tenantId).order('created_at', { ascending: true }).order('id', { ascending: true }).range(from, to);
+      if (!wide) query = query.in('branch_id', branchIds);
+      return query;
+    });
+    const crmCustomersPromise = readAllSupabasePages<Row>((from, to) => supabase.from('customers').select('id,name,email,phone,origin_channel,active,created_at').eq('tenant_id', context.tenantId).order('name', { ascending: true }).order('id', { ascending: true }).range(from, to));
+    const openDebtsPromise = noAccessibleBranches ? Promise.resolve([] as Row[]) : readAllSupabasePages<Row>((from, to) => { let query = supabase.from('receivables').select('customer_id,outstanding_amount,due_date,status,sales!inner(branch_id)').eq('tenant_id', context.tenantId).in('status', ['open','partial']).range(from, to); if (!wide) query = query.in('sales.branch_id', branchIds); return query; });
+    const [facts, rawCashMovements, rawPresales, rawQuotes, rawLeads, crmCustomers, openDebts] = await Promise.all([factsPromise, cashPromise, presalesPromise, quotesPromise, leadsPromise, crmCustomersPromise, openDebtsPromise]);
 
     const allSaleIds = Array.from(new Set([
       ...facts.sales.map((sale) => String(sale.id || '')),
@@ -120,6 +133,8 @@ export async function GET(request: NextRequest) {
       ...facts.returns.map((item) => String(item.created_by || '')),
       ...rawCashMovements.map((movement) => String(movement.performed_by || '')),
       ...rawPresales.flatMap((presale) => [String(presale.seller_uid || ''), String(presale.paid_by || '')]),
+      ...rawQuotes.map((quote) => String(quote.seller_uid || '')),
+      ...rawLeads.map((lead) => String(lead.owner_uid || '')),
       ...linkedSales.map((sale) => String(sale.sold_by || '')),
     ].filter(Boolean)));
     const profiles = await readSupabaseInBatches<Row>(userIds, (batch) => supabase
@@ -134,6 +149,8 @@ export async function GET(request: NextRequest) {
       ...facts.expenses.map((expense) => String(expense.branch_id || '')),
       ...cashSessions.map((session) => String(session.branch_id || '')),
       ...rawPresales.map((presale) => String(presale.branch_id || '')),
+      ...rawQuotes.map((quote) => String(quote.branch_id || '')),
+      ...rawLeads.map((lead) => String(lead.branch_id || '')),
     ].filter(Boolean)));
     const branches = await readSupabaseInBatches<Row>(branchIdsInData, (batch) => supabase
       .from('branches')
@@ -152,6 +169,8 @@ export async function GET(request: NextRequest) {
     const customerIds = Array.from(new Set([
       ...facts.sales.map((sale) => String(sale.customer_id || '')),
       ...rawPresales.map((presale) => String(record(presale.metadata).customerId || '')),
+      ...rawQuotes.map((quote) => String(quote.customer_id || '')),
+      ...rawLeads.map((lead) => String(lead.customer_id || '')),
     ].filter((id) => UUID_PATTERN.test(id))));
     const customers = await readSupabaseInBatches<Row>(customerIds, (batch) => supabase
       .from('customers')
@@ -370,6 +389,21 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    const mappedQuotes = rawQuotes.map((quote) => ({
+      id: String(quote.id), quoteNumber: Number(quote.quote_number || 0), branchName: String(branchById.get(String(quote.branch_id || ''))?.name || ''), customerName: String(customerById.get(String(quote.customer_id || ''))?.name || 'Cliente mostrador'), sellerName: String(profileById.get(String(quote.seller_uid || ''))?.display_name || profileById.get(String(quote.seller_uid || ''))?.email || ''), status: String(quote.status || ''), validUntil: String(quote.valid_until || ''), subtotal: number(quote.subtotal), taxAmount: number(quote.tax_amount), total: number(quote.total), currency: String(quote.currency || tenant.currency || 'NIO'), sentAt: String(quote.sent_at || ''), decidedAt: String(quote.decided_at || ''), presaleId: String(quote.converted_presale_id || ''), saleId: String(quote.converted_sale_id || ''), createdAt: String(quote.created_at || ''), items: Array.isArray(quote.quote_items) ? quote.quote_items : [], rejectionReason: String(quote.rejection_reason || ''),
+    }));
+    const salesByCustomer = new Map<string, Row[]>();
+    for (const sale of facts.sales) { const key = String(sale.customer_id || ''); if (key) salesByCustomer.set(key, [...(salesByCustomer.get(key) || []), sale]); }
+    const openQuoteByCustomer = new Map<string, Row>();
+    for (const quote of rawQuotes.filter((item) => ['sent','accepted'].includes(String(item.status)))) { const key = String(quote.customer_id || ''); if (key && (!openQuoteByCustomer.has(key) || String(quote.created_at) > String(openQuoteByCustomer.get(key)?.created_at))) openQuoteByCustomer.set(key, quote); }
+    const mappedCrmCustomers = crmCustomers.map((customer) => { const own = salesByCustomer.get(String(customer.id)) || []; const spend = own.reduce((sum, sale) => sum + number(sale.total), 0); const quote = openQuoteByCustomer.get(String(customer.id)); const quoteDays = quote ? Math.max(0, Math.floor((Date.now() - new Date(String(quote.sent_at || quote.created_at)).getTime()) / 86400000)) : null; const overdue = openDebts.filter((debt) => String(debt.customer_id) === String(customer.id) && debt.due_date && String(debt.due_date) < new Date().toISOString().slice(0,10)).length; const score = calculateCrmScore({ purchases: own.length, spend, lastQuoteDays: quoteDays, hasOpenQuote: Boolean(quote), overdue, contactComplete: Boolean(customer.email && customer.phone) }); const latest = own.map((sale) => String(sale.created_at || '')).sort().at(-1) || ''; const days = latest ? Math.max(0, Math.floor((Date.now() - new Date(latest).getTime()) / 86400000)) : null; const segment = spend >= 50000 ? 'VIP' : own.length >= 4 ? 'Recurrente' : days === null || days >= 90 ? 'Inactivo' : 'Ocasional'; return { id: String(customer.id), name: String(customer.name || ''), email: String(customer.email || ''), phone: String(customer.phone || ''), originChannel: String(customer.origin_channel || ''), active: customer.active !== false, segment, purchases: own.length, spend, lastPurchaseAt: latest, daysWithoutPurchase: days, score: score.total, scoreExplanation: crmScoreExplanation(score), createdAt: String(customer.created_at || '') }; });
+    const quoteStage = (status: string) => status === 'sent' ? 'Cotización enviada' : status === 'accepted' ? 'Negociación' : status === 'rejected' || status === 'expired' ? 'Cierre perdido' : '';
+    const mappedPipeline = [
+      ...rawLeads.map((lead) => ({ id: String(lead.id), source: 'Prospecto manual', stage: lead.stage === 'initial_contact' ? 'Contacto inicial' : 'Prospecto', name: String(lead.name || ''), branchName: String(branchById.get(String(lead.branch_id || ''))?.name || ''), customerName: String(customerById.get(String(lead.customer_id || ''))?.name || ''), ownerName: String(profileById.get(String(lead.owner_uid || ''))?.display_name || profileById.get(String(lead.owner_uid || ''))?.email || ''), value: number(lead.estimated_value), sourceChannel: String(lead.source || ''), updatedAt: String(lead.updated_at || '') })),
+      ...rawQuotes.filter((quote) => quoteStage(String(quote.status))).map((quote) => ({ id: String(quote.id), source: 'Cotización', stage: quoteStage(String(quote.status)), name: `Cotización #${quote.quote_number}`, branchName: String(branchById.get(String(quote.branch_id || ''))?.name || ''), customerName: String(customerById.get(String(quote.customer_id || ''))?.name || 'Cliente mostrador'), ownerName: String(profileById.get(String(quote.seller_uid || ''))?.display_name || profileById.get(String(quote.seller_uid || ''))?.email || ''), value: number(quote.total), sourceChannel: '', updatedAt: String(quote.updated_at || '') })),
+      ...rawPresales.filter((presale) => ['sent_to_cashier','paid','cancelled'].includes(String(presale.status))).map((presale) => { const metadata = record(presale.metadata); return { id: String(presale.id), source: 'Preventa', stage: presale.status === 'sent_to_cashier' ? 'En caja' : presale.status === 'paid' ? 'Cierre ganado' : 'Cierre perdido', name: String(presale.ticket_code || ''), branchName: String(branchById.get(String(presale.branch_id || ''))?.name || ''), customerName: String(customerById.get(String(metadata.customerId || ''))?.name || ''), ownerName: String(profileById.get(String(presale.seller_uid || ''))?.display_name || profileById.get(String(presale.seller_uid || ''))?.email || ''), value: number(presale.total), sourceChannel: '', updatedAt: String(presale.updated_at || '') }; }),
+    ];
+
     const exportQuota = await supabase.rpc('consume_financial_report_export', {
       target_tenant_id: context.tenantId,
       target_user_id: context.uid,
@@ -398,6 +432,9 @@ export async function GET(request: NextRequest) {
       presales: mappedPresales,
       expenses: mappedExpenses,
       returns: mappedReturns,
+      quotes: mappedQuotes,
+      pipeline: mappedPipeline,
+      crmCustomers: mappedCrmCustomers,
       quota: record(exportQuota.data),
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: unknown) {

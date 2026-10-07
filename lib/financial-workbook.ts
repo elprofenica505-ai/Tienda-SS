@@ -11,6 +11,9 @@ export type FinancialWorkbookData = {
   presales: Array<Record<string, any>>;
   expenses: Array<Record<string, any>>;
   returns: Array<Record<string, any>>;
+  quotes: Array<Record<string, any>>;
+  pipeline: Array<Record<string, any>>;
+  crmCustomers: Array<Record<string, any>>;
 };
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -140,6 +143,27 @@ function buildReturnsSheet(data: FinancialWorkbookData): WorkbookSheet {
   return { name: 'Devoluciones', rows, headerRow: 0 };
 }
 
+function buildQuotesSheet(data: FinancialWorkbookData): WorkbookSheet {
+  const rows: WorkbookCell[][] = [['Fecha', 'Cotización', 'Sucursal', 'Cliente', 'Vendedor', 'Estado', 'Válida hasta', 'Subtotal', 'Impuestos', 'Total', 'Moneda', 'Enviada', 'Decidida', 'Motivo de rechazo', 'Preventa vinculada', 'Venta vinculada', 'ID']];
+  for (const quote of data.quotes) rows.push([quote.createdAt || '', quote.quoteNumber || '', quote.branchName || '', quote.customerName || '', quote.sellerName || '', quote.status || '', quote.validUntil || '', Number(quote.subtotal || 0), Number(quote.taxAmount || 0), Number(quote.total || 0), quote.currency || data.tenant.currency, quote.sentAt || '', quote.decidedAt || '', quote.rejectionReason || '', quote.presaleId || '', quote.saleId || '', quote.id || '']);
+  return { name: 'Cotizaciones', rows, headerRow: 0 };
+}
+function buildQuotedProductsSheet(data: FinancialWorkbookData): WorkbookSheet {
+  const rows: WorkbookCell[][] = [['Cotización', 'Fecha', 'Sucursal', 'Cliente', 'Estado', 'Producto', 'SKU', 'Cantidad', 'Precio unitario', 'Impuesto', 'Subtotal de línea', 'Impuesto de línea', 'Total de línea', 'ID de producto', 'ID de cotización']];
+  for (const quote of data.quotes) for (const item of itemRows(quote.items)) rows.push([quote.quoteNumber || '', quote.createdAt || '', quote.branchName || '', quote.customerName || '', quote.status || '', item.description || '', item.sku || '', Number(item.quantity || 0), Number(item.unit_price || 0), Number(item.tax_rate || 0), Number(item.line_subtotal || 0), Number(item.line_tax || 0), Number(item.line_total || 0), item.product_id || '', quote.id || '']);
+  return { name: 'Productos cotizados', rows, headerRow: 0 };
+}
+function buildPipelineSheet(data: FinancialWorkbookData): WorkbookSheet {
+  const rows: WorkbookCell[][] = [['Actualizado', 'Etapa', 'Origen del dato', 'Oportunidad', 'Sucursal', 'Cliente', 'Responsable', 'Valor', 'Canal de origen', 'ID']];
+  for (const item of data.pipeline) rows.push([item.updatedAt || '', item.stage || '', item.source || '', item.name || '', item.branchName || '', item.customerName || '', item.ownerName || '', Number(item.value || 0), item.sourceChannel || '', item.id || '']);
+  return { name: 'Embudo CRM', rows, headerRow: 0 };
+}
+function buildCrmCustomersSheet(data: FinancialWorkbookData): WorkbookSheet {
+  const rows: WorkbookCell[][] = [['Cliente', 'Segmento', 'Compras del año', 'Monto comprado', 'Última compra', 'Días sin comprar', 'Puntuación', 'Explicación de puntos', 'Canal de origen', 'Teléfono', 'Correo', 'Activo', 'Fecha de alta', 'ID']];
+  for (const customer of data.crmCustomers) rows.push([customer.name || '', customer.segment || '', Number(customer.purchases || 0), Number(customer.spend || 0), customer.lastPurchaseAt || '', customer.daysWithoutPurchase ?? '', Number(customer.score || 0), customer.scoreExplanation || '', customer.originChannel || '', customer.phone || '', customer.email || '', customer.active === true ? 'Sí' : 'No', customer.createdAt || '', customer.id || '']);
+  return { name: 'Clientes CRM', rows, headerRow: 0 };
+}
+
 function dailyEventRows(date: string, data: FinancialWorkbookData): WorkbookCell[][] {
   const rows: WorkbookCell[][] = [
     [`Actividad del ${date}`],
@@ -198,7 +222,7 @@ export function buildFinancialWorkbookSheets(data: FinancialWorkbookData): Workb
     ['Devoluciones', Number(data.totals.returnsTotal || 0), data.tenant.currency],
     ['Ventas registradas', Number(data.totals.salesCount || 0), ''],
     [],
-    ['El archivo incluye hojas detalladas de Ventas, Caja, Preventas, Gastos y Devoluciones, además de una pestaña por cada día del período.'],
+    ['El archivo incluye Ventas, Caja, Preventas, Gastos, Devoluciones, Cotizaciones, Productos cotizados, Embudo CRM y Clientes CRM, además de una pestaña por día.'],
     ['Las hojas diarias usan la zona horaria de la empresa. La ganancia es una estimación: ventas netas menos costo registrado de productos.'],
   ];
   const summary: WorkbookSheet = { name: 'Resumen', rows: summaryRows, headerRow: 6, titleRows: [0] };
@@ -208,7 +232,7 @@ export function buildFinancialWorkbookSheets(data: FinancialWorkbookData): Workb
     headerRow: 8,
     titleRows: [0],
   }));
-  return [summary, buildSalesSheet(data), buildCashSheet(data), buildPresalesSheet(data), buildExpensesSheet(data), buildReturnsSheet(data), ...dailySheets];
+  return [summary, buildSalesSheet(data), buildCashSheet(data), buildPresalesSheet(data), buildExpensesSheet(data), buildReturnsSheet(data), buildQuotesSheet(data), buildQuotedProductsSheet(data), buildPipelineSheet(data), buildCrmCustomersSheet(data), ...dailySheets];
 }
 
 function crc32(bytes: Uint8Array): number {

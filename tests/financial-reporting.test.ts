@@ -29,6 +29,9 @@ function sampleWorkbookData(): FinancialWorkbookData {
     presales: [{ id: 'presale-1', ticketCode: 'P-0001', total: 120, status: 'paid', sellerName: 'Ana', sellerEmail: 'ana@example.test', customerName: 'Cliente', branchName: 'Principal', saleNumber: 'F-0001', createdAt, businessDate, metadata: { suggestedPayment: 'cash', documentType: 'ticket', notes: 'Sin azúcar' }, items: [{ name: 'Café', sku: 'CF-1', quantity: 2, unitPrice: 60, total: 120 }] }],
     expenses: [{ id: 'expense-1', description: 'Limpieza', category: 'General', amount: 15, paymentMethod: 'cash', userName: 'Luis', branchName: 'Principal', createdAt, businessDate }],
     returns: [],
+    quotes: [{ id: 'quote-1', quoteNumber: 1, branchName: 'Principal', customerName: 'Cliente', sellerName: 'Ana', status: 'sent', validUntil: businessDate, subtotal: 100, taxAmount: 20, total: 120, currency: 'NIO', createdAt, items: [{ product_id: 'product-1', description: 'Café', sku: 'CF-1', quantity: 2, unit_price: 50, line_subtotal: 100, line_tax: 20, line_total: 120 }] }],
+    pipeline: [{ id: 'quote-1', stage: 'Cotización enviada', source: 'Cotización', name: 'Cotización #1', branchName: 'Principal', customerName: 'Cliente', ownerName: 'Ana', value: 120, updatedAt: createdAt }],
+    crmCustomers: [{ id: 'customer-1', name: 'Cliente', segment: 'Recurrente', purchases: 4, spend: 120, lastPurchaseAt: createdAt, daysWithoutPurchase: 0, score: 48, scoreExplanation: 'Compró 4 veces este año (+30)', active: true, createdAt }],
   };
 }
 
@@ -94,8 +97,8 @@ test('financial summary accounts for returns, returned item cost, expenses and m
 test('master workbook includes dedicated Ventas, Caja, Preventas sheets and all 365 daily tabs', async () => {
   const data = sampleWorkbookData();
   const sheets = buildFinancialWorkbookSheets(data);
-  assert.equal(sheets.length, 371);
-  assert.deepEqual(sheets.slice(0, 6).map((sheet) => sheet.name), ['Resumen', 'Ventas', 'Caja', 'Preventas', 'Gastos', 'Devoluciones']);
+  assert.equal(sheets.length, 375);
+  assert.deepEqual(sheets.slice(0, 10).map((sheet) => sheet.name), ['Resumen', 'Ventas', 'Caja', 'Preventas', 'Gastos', 'Devoluciones', 'Cotizaciones', 'Productos cotizados', 'Embudo CRM', 'Clientes CRM']);
   assert.equal(sheets.at(-1)?.name, data.period.toDate);
   assert.equal(sheets.at(-1)?.rows[8][0], 'Tipo');
 
@@ -108,6 +111,10 @@ test('master workbook includes dedicated Ventas, Caja, Preventas sheets and all 
   assert.match(workbookXml, /name="Ventas"/);
   assert.match(workbookXml, /name="Caja"/);
   assert.match(workbookXml, /name="Preventas"/);
+  assert.match(workbookXml, /name="Cotizaciones"/);
+  assert.match(workbookXml, /name="Productos cotizados"/);
+  assert.match(workbookXml, /name="Embudo CRM"/);
+  assert.match(workbookXml, /name="Clientes CRM"/);
   assert.match(workbookXml, new RegExp(`name="${data.period.toDate}"`));
   assert.match(entries.get('xl/worksheets/sheet4.xml') || '', /P-0001/);
 });
