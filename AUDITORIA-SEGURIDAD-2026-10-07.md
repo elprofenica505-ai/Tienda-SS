@@ -155,7 +155,20 @@ PostgREST compone filtros con una sintaxis propia que usa `,` `.` `(` `)` `!`. S
 | L4 | CI ejecutaba `npm audit --omit=dev --audit-level=critical`. | **Corregido:** ahora es `--audit-level=high`, así que habría detectado M3 automáticamente. |
 | L5 | La política de MFA administrativo está desactivada por defecto. | Recomendado activarla (ver §5). Documentado en `.env.example`. |
 
-### 🟢 Verificación adicional: capa de funciones RPC (sin hallazgos)
+### 🟢 Verificación adicional: capa de funciones RPC
+
+> **Nota posterior:** al preparar el SQL para producción se detectó y corrigió un fallo **en la propia migración 2** de esta auditoría. Se documenta aquí por transparencia.
+>
+> La versión inicial usaba `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS ...`, que es un **NO-OP silencioso**. Según la documentación de PostgreSQL, los privilegios por defecto por esquema se **suman** a los globales y *"no se puede revocar un privilegio por esquema si fue otorgado globalmente; el REVOKE por esquema sólo revierte un GRANT previo por esquema"*. Como el `EXECUTE` a `PUBLIC` es un valor global incorporado de PostgreSQL, esa sentencia no habría hecho nada, dando una falsa sensación de seguridad.
+>
+> **Corregido:** se usa la forma global (sin `IN SCHEMA`), envuelta en un bloque que tolera `insufficient_privilege` para no romper la migración donde el rol no pueda alterar esos valores. Además, ahora se **otorga `EXECUTE` a `service_role` ANTES de revocar**, garantizando el acceso del backend.
+>
+> Se verificaron tres cosas antes de dar el visto bueno:
+> 1. **11 funciones** no tenían `grant execute ... to service_role` (helpers de RLS, funciones de trigger y funciones internas). Se comprobó que **ninguna se invoca por RPC desde la aplicación** (0 llamadas), y el `GRANT` global las cubre.
+> 2. **El propietario de una función conserva siempre `EXECUTE`**: el ACL por defecto es `{propietario=X/propietario, =X/propietario}`, así que revocar de `PUBLIC` no elimina su entrada. Las llamadas internas de funciones `security definer` (`erp_normalize_items`, `erp_server_price_items`) siguen funcionando.
+> 3. **Las funciones de trigger son seguras**: PostgreSQL sólo comprueba `EXECUTE` al **crear** el trigger, no en tiempo de ejecución, así que los triggers existentes (`inventory_movement_immutable_guard`, `inventory_movement_kardex_guard`, `enforce_receivable_credit_limit`) no se ven afectados.
+>
+> Ambas lecciones quedaron blindadas con pruebas: una falla si reaparece el patrón `IN SCHEMA ... REVOKE EXECUTE ON FUNCTIONS`, y otra exige que el `GRANT` a `service_role` preceda al `REVOKE`.
 
 Se auditaron las **66 funciones** del esquema `public` y se confirmó que **las 66** tienen su `revoke all on function ... from public, anon, authenticated`. Esto es importante porque en PostgreSQL `create function` concede `EXECUTE` a `PUBLIC` por defecto, y `anon`/`authenticated` heredan de `PUBLIC`: cualquier función `security definer` sin revocar sería invocable sin autenticación desde `POST /rest/v1/rpc/<funcion>`.
 
@@ -272,8 +285,9 @@ Abre la aplicación y prueba: iniciar sesión, ver el catálogo, cobrar una vent
 | Archivo | Cambio |
 |---|---|
 | `supabase/migrations/20261008000001_close_rls_gap_exposed_business_tables.sql` | **NUEVO** — cierra el fallo crítico C1 |
-| `supabase/migrations/20261008000002_harden_function_default_privileges.sql` | **NUEVO** — red de seguridad para funciones futuras |
-| `tests/rls-coverage.test.ts` | **NUEVO** — 5 pruebas de regresión (RLS, privilegios, funciones, vistas) |
+| `supabase/migrations/20261008000002_harden_function_default_privileges.sql` | **NUEVO** — red de seguridad para funciones futuras (corregido el NO-OP) |
+| `MIGRACION-SEGURIDAD-SUPABASE.sql` | **NUEVO** — los 2 pasos consolidados, listo para pegar en el SQL Editor de Supabase |
+| `tests/rls-coverage.test.ts` | **NUEVO** — 7 pruebas de regresión (RLS, privilegios, funciones, vistas, NO-OP) |
 | `lib/tenant.ts` | Validación del identificador de empresa exportada y reutilizable (M1) |
 | `lib/supabase/tenant-access.ts` | Usa la validación compartida (M1) |
 | `lib/repositories/organization-repository.ts` | `toTenantContext` devuelve siempre el UUID resuelto (M1) |
@@ -282,6 +296,6 @@ Abre la aplicación y prueba: iniciar sesión, ver el catálogo, cobrar una vent
 | `.env.example` | Documenta la recomendación de MFA administrativo (L5) |
 | `package.json` / `package-lock.json` | `npm audit fix`; nueva prueba añadida a `npm test` (M3) |
 
-**Estado final verificado:** `npm run typecheck` ✅ · `npm run lint` ✅ (0 errores) · `npm test` ✅ **362/362** · `npm run build` ✅ · `npm audit --omit=dev` ✅ **0 vulnerabilidades**
+**Estado final verificado:** `npm run typecheck` ✅ · `npm run lint` ✅ (0 errores) · `npm test` ✅ **364/364** · `npm run build` ✅ · `npm audit --omit=dev` ✅ **0 vulnerabilidades**
 
 > **Nota sobre "sin dañar lo ya funcional":** durante la implementación se intentó eliminar el dominio fijo de `middleware.ts` (hallazgo L3). La suite de pruebas lo detectó inmediatamente (`stage0-product-truth` exige ese respaldo), así que **se revirtió** y se dejó el comportamiento original intacto. Todos los demás cambios se validaron con la suite completa.
