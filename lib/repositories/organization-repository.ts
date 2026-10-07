@@ -203,5 +203,9 @@ export async function upsertMemberBranches(tenantId: string, authUserId: string,
 
 export function toTenantContext(tenantId: string, authUserId: string, membership: Awaited<ReturnType<typeof findMembership>>) {
   if (!membership) throw new Error('FORBIDDEN');
-  return { uid: authUserId, tenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, subscriptionStatus: undefined };
+  // Se usa SIEMPRE el UUID resuelto de la empresa, nunca el valor crudo que envió
+  // el cliente: el encabezado puede traer un identificador heredado de Firestore
+  // y no debe propagarse a las consultas ni a los RPC.
+  const resolvedTenantId = String(membership.tenant.id);
+  return { uid: authUserId, tenantId: resolvedTenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, subscriptionStatus: undefined };
 }

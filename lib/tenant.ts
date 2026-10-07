@@ -20,7 +20,29 @@ export interface TenantContext {
   subscriptionStatus?: string;
 }
 
-const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/**
+ * Formato permitido para el identificador de empresa que llega desde el cliente
+ * en el encabezado `x-tenant-id`.
+ *
+ * Es una defensa en profundidad: el valor se interpola en filtros de PostgREST
+ * (`.or(`id.eq.${tenantId},legacy_firestore_id.eq.${tenantId}`)`). PostgREST usa
+ * una sintaxis propia con `,` `.` `(` `)` `!` `*` `:` para componer filtros, así
+ * que aceptar esos caracteres sería una inyección de filtros (equivalente a una
+ * inyección SQL en cuanto a efecto). El patrón admite UUID y los identificadores
+ * heredados de Firestore, pero rechaza toda la sintaxis de filtros.
+ */
+export const TENANT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+export function isValidTenantId(value: unknown): value is string {
+  return typeof value === 'string' && TENANT_ID_PATTERN.test(value);
+}
+
+/** Lee y valida el encabezado `x-tenant-id`. Devuelve null si falta o es inválido. */
+export function readTenantIdFromHeaders(headers: { get(name: string): string | null }): string | null {
+  const value = headers.get('x-tenant-id')?.trim();
+  return isValidTenantId(value) ? value : null;
+}
+
 const TENANT_ROLES: readonly TenantRole[] = ['owner', 'admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
 
 function isTenantRole(value: unknown): value is TenantRole { return typeof value === 'string' && TENANT_ROLES.includes(value as TenantRole); }
@@ -31,8 +53,8 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
   if (!token) throw new Error('UNAUTHENTICATED');
   const auth = await getSupabaseServer().auth.getUser(token);
   if (auth.error || !auth.data.user) throw new Error('UNAUTHENTICATED');
-  const requestedTenant = request.headers.get('x-tenant-id')?.trim();
-  if (!requestedTenant || !TENANT_ID_PATTERN.test(requestedTenant)) throw new Error('TENANT_REQUIRED');
+  const requestedTenant = readTenantIdFromHeaders(request.headers);
+  if (!requestedTenant) throw new Error('TENANT_REQUIRED');
   const membership = await findMembership(requestedTenant, auth.data.user.id);
   if (!membership || membership.tenant.status !== 'active') throw new Error('FORBIDDEN');
   const roleValue = membership.member.role;

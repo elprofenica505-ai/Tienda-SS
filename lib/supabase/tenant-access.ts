@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { assertTokenSessionPolicy } from '@/lib/auth-policy';
+import { readTenantIdFromHeaders } from '@/lib/tenant';
 import { consumeDistributedRateLimits, getClientAddress } from '@/lib/rate-limit';
 import { normalizePermissions } from '@/lib/permissions';
 import type { PermissionAction, PermissionModule } from '@/lib/permissions';
@@ -18,7 +19,7 @@ export async function requireSupabaseTenantPermission(request: NextRequest, modu
   } catch {
     throw new Error('UNAUTHENTICATED');
   }
-  const tenantId = request.headers.get('x-tenant-id')?.trim();
+  const tenantId = readTenantIdFromHeaders(request.headers);
   if (!tenantId) throw new Error('TENANT_REQUIRED');
   const membership = await findMembership(tenantId, user.id);
   const context = toTenantContext(tenantId, user.id, membership);

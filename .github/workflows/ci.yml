@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Dependency review
-        run: npm audit --omit=dev --audit-level=critical
+        run: npm audit --omit=dev --audit-level=high
 
   quality:
     runs-on: ubuntu-latest
@@ -57,7 +57,7 @@ jobs:
         # Playwright is development-only tooling. The gate
         # blocks critical vulnerabilities in packages shipped to production;
         # non-critical advisories remain visible in the audit output for review.
-        run: npm audit --omit=dev --audit-level=critical
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Generate SBOM
         run: npm sbom --sbom-format cyclonedx --sbom-type application > sbom.cdx.json
