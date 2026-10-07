@@ -44,10 +44,13 @@ const base = baseRules(css);
 /** Collects the literal class names written in JSX, ignoring interpolated fragments. */
 function classNames(source: string): string[] {
   const names = new Set<string>();
-  for (const match of source.matchAll(/className=\{?["`]([^"`]+)/g)) {
+  const pattern = /className=\{?["`]([^"`]+)/g;
+  let match = pattern.exec(source);
+  while (match) {
     for (const word of match[1].split(/\s+/)) {
       if (word && !word.includes('{') && !word.includes('$')) names.add(word);
     }
+    match = pattern.exec(source);
   }
   return Array.from(names);
 }
