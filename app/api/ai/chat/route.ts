@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSystemPrompt, getTenantContextForAI } from '@/lib/ai/context';
 import { decryptApiKey } from '@/lib/ai/encryption';
-import { callGemini, GeminiCallError } from '@/lib/ai/gemini';
+import { callGemini, GeminiCallError, resolveGeminiModel } from '@/lib/ai/gemini';
 import { aiErrorResponse, aiJsonBody, noStoreJson, requireAiManager } from '@/lib/ai/route-utils';
 import {
   freeAiQuota,
@@ -65,8 +65,16 @@ function geminiFailure(error: GeminiCallError, usingOwnKey: boolean, quota: AiQu
   if (error.code === 'API_KEY_INVALID') {
     return noStoreJson({
       error: usingOwnKey
-        ? 'Tu API Key de Gemini no es válida o no tiene acceso al modelo. Revísala en Configuración IA.'
-        : 'La API Key de Gemini configurada en el servidor no es válida. Configura GEMINI_API_KEY en Vercel o agrega tu propia key.',
+        ? 'Tu API Key de Gemini no es válida o no tiene acceso al modelo. Tu consulta no fue descontada; revísala en Configuración IA.'
+        : 'La API Key de Gemini configurada en el servidor no es válida. Tu consulta no fue descontada. Configura GEMINI_API_KEY en Vercel o agrega tu propia key.',
+      code: error.code,
+      quota,
+      usingOwnKey,
+    }, 503);
+  }
+  if (error.code === 'MODEL_NOT_FOUND') {
+    return noStoreJson({
+      error: 'El modelo de Gemini configurado ya no está disponible. Define GEMINI_MODEL en Vercel con un modelo vigente (por ejemplo gemini-3.1-flash-lite). Tu consulta no fue descontada.',
       code: error.code,
       quota,
       usingOwnKey,
@@ -84,6 +92,7 @@ export async function POST(request: NextRequest) {
   let reservedTenantId = '';
   let quota: AiQuota | null = null;
   let usingOwnKey = false;
+  const model = resolveGeminiModel();
 
   try {
     const context = await requireAiManager(request);
@@ -137,6 +146,7 @@ export async function POST(request: NextRequest) {
       systemInstruction: buildSystemPrompt(businessContext, config),
       history,
       message,
+      model,
     });
     geminiCompleted = true;
 
@@ -151,7 +161,7 @@ export async function POST(request: NextRequest) {
         content: response,
         metadata: {
           provider: 'gemini',
-          model: 'gemini-1.5-flash',
+          model,
           keyMode: usingOwnKey ? 'byok' : 'system',
         },
       });
