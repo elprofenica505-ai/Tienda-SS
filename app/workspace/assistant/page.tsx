@@ -1,11 +1,15 @@
 'use client';
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { AssistantVisuals } from '@/components/assistant/AssistantVisuals';
 import { useTenant } from '@/components/tenant/TenantProvider';
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
+import type { AssistantVisual } from '@/lib/ai/visuals';
+import { formatMoney } from '@/lib/currency';
 
 const MANAGER_ROLES = new Set(['owner', 'admin', 'gerente', 'jefe']);
 const NO_API_KEY_MESSAGE = 'No hay API Key configurada. Agrega tu propia key en Configuración IA o configura GEMINI_API_KEY en Vercel.';
+const WORD_EXPORT_MESSAGE = 'Informe Word descargado con los datos reales de los últimos 30 días. No consume consultas de Conexia ni la cuota de exportaciones.';
 
 const suggestions = [
   '¿Cuánto vendí hoy?',
@@ -20,6 +24,15 @@ type Message = {
   content: string;
   createdAt?: string;
   error?: boolean;
+  visual?: AssistantVisual | null;
+};
+
+type ReportsPayload = {
+  period?: { days: number; from: string; to: string; timeZone?: string; fromTime?: string; toTime?: string };
+  summary?: Record<string, number | null>;
+  daily?: Array<Record<string, number | string>>;
+  topProducts?: Array<{ name: string; quantity: number; revenue: number }>;
+  paymentMethods?: Array<{ method: string; total: number }>;
 };
 
 type Quota = {
@@ -65,6 +78,90 @@ function defaultDraft(): ConfigDraft {
   return { personality: 'conexia', dailyLimit: 20, enabled: true, customInstructions: '' };
 }
 
+function numberOr(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Tabla de Word: filas y celdas ya vienen formateadas y escapadas. */
+function wordTableHtml(title: string, columns: string[], rows: string[][]): string {
+  return `<h2>${escapeHtml(title)}</h2><table border="1" cellspacing="0" cellpadding="5" width="100%">`
+    + `<thead><tr>${columns.map((column) => `<th bgcolor="#eef4ea" align="left">${escapeHtml(column)}</th>`).join('')}</tr></thead>`
+    + `<tbody>${rows.length
+      ? rows.map((row) => `<tr>${row.map((cell, index) => `<td align="${index === 0 ? 'left' : 'right'}">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
+      : `<tr><td colspan="${columns.length}">Sin registros en el período.</td></tr>`}</tbody></table>`;
+}
+
+/**
+ * Construye el informe .doc a partir del JSON real de /api/reports (mismo
+ * dataset que usa Reportes y el análisis de Conexia). No consume la cuota de
+ * exportaciones: es una descarga generada en el navegador.
+ */
+function buildWordReportHtml(payload: ReportsPayload, companyName: string, money: (value: number) => string): string {
+  const summary = payload.summary || {};
+  const asMoney = (value: unknown) => money(numberOr(value));
+  const costCoverage = summary.costCoverage;
+  const summaryRows: string[][] = [
+    ['Ventas brutas', asMoney(summary.grossSales)],
+    ['Devoluciones', asMoney(summary.returns)],
+    ['Ventas netas', asMoney(summary.sales)],
+    ['Costo de mercadería (histórico)', asMoney(summary.costOfGoodsSold)],
+    ['Utilidad bruta', asMoney(summary.grossProfit)],
+    ['Gastos registrados', asMoney(summary.expenses)],
+    ['Utilidad neta', asMoney(summary.netProfit)],
+    ['Crédito otorgado', asMoney(summary.creditIssued)],
+    ['Crédito cobrado', asMoney(summary.creditCollected)],
+    ['Cartera abierta hoy', asMoney(summary.openCredit)],
+    ['Transacciones', String(numberOr(summary.salesCount))],
+    ['Ticket promedio', asMoney(summary.averageTicket)],
+    ['Cobertura de costo histórico', costCoverage === null || costCoverage === undefined ? 'No disponible' : `${numberOr(costCoverage).toFixed(1)}%`],
+  ];
+  const dailyRows = (payload.daily || []).map((row) => [
+    String(row.date ?? ''),
+    asMoney(row.grossSales),
+    asMoney(row.returns),
+    asMoney(row.sales),
+    asMoney(row.costOfGoodsSold),
+    asMoney(row.grossProfit),
+    asMoney(row.expenses),
+    asMoney(row.netProfit),
+    String(numberOr(row.salesCount)),
+  ]);
+  const productRows = (payload.topProducts || []).map((item, index) => [
+    `${index + 1}. ${item.name}`,
+    String(numberOr(item.quantity)),
+    money(numberOr(item.revenue)),
+  ]);
+  const paymentRows = (payload.paymentMethods || []).map((item) => [item.method, money(numberOr(item.total))]);
+  const period = payload.period;
+  const periodLine = period
+    ? `Período: ${escapeHtml(period.from)} a ${escapeHtml(period.to)} (${escapeHtml(period.timeZone || 'America/Managua')}, ${period.days} días)`
+    : 'Período: últimos 30 días';
+
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>Informe administrativo de ${escapeHtml(companyName)}</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;font-size:11pt;color:#1f2d22}h1{font-size:18pt;margin:0 0 4px}h2{font-size:13pt;margin:18px 0 6px}table{border-collapse:collapse;font-size:9.5pt}th,td{border:1px solid #cfdcc9;padding:4px 6px}p{margin:4px 0}small{color:#5b6b5f}</style>
+</head>
+<body>
+<h1>${escapeHtml(companyName)} — Informe administrativo</h1>
+<p>${periodLine}</p>
+<p><small>Generado por Conexia IA el ${escapeHtml(new Date().toLocaleString('es-NI', { timeZone: period?.timeZone || 'America/Managua' }))} con los registros reales de ConexiaX. Orientación operativa, no asesoría contable ni tributaria.</small></p>
+${wordTableHtml('Resumen del período', ['Concepto', 'Valor'], summaryRows)}
+${wordTableHtml('Detalle diario', ['Fecha', 'Ventas brutas', 'Devoluciones', 'Ventas netas', 'Costo', 'Utilidad bruta', 'Gastos', 'Utilidad neta', 'Transacciones'], dailyRows)}
+${wordTableHtml('Top productos por ingreso', ['Producto', 'Unidades', 'Ingreso'], productRows)}
+${wordTableHtml('Ingresos por método de pago', ['Método', 'Total'], paymentRows)}
+</body></html>`;
+}
+
 function quotaLabel(quota: Quota | null) {
   if (!quota) return 'Cargando cuota…';
   if (quota.unlimited) return 'Tu API Key · Sin límite';
@@ -93,9 +190,12 @@ function AssistantPageContent() {
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const isManager = Boolean(member && MANAGER_ROLES.has(member.role));
+  /** Montos siempre en la moneda y el idioma de la empresa. */
+  const money = (value: number) => formatMoney(value, tenant?.currency, tenant?.locale);
 
   const load = useCallback(async () => {
     if (!authUser || !tenant || !isManager) {
@@ -199,6 +299,8 @@ function AssistantPageContent() {
         role: 'assistant',
         content: typeof data.response === 'string' ? data.response : 'Conexia no recibió una respuesta utilizable.',
         createdAt: data.assistant?.createdAt,
+        // Las gráficas vienen calculadas en el servidor con el dataset real de 30 días.
+        visual: (data.visual as AssistantVisual | null) || null,
       }]);
       if (typeof data.usingOwnKey === 'boolean' && config) setConfig({ ...config, usingOwnKey: data.usingOwnKey });
     } catch (error) {
@@ -249,6 +351,40 @@ function AssistantPageContent() {
       setNotice(error instanceof Error ? error.message : 'No se pudo guardar la configuración.');
     } finally {
       setSavingConfig(false);
+    }
+  }
+
+  /**
+   * Informe Word con datos reales de 30 días. Lee /api/reports (el mismo
+   * endpoint que alimenta Reportes) y arma el .doc en el navegador: no gasta
+   * consultas de Gemini ni la cuota de exportaciones.
+   */
+  async function exportToWord() {
+    if (!authUser || !tenant || exportingWord) return;
+    setExportingWord(true);
+    setNotice('');
+    try {
+      const response = await fetch('/api/reports?days=30', {
+        headers: { Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id },
+        cache: 'no-store',
+      });
+      const data: (ReportsPayload & { error?: string }) = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'No se pudo leer la información del informe.');
+      const html = buildWordReportHtml(data, tenant.name, money);
+      const blob = new Blob([`\ufeff${html}`], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `informe-30-dias-${data.period?.to || new Date().toISOString().slice(0, 10)}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      setNotice(WORD_EXPORT_MESSAGE);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'No se pudo generar el informe Word.');
+    } finally {
+      setExportingWord(false);
     }
   }
 
@@ -313,6 +449,15 @@ function AssistantPageContent() {
           </div>
           <div className="assistant-header-actions">
             <span className={`assistant-quota-badge${quota?.unlimited ? ' own-key' : ''}`} aria-label={quotaLabel(quota)}>{quotaLabel(quota)}</span>
+            <button
+              className="button button-secondary assistant-word-button"
+              type="button"
+              onClick={() => void exportToWord()}
+              disabled={exportingWord || !online}
+              title="Descarga un informe .doc con los datos reales de los últimos 30 días"
+            >
+              {exportingWord ? 'Generando informe…' : '⬇ Informe Word'}
+            </button>
             <button className="button button-secondary assistant-config-button" type="button" onClick={openConfig}>⚙ Configuración IA</button>
           </div>
         </header>
@@ -339,6 +484,7 @@ function AssistantPageContent() {
                 <article className="assistant-bubble">
                   <small>{message.role === 'user' ? 'Tú' : 'Conexia'}</small>
                   <p>{message.content}</p>
+                  {message.role === 'assistant' && message.visual && <AssistantVisuals visual={message.visual} money={money} />}
                 </article>
                 {message.role === 'user' && <div className="assistant-user-avatar" aria-hidden="true">Tú</div>}
               </div>
