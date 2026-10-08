@@ -166,6 +166,16 @@ test('el Excel maestro exige permiso de exportar igual que la exportación de re
   assert.deepEqual(getApiPolicy('/api/reports/consolidated', 'GET'), { module: 'reports', action: 'view' });
 });
 
+test('Conexia IA está registrada bajo dashboard para que sus handlers apliquen la restricción de dueño', () => {
+  assert.deepEqual(getApiPolicy('/api/ai/chat', 'GET'), { module: 'dashboard', action: 'view' });
+  assert.deepEqual(getApiPolicy('/api/ai/config', 'POST'), { module: 'dashboard', action: 'create' });
+  const response = middleware(request('/api/ai/history', 'GET', {
+    Authorization: 'Bearer test-token',
+    'x-tenant-id': 'tenant-a',
+  }));
+  assert.equal(response.status, 200);
+});
+
 test('las rutas realmente inexistentes siguen devolviendo 403', async () => {
   for (const path of ['/api/not-registered', '/api/cash-sessions-fake', '/api/reportes']) {
     assert.equal(getApiPolicy(path, 'GET'), null, `${path} no debe tener política`);
