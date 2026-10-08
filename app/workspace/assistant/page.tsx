@@ -280,7 +280,7 @@ function AssistantPageContent() {
 
   if (!isManager) {
     return (
-      <main className="workspace-page">
+      <main className="workspace-page assistant-shell">
         <WorkspaceSidebar />
         <section className="workspace-main assistant-main">
           <div className="assistant-restricted" role="alert">
@@ -299,7 +299,7 @@ function AssistantPageContent() {
   const quotaExhausted = Boolean(!quota?.unlimited && quota?.remaining !== null && quota && quota.remaining <= 0);
 
   return (
-    <main className="workspace-page">
+    <main className="workspace-page assistant-shell">
       <WorkspaceSidebar />
       <section className="workspace-main assistant-main">
         <header className="assistant-header">
