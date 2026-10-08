@@ -48,6 +48,10 @@ const routePolicies: Array<{ pattern: RegExp; policy: ApiPolicy }> = [
   { pattern: /^\/api\/payables(?:\/.*)?$/, policy: { module: 'finance', action: 'view' } },
   { pattern: /^\/api\/(?:members|usuarios)(?:\/.*)?$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/notifications(?:\/.*)?$/, policy: { module: 'dashboard', action: 'view' } },
+  // Conexia IA aplica además una validación estricta de owner/admin/gerente/jefe
+  // dentro de sus handlers. Esta política evita que el middleware la descarte
+  // antes de que pueda devolver el mensaje de acceso restringido apropiado.
+  { pattern: /^\/api\/ai(?:\/.*)?$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/daily-summaries(?:\/.*)?$/, policy: { module: 'dashboard', action: 'view' } },
   { pattern: /^\/api\/permissions(?:\/.*)?$/, policy: { module: 'members', action: 'view' } },
   { pattern: /^\/api\/receivables(?:\/.*)?$/, policy: { module: 'receivables', action: 'view' } },

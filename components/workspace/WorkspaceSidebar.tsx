@@ -32,6 +32,10 @@ const controlItems: NavItem[] = [
   { href: '/workspace/daily-summary', icon: '✦', label: 'Resumen diario' },
 ];
 
+const intelligenceItems: NavItem[] = [
+  { href: '/workspace/assistant', icon: '✦', label: 'Conexia IA' },
+];
+
 const companyItems: NavItem[] = [
   { href: '/workspace/organization', icon: '⌂', label: 'Sucursales y cajas' },
   { href: '/workspace/members', icon: '♙', label: 'Usuarios y permisos' },
@@ -169,6 +173,7 @@ export function WorkspaceSidebar() {
       <div id="workspace-navigation" className="workspace-navigation">
         <NavigationGroup label="Operación" items={operationItems} pathname={pathname} onNavigate={closeMobileMenu} activeAlertCount={activeAlertCount} />
         <NavigationGroup label="Control" items={visibleControlItems} pathname={pathname} onNavigate={closeMobileMenu} activeAlertCount={activeAlertCount} />
+        {isManager && <NavigationGroup label="Inteligencia" items={intelligenceItems} pathname={pathname} onNavigate={closeMobileMenu} activeAlertCount={activeAlertCount} />}
         <NavigationGroup label="Empresa" items={companyItems} pathname={pathname} onNavigate={closeMobileMenu} activeAlertCount={activeAlertCount} />
         <div className="workspace-sidebar-bottom">
           <button type="button" onClick={() => void cerrarSesion()}>
