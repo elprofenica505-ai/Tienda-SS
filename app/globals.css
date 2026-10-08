@@ -1038,6 +1038,7 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .assistant-heading p{color:#728076;font-size:13px;line-height:1.55;margin:0;max-width:650px}
 .assistant-header-actions{align-items:center;display:flex;flex-wrap:wrap;gap:9px;justify-content:flex-end}
 .assistant-config-button{gap:7px;white-space:nowrap}
+.assistant-word-button{white-space:nowrap}
 .assistant-avatar{align-items:center;background:linear-gradient(145deg,#183d29,#255b3c);border:3px solid #e8f4dc;border-radius:15px;box-shadow:0 9px 23px rgba(31,83,49,.18);color:#d5fb8e;display:flex;flex:0 0 auto;font-size:20px;font-weight:900;height:51px;justify-content:center;letter-spacing:-1px;width:51px}
 .assistant-avatar-large{border-radius:22px;font-size:45px;height:92px;width:92px}
 .assistant-message-avatar{border-width:2px;border-radius:11px;font-size:14px;height:36px;margin-top:4px;width:36px}
@@ -1112,6 +1113,32 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .assistant-enabled-toggle{align-items:center;color:#466649;display:flex;font-size:11px;font-weight:800;gap:7px;white-space:nowrap}.assistant-enabled-toggle input{accent-color:#588d3a;height:16px;width:16px}
 .assistant-ai-studio-help{background:#fff;border:1px dashed #c7dec0;border-radius:11px;color:#647267;display:grid;gap:9px;padding:13px}.assistant-ai-studio-help .button{font-size:11px;justify-self:start;padding:9px 12px}.assistant-ai-studio-help ol{display:grid;font-size:11px;gap:3px;margin:0;padding-left:20px}.assistant-ai-studio-help p{color:#426348;font-size:11px;font-weight:700;line-height:1.45;margin:0}.assistant-ai-studio-help small{color:#7d8980;font-size:10px;line-height:1.45}
 .assistant-config-actions{align-items:center;border-top:1px solid #e6ede4;display:flex;justify-content:space-between;padding-top:17px}.assistant-config-actions>div{display:flex;gap:8px}.assistant-config-actions .button{font-size:11px;padding:10px 13px}.assistant-config-actions .text-link{background:transparent;border:0;cursor:pointer;padding:8px}.assistant-config-actions .text-link:disabled{cursor:not-allowed;opacity:.55}
+/* Conexia IA — gráficas y cuadros comparativos con datos reales */
+.assistant-visuals{display:grid;gap:12px;margin-top:13px}
+.viz-block{background:#fff;border:1px solid #dfe9dc;border-radius:14px;display:grid;gap:10px;padding:13px}
+.viz-title{align-items:center;color:#2c4634;display:flex;font-size:11px;font-weight:800;gap:6px;letter-spacing:.3px;margin:0;text-transform:uppercase}
+.viz-bars{display:grid;gap:7px}
+.viz-bar-row{align-items:center;display:grid;gap:8px;grid-template-columns:54px minmax(60px,1fr) auto}
+.viz-bar-label{color:#5f6f63;font-size:10px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.viz-bar-track{background:#eef3ec;border-radius:999px;height:9px;overflow:hidden}
+.viz-bar-fill{background:linear-gradient(90deg,#8fc465,#4b8c3f);border-radius:999px;display:block;height:100%;min-width:2px}
+.viz-bar-value{color:#2c4634;font-size:10px;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.viz-pie{align-items:center;display:flex;flex-wrap:wrap;gap:14px}
+.viz-pie-chart{border:5px solid #fff;border-radius:50%;box-shadow:0 6px 16px rgba(28,58,34,.14);flex:0 0 auto;height:112px;width:112px}
+.viz-legend{display:grid;flex:1;gap:6px;list-style:none;margin:0;min-width:170px;padding:0}
+.viz-legend-item{align-items:center;display:grid;gap:7px;grid-template-columns:10px minmax(48px,1fr) auto;font-size:10px}
+.viz-legend-dot{border-radius:3px;height:10px;width:10px}
+.viz-legend-label{color:#55655a;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.viz-legend-value{color:#2c4634;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.viz-table-scroll{overflow-x:auto}
+.viz-table{border-collapse:collapse;font-size:10px;width:100%}
+.viz-table th,.viz-table td{border-bottom:1px solid #e8efe6;padding:7px 8px;text-align:left;vertical-align:top}
+.viz-table th{background:#f4f8f2;color:#43614a;font-size:9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap}
+.viz-table td{color:#3a4c3f}
+.viz-table tbody tr:last-child td{border-bottom:0}
+.viz-table td + td,.viz-table th + th{text-align:right}
+.viz-table td.viz-cell-money{font-variant-numeric:tabular-nums;font-weight:700;text-align:right;white-space:nowrap}
+.viz-table td:first-child{font-weight:700}
 @media(max-width:820px){.assistant-header{align-items:stretch;flex-direction:column}.assistant-header-actions{justify-content:flex-start}.assistant-chat-panel{min-height:calc(100vh - 330px)}.assistant-messages{max-height:calc(100vh - 430px)}}
 @media(max-width:720px){
 /* Conexia en móvil: nada se desborda y el editor queda siempre visible. */
@@ -1159,4 +1186,18 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .assistant-config-actions>div{display:grid;gap:8px;grid-template-columns:1fr 1fr}
 .assistant-config-actions .button{font-size:12px;padding:11px 12px}
 .assistant-config-actions .text-link{text-align:left}
+/* Gráficas y cuadros de Conexia en móvil: se apilan y no desbordan. */
+.assistant-visuals{gap:10px;margin-top:11px}
+.viz-block{border-radius:12px;padding:11px}
+.viz-bars{gap:6px}
+.viz-bar-row{gap:6px;grid-template-columns:44px minmax(48px,1fr) auto}
+.viz-bar-label,.viz-bar-value{font-size:9px}
+.viz-pie{align-items:flex-start;flex-direction:column;gap:11px}
+.viz-pie-chart{height:94px;width:94px}
+.viz-legend{min-width:0;width:100%}
+.viz-legend-item{font-size:10px}
+.viz-table{font-size:10px}
+.viz-table th,.viz-table td{padding:6px 7px}
+.viz-table th{font-size:8px}
+.viz-legend-value{white-space:normal}
 }

@@ -3,6 +3,7 @@ import { buildSystemPrompt, getTenantContextForAI } from '@/lib/ai/context';
 import { decryptApiKey } from '@/lib/ai/encryption';
 import { callGemini, GeminiCallError, resolveGeminiModel } from '@/lib/ai/gemini';
 import { aiErrorResponse, aiJsonBody, noStoreJson, requireAiManager } from '@/lib/ai/route-utils';
+import { buildAssistantVisuals } from '@/lib/ai/visuals';
 import {
   freeAiQuota,
   getRecentAiHistory,
@@ -133,6 +134,8 @@ export async function POST(request: NextRequest) {
       getTenantContextForAI(context.tenantId, message),
       getRecentAiHistory(context.tenantId, 10),
     ]);
+    // Gráficas y cuadros construidos con el mismo dataset real que usa el prompt.
+    const visual = buildAssistantVisuals(businessContext);
     await saveAiHistoryMessage({
       tenantId: context.tenantId,
       userId: context.uid,
@@ -173,6 +176,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       response,
       assistant,
+      visual,
       quota: quota || unlimitedAiQuota(),
       usingOwnKey,
     });
