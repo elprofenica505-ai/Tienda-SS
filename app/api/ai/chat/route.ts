@@ -65,8 +65,8 @@ function geminiFailure(error: GeminiCallError, usingOwnKey: boolean, quota: AiQu
   if (error.code === 'API_KEY_INVALID') {
     return noStoreJson({
       error: usingOwnKey
-        ? 'Tu API Key de Gemini no es válida o no tiene acceso al modelo. Revísala en Configuración IA.'
-        : 'La API Key de Gemini configurada en el servidor no es válida. Configura GEMINI_API_KEY en Vercel o agrega tu propia key.',
+        ? 'Tu API Key de Gemini no es válida o no tiene acceso al modelo. Tu consulta no fue descontada; revísala en Configuración IA.'
+        : 'La API Key de Gemini configurada en el servidor no es válida. Tu consulta no fue descontada. Configura GEMINI_API_KEY en Vercel o agrega tu propia key.',
       code: error.code,
       quota,
       usingOwnKey,
