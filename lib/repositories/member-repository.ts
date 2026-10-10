@@ -69,15 +69,30 @@ export async function updateMember(tenantId: string, authUserId: string, changes
   return { before: current, after: result.data };
 }
 
+/**
+ * Reemplaza las sucursales asignadas a un miembro.
+ * La UI envía `legacy_firestore_id || id`: una sucursal creada directo en Supabase llega como uuid,
+ * así que cada referencia se resuelve contra ambas claves. Todo se valida antes de borrar nada.
+ */
 async function replaceBranchAssignments(tenantId: string, memberId: string, branchIds: string[]) {
   const supabase = getSupabaseServer();
-  const branches = await supabase.from('branches').select('id, legacy_firestore_id').eq('tenant_id', tenantId).in('legacy_firestore_id', branchIds);
+  const branches = await supabase.from('branches').select('id, legacy_firestore_id, active').eq('tenant_id', tenantId).eq('active', true);
   if (branches.error) fail(branches.error);
-  if ((branches.data || []).length !== branchIds.length) throw new Error('BRANCH_NOT_FOUND');
+  const byReference = new Map<string, string>();
+  for (const branch of branches.data || []) {
+    byReference.set(String(branch.id), String(branch.id));
+    if (branch.legacy_firestore_id) byReference.set(String(branch.legacy_firestore_id), String(branch.id));
+  }
+  const resolvedIds = new Set<string>();
+  for (const reference of branchIds) {
+    const branchId = byReference.get(reference);
+    if (!branchId) throw new Error('BRANCH_NOT_FOUND');
+    resolvedIds.add(branchId);
+  }
   const deleted = await supabase.from('member_branches').delete().eq('tenant_id', tenantId).eq('member_id', memberId);
   if (deleted.error) fail(deleted.error);
-  if (branches.data?.length) {
-    const inserted = await supabase.from('member_branches').insert(branches.data.map((branch) => ({ tenant_id: tenantId, member_id: memberId, branch_id: branch.id })));
+  if (resolvedIds.size) {
+    const inserted = await supabase.from('member_branches').insert(Array.from(resolvedIds).map((branchId) => ({ tenant_id: tenantId, member_id: memberId, branch_id: branchId })));
     if (inserted.error) fail(inserted.error);
   }
 }

@@ -22,6 +22,8 @@ export type FakeSupabase = {
   requests: Array<{ method: string; table: string; search: string }>;
   /** tablas que responden con error 500 para simular una falla de la base de datos */
   failTables: Set<string>;
+  /** respuesta de error literal por tabla (p. ej. PGRST205 cuando una tabla aún no está migrada) */
+  tableErrors: Record<string, { status: number; body: unknown }>;
   /** límite de filas por respuesta (como el "Max rows" de la API de Supabase); sin valor = sin límite */
   maxRows?: number;
   close: () => Promise<void>;
@@ -110,6 +112,7 @@ export async function startFakeSupabase(initial: { tables?: Record<string, FakeR
     rpcCalls: [],
     requests: [],
     failTables: new Set(),
+    tableErrors: {},
   };
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
@@ -152,6 +155,8 @@ export async function startFakeSupabase(initial: { tables?: Record<string, FakeR
     const table = tableMatch[1];
     state.requests.push({ method, table, search: url.search });
     if (state.failTables.has(table)) return send(500, { code: 'XX000', message: `fallo simulado en ${table}`, details: null, hint: null });
+    const tableError = state.tableErrors[table];
+    if (tableError) return send(tableError.status, tableError.body);
 
     const rows = state.tables[table] || (state.tables[table] = []);
     const wantsObject = String(request.headers.accept || '').includes('application/vnd.pgrst.object+json');
@@ -183,6 +188,11 @@ export async function startFakeSupabase(initial: { tables?: Record<string, FakeR
       const inserted = (Array.isArray(body) ? body : [body]) as FakeRow[];
       rows.push(...inserted);
       return wantsRepresentation ? reply(inserted) : send(201);
+    }
+    if (method === 'DELETE') {
+      const targets = filterRows(rows, url.searchParams).rows;
+      for (const row of targets) rows.splice(rows.indexOf(row), 1);
+      return wantsRepresentation ? reply(targets) : send(204);
     }
     return send(405, { message: `Método no soportado por el servidor simulado: ${method}` });
   }
