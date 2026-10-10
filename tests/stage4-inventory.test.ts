@@ -24,16 +24,27 @@ test('la API cubre recepción, transferencias, costos y conteos aprobables', () 
   assert.match(inventoryApi, /action === 'count'/);
   assert.match(inventoryApi, /action === 'approve-count'/);
   assert.match(inventoryApi, /adjust_inventory/);
-  assert.match(inventoryApi, /transferencias entre almacenes aún no están habilitadas/);
+  assert.doesNotMatch(inventoryApi, /aún no están habilitadas/, 'el bloqueo temporal de la Fase 1A ya no aplica');
 });
 
-test('las transferencias no ejecutan mutaciones no migradas', () => {
+test('las transferencias se ejecutan con las RPC atómicas de la Fase 1A', () => {
   assert.match(inventoryApi, /create-transfer/);
   assert.match(inventoryApi, /approve-transfer/);
   assert.match(inventoryApi, /dispatch-transfer/);
   assert.match(inventoryApi, /receive-transfer/);
   assert.match(inventoryApi, /cancel-transfer/);
-  assert.match(inventoryApi, /status: 409/);
+  for (const rpc of ['create_stock_transfer', 'approve_stock_transfer', 'dispatch_stock_transfer', 'receive_stock_transfer', 'cancel_stock_transfer']) {
+    assert.match(inventoryApi, new RegExp(rpc), `falta invocar la RPC ${rpc}`);
+  }
+  assert.match(inventoryApi, /transferErrorResponse/, 'los códigos de error del SQL se traducen a 400/404/409');
+  assert.match(inventoryApi, /writeImmutableAudit/);
+});
+
+test('la API expone el tránsito y las líneas de cada transferencia', () => {
+  assert.match(inventoryApi, /from\('stock_transfers'\)/);
+  assert.match(inventoryApi, /from\('stock_transfer_items'\)/);
+  assert.match(inventoryApi, /in_transit_quantity/);
+  assert.match(inventoryApi, /inTransitQuantity/);
 });
 
 test('las compras reciben en el stock canónico del almacén autorizado', () => {
@@ -61,6 +72,10 @@ test('la UI expone almacén activo, transferencia y conteo físico', () => {
   assert.match(inventoryPage, /Transferencias/);
   assert.match(inventoryPage, /approve-transfer/);
   assert.match(inventoryPage, /receive-transfer/);
+  assert.match(inventoryPage, /dispatch-transfer/);
+  assert.match(inventoryPage, /cancel-transfer/);
+  assert.match(inventoryPage, /transferItemId/, 'la recepción parcial se envía por línea');
+  assert.match(inventoryPage, /En tránsito/);
 });
 
 test('las colecciones de inventario tienen reglas sin borrado directo', () => {

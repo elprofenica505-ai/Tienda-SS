@@ -39,6 +39,8 @@ function responseFor(error: unknown) {
   if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'Uno de los productos no existe o está archivado.' }, { status: 404 });
   if (message.includes('INSUFFICIENT_WAREHOUSE_STOCK')) return NextResponse.json({ error: 'No hay stock suficiente para completar la reserva.' }, { status: 409 });
   if (message.includes('RESERVATION_EMPTY')) return NextResponse.json({ error: 'No se puede reservar únicamente servicios.' }, { status: 400 });
+  if (message.includes('RESERVATION_ITEMS_REQUIRED')) return NextResponse.json({ error: 'La reserva necesita al menos un producto con cantidad.' }, { status: 400 });
+  if (message.includes('INVALID_RESERVATION_QUANTITY')) return NextResponse.json({ error: 'Las cantidades reservadas deben ser números enteros mayores que cero.' }, { status: 400 });
   if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
   if (message.includes('RESERVATION_NOT_FOUND')) return NextResponse.json({ error: 'La reserva no existe.' }, { status: 404 });
   if (message.includes('RESERVATION_CLOSED')) return NextResponse.json({ error: 'La reserva ya fue cerrada.' }, { status: 409 });
