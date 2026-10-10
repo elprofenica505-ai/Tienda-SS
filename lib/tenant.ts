@@ -17,6 +17,10 @@ export interface TenantContext {
   role: TenantRole;
   email?: string;
   branchIds: string[];
+  /** Almacenes asignados explícitamente al miembro. Vacío = todos los de sus sucursales. */
+  warehouseIds: string[];
+  /** Cajas asignadas explícitamente al miembro. Vacío = todas las de sus sucursales. */
+  cashRegisterIds: string[];
   subscriptionStatus?: string;
 }
 
@@ -81,6 +85,8 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
     role,
     email: auth.data.user.email,
     branchIds: membership.branchIds,
+    warehouseIds: membership.warehouseIds,
+    cashRegisterIds: membership.cashRegisterIds,
     subscriptionStatus: typeof membership.tenant.subscription_status === 'string' ? membership.tenant.subscription_status : undefined,
   };
 }
@@ -109,6 +115,8 @@ export function tenantErrorResponse(error: unknown) {
   if (code === 'FORBIDDEN') return { status: 403, body: { error: 'No tienes permiso para esta empresa.' } };
   if (code === 'BRANCH_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa sucursal.', code } };
   if (code === 'BRANCH_NOT_FOUND') return { status: 404, body: { error: 'La sucursal no existe o no está activa.', code } };
+  if (code === 'WAREHOUSE_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para ese almacén.', code } };
+  if (code === 'CASH_REGISTER_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa caja.', code } };
   if (code === 'EMAIL_NOT_VERIFIED') return { status: 403, body: { error: 'Verifica tu correo electrónico antes de continuar.', code } };
   if (code === 'SESSION_EXPIRED') return { status: 401, body: { error: 'Tu sesión expiró. Inicia sesión nuevamente.', code } };
   if (code === 'MFA_REQUIRED') return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };

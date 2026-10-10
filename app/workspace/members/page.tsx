@@ -3,16 +3,18 @@
 import { WorkspaceSidebar } from '@/components/workspace/WorkspaceSidebar';
 import { useCallback, FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTenant } from '@/components/tenant/TenantProvider';
+import { useTenant, type TenantBranch } from '@/components/tenant/TenantProvider';
 
-type Member = { id: string; uid: string; name: string; email: string; role: string; status: string };
+type Member = { id: string; uid: string; name: string; email: string; role: string; status: string; branchIds?: string[] };
+type BranchOption = { id: string; name: string; code: string; warehouses: number; cashRegisters: number };
+type OrganizationBranch = TenantBranch & { supabaseId?: string };
 const roleLabels: Record<string, string> = { owner: 'Propietario', admin: 'Administrador', gerente: 'Gerente', supervisor_sucursal: 'Supervisor de sucursal', vendedor: 'Vendedor', cajero: 'Cajero', bodega: 'Bodega / inventario', compras: 'Compras', chofer: 'Chofer', despachador: 'Despachador', solo_lectura: 'Solo lectura', jefe: 'Jefe (compatibilidad)' };
 const roles = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
 const roleDescriptions: Record<string, string> = { admin: 'Administra usuarios, permisos y toda la operación.', gerente: 'Supervisa resultados, finanzas, reportes y decisiones del negocio.', supervisor_sucursal: 'Coordina una sucursal y valida la operación diaria.', vendedor: 'Gestiona clientes, ventas, pedidos y cuentas por cobrar.', cajero: 'Opera caja, cobros, ventas y movimientos de efectivo.', bodega: 'Controla inventario, existencias y movimientos de almacén.', compras: 'Gestiona proveedores, compras, costos y reposición.', chofer: 'Consulta pedidos y coordina entregas asignadas.', despachador: 'Prepara pedidos, salidas y coordinación de despacho.', solo_lectura: 'Consulta información y reportes sin modificar datos.', jefe: 'Perfil heredado con control operativo amplio.' };
 
 function MembersContent() {
   const router = useRouter();
-  const { authUser, tenant, member, loading: tenantLoading } = useTenant();
+  const { authUser, tenant, member, organization, loading: tenantLoading } = useTenant();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -20,6 +22,8 @@ function MembersContent() {
   const [query, setQuery] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ email: '', role: 'vendedor' });
+  /** Sucursales editadas por miembro (uid → ids) antes de guardar. */
+  const [branchDrafts, setBranchDrafts] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     if (!authUser || !tenant) return;
@@ -49,23 +53,59 @@ function MembersContent() {
     finally { setSaving(false); }
   }
 
-  async function update(uid: string, payload: Record<string, unknown>, success: string) {
-    if (!authUser || !tenant) return;
+  async function update(uid: string, payload: Record<string, unknown>, success: string): Promise<boolean> {
+    if (!authUser || !tenant) return false;
     setSaving(true); setMessage('');
     try {
       const response = await fetch('/api/members', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await authUser.getIdToken()}`, 'x-tenant-id': tenant.id }, body: JSON.stringify({ uid, ...payload }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo actualizar el usuario.');
       setMessage(success); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo actualizar el usuario.'); }
+      return true;
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo actualizar el usuario.'); return false; }
     finally { setSaving(false); }
+  }
+
+  /** Sucursales con el número de almacenes y cajas activos que cuelgan de cada una. */
+  const branchOptions: BranchOption[] = (organization?.branches || []).map((branch: OrganizationBranch) => {
+    const keys = new Set([branch.id, branch.supabaseId].filter(Boolean));
+    return {
+      id: branch.id,
+      name: branch.name,
+      code: branch.code,
+      warehouses: (organization?.warehouses || []).filter((item) => item.active && keys.has(item.branchId)).length,
+      cashRegisters: (organization?.cashRegisters || []).filter((item) => item.active && keys.has(item.branchId)).length,
+    };
+  });
+
+  function branchesFor(item: Member): string[] {
+    return branchDrafts[item.uid] ?? item.branchIds ?? [];
+  }
+
+  function toggleBranch(item: Member, branchId: string, checked: boolean) {
+    setBranchDrafts((previous) => {
+      const current = previous[item.uid] ?? item.branchIds ?? [];
+      const next = checked ? [...current.filter((id) => id !== branchId), branchId] : current.filter((id) => id !== branchId);
+      return { ...previous, [item.uid]: next };
+    });
+  }
+
+  function hasBranchChanges(item: Member): boolean {
+    if (!branchDrafts[item.uid]) return false;
+    const current = [...(item.branchIds ?? [])].sort().join('|');
+    return [...branchDrafts[item.uid]].sort().join('|') !== current;
+  }
+
+  async function saveBranches(item: Member) {
+    const saved = await update(item.uid, { branchIds: branchesFor(item) }, 'Sucursales actualizadas.');
+    if (saved) setBranchDrafts((previous) => { const next = { ...previous }; delete next[item.uid]; return next; });
   }
 
   if (tenantLoading || loading) return <div className="workspace-loading">Cargando usuarios...</div>;
   if (!authUser || !tenant || !member) { router.replace('/'); return null; }
   const filtered = members.filter((item) => `${item.name} ${item.email} ${roleLabels[item.role] || item.role}`.toLowerCase().includes(query.toLowerCase()));
 
-  return <main className="workspace-page"><WorkspaceSidebar /><section className="workspace-main members-main"><header className="members-header"><div><button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button><div className="eyebrow catalog-eyebrow">Tu espacio / Administración</div><h1>Usuarios y roles</h1><p>Invita y administra quién puede operar en <strong>{tenant.name}</strong>.</p></div><button className="button" onClick={() => setShowForm(true)}>+ Invitar empleado</button></header>{message && <div className="catalog-message" role="status">{message}{invitationLink && <button className="text-link" type="button" onClick={() => void navigator.clipboard?.writeText(invitationLink)}>Copiar enlace de invitación</button>}</div>}<div className="members-toolbar"><div className="members-count"><strong>{members.filter((item) => item.status === 'active').length}</strong><span>usuarios activos</span></div><input className="contacts-search" aria-label="Buscar usuarios" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre o correo" /></div><div className="members-list">{filtered.length === 0 ? <div className="catalog-empty"><div className="empty-spark">♙</div><h2>Aún no hay usuarios adicionales</h2><p>Envía una invitación y la persona creará su cuenta dentro de este tenant.</p><button className="button" onClick={() => setShowForm(true)}>Invitar primer empleado ↗</button></div> : filtered.map((item) => <article className={`member-card ${item.status !== 'active' ? 'is-archived' : ''}`} key={item.uid}><div className="contact-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="member-info"><h3>{item.name}</h3><small>{item.email}</small><span className={`member-status ${item.status === 'active' ? 'active' : 'disabled'}`}>{item.status === 'active' ? 'Activo' : 'Desactivado'}</span></div><select aria-label={`Rol de ${item.email}`} value={item.role} disabled={item.role === 'owner' || item.uid === member.uid || saving} onChange={(event) => void update(item.uid, { role: event.target.value }, 'Rol actualizado.')}><option value={item.role}>{roleLabels[item.role] || item.role}</option>{item.role !== 'owner' && roles.filter((role) => role !== item.role).map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select>{item.role !== 'owner' && item.uid !== member.uid && <button className="member-toggle" disabled={saving} onClick={() => void update(item.uid, { status: item.status === 'active' ? 'disabled' : 'active' }, item.status === 'active' ? 'Usuario desactivado.' : 'Usuario reactivado.')}>{item.status === 'active' ? 'Desactivar' : 'Reactivar'}</button>}</article>)}</div>{showForm && <div className="modal-backdrop" onClick={() => setShowForm(false)}><div className="catalog-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" aria-label="Cerrar invitación" onClick={() => setShowForm(false)}>×</button><div className="eyebrow">Invitación de equipo</div><h2>Invita a tu equipo.</h2><p>La persona recibirá un enlace, creará su contraseña y quedará activa en este tenant al aceptar.</p><form onSubmit={createInvitation}><label>Correo<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="usuario@empresa.com" /></label><label>Rol<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>{roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select><small className="role-helper">{roleDescriptions[form.role]}</small></label><button className="button auth-submit" disabled={saving}>{saving ? 'Enviando...' : 'Enviar invitación ↗'}</button></form></div></div>}</section></main>;
+  return <main className="workspace-page"><WorkspaceSidebar /><section className="workspace-main members-main"><header className="members-header"><div><button className="text-link" onClick={() => router.push('/workspace')}>← Resumen</button><div className="eyebrow catalog-eyebrow">Tu espacio / Administración</div><h1>Usuarios y roles</h1><p>Invita y administra quién puede operar en <strong>{tenant.name}</strong>.</p></div><button className="button" onClick={() => setShowForm(true)}>+ Invitar empleado</button></header>{message && <div className="catalog-message" role="status">{message}{invitationLink && <button className="text-link" type="button" onClick={() => void navigator.clipboard?.writeText(invitationLink)}>Copiar enlace de invitación</button>}</div>}<div className="members-toolbar"><div className="members-count"><strong>{members.filter((item) => item.status === 'active').length}</strong><span>usuarios activos</span></div><input className="contacts-search" aria-label="Buscar usuarios" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nombre o correo" /></div><div className="members-list">{filtered.length === 0 ? <div className="catalog-empty"><div className="empty-spark">♙</div><h2>Aún no hay usuarios adicionales</h2><p>Envía una invitación y la persona creará su cuenta dentro de este tenant.</p><button className="button" onClick={() => setShowForm(true)}>Invitar primer empleado ↗</button></div> : filtered.map((item) => <article className={`member-card ${item.status !== 'active' ? 'is-archived' : ''}`} key={item.uid}><div className="contact-avatar">{item.name.slice(0, 1).toUpperCase()}</div><div className="member-info"><h3>{item.name}</h3><small>{item.email}</small><span className={`member-status ${item.status === 'active' ? 'active' : 'disabled'}`}>{item.status === 'active' ? 'Activo' : 'Desactivado'}</span></div><select aria-label={`Rol de ${item.email}`} value={item.role} disabled={item.role === 'owner' || item.uid === member.uid || saving} onChange={(event) => void update(item.uid, { role: event.target.value }, 'Rol actualizado.')}><option value={item.role}>{roleLabels[item.role] || item.role}</option>{item.role !== 'owner' && roles.filter((role) => role !== item.role).map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select>{item.role !== 'owner' && item.uid !== member.uid && <button className="member-toggle" disabled={saving} onClick={() => void update(item.uid, { status: item.status === 'active' ? 'disabled' : 'active' }, item.status === 'active' ? 'Usuario desactivado.' : 'Usuario reactivado.')}>{item.status === 'active' ? 'Desactivar' : 'Reactivar'}</button>}{item.role !== 'owner' && item.uid !== member.uid && <div className="member-branches"><div className="member-branches-header"><div><b>Sucursales que opera</b><small>Define qué sucursales puede ver y operar este usuario.</small></div><button className="button" type="button" disabled={saving || !hasBranchChanges(item)} onClick={() => void saveBranches(item)}>Guardar sucursales</button></div>{branchOptions.length === 0 ? <small>Aún no hay sucursales. Créalas en Sucursales y cajas.</small> : <div className="member-branch-options">{branchOptions.map((option) => <label className="member-branch-option" key={option.id}><input type="checkbox" checked={branchesFor(item).includes(option.id)} disabled={saving} onChange={(event) => toggleBranch(item, option.id, event.target.checked)} /><span>{option.name}<small>{option.code || 'Sin código'} · {option.warehouses} almacén(es) · {option.cashRegisters} caja(s)</small></span></label>)}</div>}</div>}</article>)}</div>{showForm && <div className="modal-backdrop" onClick={() => setShowForm(false)}><div className="catalog-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" aria-label="Cerrar invitación" onClick={() => setShowForm(false)}>×</button><div className="eyebrow">Invitación de equipo</div><h2>Invita a tu equipo.</h2><p>La persona recibirá un enlace, creará su contraseña y quedará activa en este tenant al aceptar.</p><form onSubmit={createInvitation}><label>Correo<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="usuario@empresa.com" /></label><label>Rol<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}>{roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select><small className="role-helper">{roleDescriptions[form.role]}</small></label><button className="button auth-submit" disabled={saving}>{saving ? 'Enviando...' : 'Enviar invitación ↗'}</button></form></div></div>}</section></main>;
 }
 
 export default function MembersPage() {

@@ -367,6 +367,13 @@ test('POST receive-transfer: exige líneas para recibir', async () => {
   assert.equal(rpcCall('receive_stock_transfer').length, 0);
 });
 
+test('POST: un administrador puede operar una transferencia aunque la sucursal activa no sea uno de sus extremos', async () => {
+  // La sucursal activa es 'otra' (OTHER_BRANCH); TRANSFER_ID va de BRANCH a BRANCH. El selector de sucursal no debe bloquear a un rol administrativo.
+  const response = await route.POST(request(OWNER_TOKEN, 'otra', 'POST', { action: 'approve-transfer', transferId: TRANSFER_ID }));
+  assert.equal(response.status, 200);
+  assert.equal(rpcCall('approve_stock_transfer').length, 1);
+});
+
 test('POST: una transferencia inexistente responde 404 y una sin id responde 400', async () => {
   const missing = await route.POST(request(OWNER_TOKEN, 'principal', 'POST', { action: 'approve-transfer', transferId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }));
   assert.equal(missing.status, 404);

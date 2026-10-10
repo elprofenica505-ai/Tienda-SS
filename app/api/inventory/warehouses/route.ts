@@ -74,6 +74,8 @@ function assertTransferBranchScope(context: TenantContext, dbBranchId: string, t
   for (const transferDbBranchId of transferDbBranchIds) {
     assertBranchAccess(context, branchNames.get(String(transferDbBranchId)) || String(transferDbBranchId));
   }
+  // Los roles administrativos ya pasaron assertBranchAccess; el encabezado x-branch-id viene del selector de sucursal y no debe bloquearlos.
+  if (MANAGERS.has(context.role)) return;
   if (!transferDbBranchIds.some((value) => String(value) === String(dbBranchId))) throw new Error('BRANCH_OUT_OF_SCOPE');
 }
 
