@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test, { after, before, beforeEach } from 'node:test';
 import { NextRequest } from 'next/server';
 import {
@@ -21,6 +22,7 @@ const PRODUCT_ID = '55555555-5555-4555-8555-555555555551';
 const TRANSFER_ID = '66666666-6666-4666-8666-666666666661';
 const TRANSFER_ITEM_ID = '77777777-7777-4777-8777-777777777771';
 const FOREIGN_TRANSFER_ID = '66666666-6666-4666-8666-666666666662';
+const CREATE_TRANSFER_ROLE_FIX = readFileSync('supabase/migrations/20261011000001_fix_create_stock_transfer_postgrest_role.sql', 'utf8');
 const OWNER_TOKEN = 'warehouse-owner-token';
 const STAFF_TOKEN = 'warehouse-staff-token';
 
@@ -150,6 +152,12 @@ after(async () => {
 
 beforeEach(resetData);
 
+test('create_stock_transfer reconoce service_role desde PostgREST y conserva la guarda por tenant', () => {
+  assert.match(CREATE_TRANSFER_ROLE_FIX, /session_user not in \('service_role', 'postgres', 'supabase_admin'\) and coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
+  assert.match(CREATE_TRANSFER_ROLE_FIX, /and not public\.has_tenant_access\(target_tenant_id\) then raise exception 'FORBIDDEN'/);
+  assert.match(CREATE_TRANSFER_ROLE_FIX, /grant execute on function public\.create_stock_transfer\([^;]+ to service_role;/i);
+});
+
 test('los códigos del SQL de transferencias se traducen a 400, 404 y 409', () => {
   assert.equal(transferErrorResponse(new Error('WAREHOUSE_REQUIRED'))?.status, 400);
   assert.equal(transferErrorResponse(new Error('TRANSFER_SAME_WAREHOUSE'))?.status, 400);
@@ -224,6 +232,13 @@ test('GET: entrega existencias canónicas y las transferencias reales con sus l�
   assert.equal(transfer.destinationWarehouseId, DESTINATION_WAREHOUSE_ID);
   assert.deepEqual({ requested: transfer.requested, shipped: transfer.shipped, received: transfer.received, pending: transfer.pending }, { requested: 40, shipped: 40, received: 15, pending: 25 });
   assert.deepEqual(transfer.items[0], { transferItemId: TRANSFER_ITEM_ID, productId: PRODUCT_ID, productName: 'Frijoles 1lb', productSku: 'FRI-1', requested: 40, shipped: 40, received: 15, pending: 25, unitCost: 18.5 });
+});
+
+test('GET: owner activo carga los almacenes de la sucursal sin una selección previa', async () => {
+  const response = await route.GET(request(OWNER_TOKEN, 'principal', 'GET'));
+  assert.equal(response.status, 200);
+  const body = await response.json() as { warehouses: FakeRow[] };
+  assert.equal(body.warehouses.length, 2);
 });
 
 test('GET: rechaza un almacén que no pertenece a la sucursal del usuario', async () => {
