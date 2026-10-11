@@ -17,12 +17,61 @@ import {
 } from '@/lib/inventory-transfers';
 
 const migrationFile = readFileSync('supabase/migrations/20261010000001_multi_warehouse_inventory.sql', 'utf8');
+const warehouseInventoryPage = readFileSync('app/workspace/warehouse-inventory/page.tsx', 'utf8');
+const globalStyles = readFileSync('app/globals.css', 'utf8');
 /** Los contratos se verifican sobre el SQL ejecutable, no sobre la documentación. */
 const migration = migrationFile.replace(/--[^\n]*/g, ' ');
 
 function line(requested: number, shipped: number, received: number): TransferLine {
   return { productId: 'product-1', requested, shipped, received };
 }
+
+function mediaBlocks(styles: string, condition: string): string[] {
+  const marker = `@media(${condition}){`;
+  const blocks: string[] = [];
+  let searchFrom = 0;
+  let start = styles.indexOf(marker, searchFrom);
+
+  while (start !== -1) {
+    const openBrace = start + marker.length - 1;
+    let depth = 1;
+    let cursor = openBrace + 1;
+
+    while (cursor < styles.length && depth > 0) {
+      if (styles[cursor] === '{') depth += 1;
+      if (styles[cursor] === '}') depth -= 1;
+      cursor += 1;
+    }
+
+    if (depth !== 0) break;
+    blocks.push(styles.slice(openBrace + 1, cursor - 1));
+    searchFrom = cursor;
+    start = styles.indexOf(marker, searchFrom);
+  }
+
+  return blocks;
+}
+
+test('transferencias apiladas mantienen estado y acciones disponibles en móvil', () => {
+  assert.match(warehouseInventoryPage, /className="inventory-table warehouse-transfer-table"/);
+  for (const label of ['Transferencia', 'Estado', 'Líneas', 'Acciones']) {
+    assert.ok(warehouseInventoryPage.includes(`<span data-label="${label}">`), `falta la celda ${label}`);
+    assert.ok(warehouseInventoryPage.includes(`<span className="warehouse-mobile-label">${label}</span>`), `falta el rótulo móvil ${label}`);
+  }
+
+  const mobileStyles = mediaBlocks(globalStyles, 'max-width:680px').find((block) => block.includes('.warehouse-transfer-table{min-width:0;overflow:visible}'));
+  assert.ok(mobileStyles, 'la adaptación de tarjetas debe limitarse a móvil vertical');
+  assert.match(mobileStyles, /\.warehouse-transfer-table \.inventory-row-head\{display:none\}/);
+  assert.match(mobileStyles, /\.warehouse-transfer-table \.inventory-row:not\(\.inventory-row-head\)\{[^}]*grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(mobileStyles, /\.warehouse-transfer-table \.inventory-row \.warehouse-mobile-label\{[^}]*display:block/);
+  assert.match(mobileStyles, /\.warehouse-transfer-table \.inventory-row \.text-link\{[^}]*min-height:44px/);
+  assert.match(globalStyles, /\.warehouse-transfer-table \.warehouse-mobile-label\{display:none\}/);
+});
+
+test('el recorte móvil de columnas solo aplica a Inventario general y transferencias conservan cuatro columnas en escritorio', () => {
+  assert.match(globalStyles, /\.inventory-main \.inventory-row span:nth-child\(2\),\.inventory-main \.inventory-row span:nth-child\(4\),\.inventory-main \.inventory-row-head span:nth-child\(2\),\.inventory-main \.inventory-row-head span:nth-child\(4\)\{display:none\}/);
+  assert.match(globalStyles, /\.warehouse-transfer-table \.inventory-row\{grid-template-columns:minmax\(0,1\.4fr\) minmax\(0,1fr\) minmax\(0,1\.4fr\) minmax\(0,1fr\)\}/);
+});
 
 test('el ciclo de vida de la transferencia es draft -> approved -> in_transit -> received', () => {
   assert.equal(canTransition('draft', 'approved'), true);
