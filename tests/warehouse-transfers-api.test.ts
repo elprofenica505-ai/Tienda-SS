@@ -22,7 +22,7 @@ const PRODUCT_ID = '55555555-5555-4555-8555-555555555551';
 const TRANSFER_ID = '66666666-6666-4666-8666-666666666661';
 const TRANSFER_ITEM_ID = '77777777-7777-4777-8777-777777777771';
 const FOREIGN_TRANSFER_ID = '66666666-6666-4666-8666-666666666662';
-const CREATE_TRANSFER_ROLE_FIX = readFileSync('supabase/migrations/20261011000001_fix_create_stock_transfer_postgrest_role.sql', 'utf8');
+const WAREHOUSE_RPC_ROLE_FIX = readFileSync('supabase/migrations/20261011000001_fix_multi_warehouse_postgrest_role.sql', 'utf8');
 const OWNER_TOKEN = 'warehouse-owner-token';
 const STAFF_TOKEN = 'warehouse-staff-token';
 
@@ -152,10 +152,14 @@ after(async () => {
 
 beforeEach(resetData);
 
-test('create_stock_transfer reconoce service_role desde PostgREST y conserva la guarda por tenant', () => {
-  assert.match(CREATE_TRANSFER_ROLE_FIX, /session_user not in \('service_role', 'postgres', 'supabase_admin'\) and coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
-  assert.match(CREATE_TRANSFER_ROLE_FIX, /and not public\.has_tenant_access\(target_tenant_id\) then raise exception 'FORBIDDEN'/);
-  assert.match(CREATE_TRANSFER_ROLE_FIX, /grant execute on function public\.create_stock_transfer\([^;]+ to service_role;/i);
+test('las RPC de inventario multi-almacén reconocen service_role desde PostgREST y conservan la guarda por tenant', () => {
+  const functionNames = ['adjust_inventory', 'create_stock_transfer', 'approve_stock_transfer', 'dispatch_stock_transfer', 'receive_stock_transfer', 'cancel_stock_transfer'];
+  for (const functionName of functionNames) {
+    assert.ok(WAREHOUSE_RPC_ROLE_FIX.includes(`create or replace function public.${functionName}(`));
+    assert.ok(WAREHOUSE_RPC_ROLE_FIX.toLowerCase().includes(`grant execute on function public.${functionName}(`));
+  }
+  assert.equal(WAREHOUSE_RPC_ROLE_FIX.split("coalesce(auth.role(), '') <> 'service_role'").length - 1, functionNames.length);
+  assert.equal(WAREHOUSE_RPC_ROLE_FIX.split("and not public.has_tenant_access(target_tenant_id) then raise exception 'FORBIDDEN'").length - 1, functionNames.length);
 });
 
 test('los códigos del SQL de transferencias se traducen a 400, 404 y 409', () => {
