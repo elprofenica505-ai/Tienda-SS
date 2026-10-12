@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
+import { assertBranchAccess, assertResourceAssignmentsAvailable, canAccessCashRegister } from '@/lib/data-scope';
 import { resolveAuthorizedBranchId } from '@/lib/organization-scope';
 import { readSupabaseInBatches } from '@/lib/supabase/read-pages';
 
 export const runtime = 'nodejs';
 const PAGE_SIZE = 50;
-type Row = Record<string, any>;
+type Row = Record<string, unknown>;
 
 function text(value: unknown, max = 300): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -51,6 +52,7 @@ export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'finance', 'view');
     const branchId = await resolveAuthorizedBranchId(context, request.headers.get('x-branch-id') || undefined);
+    assertResourceAssignmentsAvailable(context, 'cashRegisters');
     const cursor = parseCursor(request.nextUrl.searchParams.get('cursor'));
     const supabase = getSupabaseServer();
 
@@ -63,10 +65,15 @@ export async function GET(request: NextRequest) {
       .order('id', { ascending: false })
       .limit(PAGE_SIZE + 1);
     if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+    const hasRestrictedCashRegisters = !['owner', 'admin', 'gerente', 'jefe'].includes(context.role) && Boolean(context.cashRegisterIds?.length);
+    if (hasRestrictedCashRegisters) {
+      query = query.in('cash_sessions.cash_register_id', context.cashRegisterIds);
+    }
     const result = await query;
     if (result.error) throw new Error(result.error.message);
-    const fetched = result.data || [];
-    const rows = fetched.slice(0, PAGE_SIZE) as unknown as Row[];
+    const fetched = ((result.data || []) as unknown as Row[])
+      .filter((row) => canAccessCashRegister(context, relation(row.cash_sessions).cash_register_id));
+    const rows = fetched.slice(0, PAGE_SIZE);
     const last = rows.at(-1);
     const nextCursor = fetched.length > PAGE_SIZE && last
       ? Buffer.from(JSON.stringify({ createdAt: last.created_at, id: last.id })).toString('base64url')

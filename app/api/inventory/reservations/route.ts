@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
-import { assertBranchAccess } from '@/lib/data-scope';
+import { assertBranchAccess, assertWarehouseAccess } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -27,11 +27,11 @@ async function resolveId(table: 'branches' | 'warehouses' | 'products', tenantId
   if (isUuid(value)) {
     const direct = await supabase.from(table).select('id, legacy_firestore_id, tenant_id, branch_id, active, item_type').eq('tenant_id', tenantId).eq('id', value).maybeSingle();
     if (direct.error) throw new Error(direct.error.message);
-    if (direct.data) return direct.data as Record<string, any>;
+    if (direct.data) return direct.data as Record<string, unknown>;
   }
   const legacy = await supabase.from(table).select('id, legacy_firestore_id, tenant_id, branch_id, active, item_type').eq('tenant_id', tenantId).eq('legacy_firestore_id', value).maybeSingle();
   if (legacy.error) throw new Error(legacy.error.message);
-  return legacy.data as Record<string, any> | null;
+  return legacy.data as Record<string, unknown> | null;
 }
 
 function responseFor(error: unknown) {
@@ -57,12 +57,13 @@ export async function POST(request: NextRequest) {
     const warehouseId = text(body.warehouseId, 128) || '';
     if (!branchId) return NextResponse.json({ error: 'La sucursal es obligatoria para reservar inventario.' }, { status: 400 });
     if (!warehouseId) return NextResponse.json({ error: 'El almacén es obligatorio para reservar inventario.' }, { status: 400 });
-    assertBranchAccess(context, branchId);
     const branch = await resolveId('branches', context.tenantId, branchId);
-    const warehouse = await resolveId('warehouses', context.tenantId, warehouseId);
     if (!branch) return NextResponse.json({ error: 'La sucursal no existe en este tenant.' }, { status: 404 });
+    assertBranchAccess(context, String(branch.legacy_firestore_id || branch.id));
+    const warehouse = await resolveId('warehouses', context.tenantId, warehouseId);
     if (!warehouse || warehouse.active === false) return NextResponse.json({ error: 'El almacén no existe o no está activo.' }, { status: 404 });
     if (String(warehouse.branch_id) !== String(branch.id)) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal indicada.' }, { status: 400 });
+    assertWarehouseAccess(context, String(warehouse.id));
 
     const rawItems = Array.isArray(body.items) ? body.items : [];
     const requested = new Map<string, number>();
@@ -101,12 +102,13 @@ export async function DELETE(request: NextRequest) {
     const context = await requireTenantPermission(request, 'inventory', 'edit');
     const reservationId = text(new URL(request.url).searchParams.get('id'), 120);
     if (!reservationId) return NextResponse.json({ error: 'La reserva es obligatoria.' }, { status: 400 });
-    const reservation = await getSupabaseServer().from('inventory_reservations').select('branch_id').eq('tenant_id', context.tenantId).eq('id', reservationId).maybeSingle();
+    const reservation = await getSupabaseServer().from('inventory_reservations').select('branch_id,warehouse_id').eq('tenant_id', context.tenantId).eq('id', reservationId).maybeSingle();
     if (reservation.error) throw new Error(reservation.error.message);
     if (!reservation.data) throw new Error('RESERVATION_NOT_FOUND');
     const branch = await resolveId('branches', context.tenantId, String(reservation.data.branch_id));
     if (!branch) throw new Error('RESERVATION_NOT_FOUND');
     assertBranchAccess(context, String(branch.legacy_firestore_id || branch.id));
+    assertWarehouseAccess(context, String(reservation.data.warehouse_id));
     const result = await getSupabaseServer().rpc('release_inventory_reservation', {
       target_tenant_id: context.tenantId,
       target_reservation_id: reservationId,
