@@ -1,5 +1,6 @@
 import { getSupabaseServer } from '@/lib/supabase/server';
 import type { TenantRole } from '@/lib/tenant';
+import type { ScopedResource } from '@/lib/data-scope';
 
 export type OrganizationResource = 'branches' | 'warehouses' | 'cashRegisters';
 export type OrganizationRow = Record<string, unknown> & { id: string };
@@ -73,7 +74,7 @@ function mapOrganizationRow(resource: OrganizationResource, row: OrganizationRow
 }
 
 /** Errores de PostgREST/Postgres que significan "la tabla todavía no existe en esta base". */
-function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
+export function isMissingRelation(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   if (error.code && ['42P01', 'PGRST205', 'PGRST202'].includes(error.code)) return true;
   return /could not find the table|relation .* does not exist|schema cache/i.test(error.message || '');
@@ -81,15 +82,16 @@ function isMissingRelation(error: { code?: string; message?: string } | null): b
 
 /**
  * Ids asignados a un miembro en una tabla de acceso por recurso (FASE 2A).
- * Si la migración aún no está aplicada la tabla no existe y se devuelve [] (sin asignación = acceso total).
+ * Si la migración aún no está aplicada la tabla no existe: se devuelve `unavailable` y los miembros
+ * no administrativos quedan bloqueados en ese recurso (fail-closed). Sin tabla no hay forma de saber si hay restricción.
  */
-async function resourceAssignments(table: 'member_warehouses' | 'member_cash_registers', column: 'warehouse_id' | 'cash_register_id', tenantId: string, memberId: string): Promise<string[]> {
+async function resourceAssignments(table: 'member_warehouses' | 'member_cash_registers', column: 'warehouse_id' | 'cash_register_id', tenantId: string, memberId: string): Promise<{ ids: string[]; unavailable: boolean }> {
   const result = await getSupabaseServer().from(table).select(column).eq('tenant_id', tenantId).eq('member_id', memberId);
   if (result.error) {
-    if (isMissingRelation(result.error)) return [];
+    if (isMissingRelation(result.error)) return { ids: [], unavailable: true };
     fail(result.error);
   }
-  return (result.data || []).map((row) => String((row as unknown as Record<string, unknown>)[column]));
+  return { ids: (result.data || []).map((row) => String((row as unknown as Record<string, unknown>)[column])), unavailable: false };
 }
 
 export function supabaseAuthUserToProfileId(authUserId: string): string {
@@ -131,17 +133,20 @@ export async function findMembership(tenantId: string, authUserId: string) {
   const member = await supabase.from('members').select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at').eq('tenant_id', tenant.data.id).eq('profile_id', profile.data.id).eq('status', 'active').maybeSingle();
   if (member.error) fail(member.error);
   if (!member.data) return null;
-  const [assignments, warehouseIds, cashRegisterIds] = await Promise.all([
+  const [assignments, warehouses, cashRegisters] = await Promise.all([
     supabase.from('member_branches').select('branch_id, branches(legacy_firestore_id)').eq('tenant_id', tenant.data.id).eq('member_id', member.data.id),
     resourceAssignments('member_warehouses', 'warehouse_id', tenant.data.id, member.data.id),
     resourceAssignments('member_cash_registers', 'cash_register_id', tenant.data.id, member.data.id),
   ]);
+  const unavailableResources: ScopedResource[] = [];
+  if (warehouses.unavailable) unavailableResources.push('warehouses');
+  if (cashRegisters.unavailable) unavailableResources.push('cashRegisters');
   if (assignments.error) fail(assignments.error);
   const branchIds = (assignments.data || []).map((item) => {
     const branch = item.branches as unknown as OrganizationRow | null;
     return String(branch?.legacy_firestore_id || item.branch_id);
   });
-  return { tenant: tenant.data as OrganizationRow, member: member.data as OrganizationRow, profile: profile.data as OrganizationRow, branchIds, warehouseIds, cashRegisterIds };
+  return { tenant: tenant.data as OrganizationRow, member: member.data as OrganizationRow, profile: profile.data as OrganizationRow, branchIds, warehouseIds: warehouses.ids, cashRegisterIds: cashRegisters.ids, unavailableResources };
 }
 
 export async function getOrganization(tenantId: string) {
@@ -231,5 +236,5 @@ export function toTenantContext(tenantId: string, authUserId: string, membership
   // el cliente: el encabezado puede traer un identificador heredado de Firestore
   // y no debe propagarse a las consultas ni a los RPC.
   const resolvedTenantId = String(membership.tenant.id);
-  return { uid: authUserId, tenantId: resolvedTenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, warehouseIds: membership.warehouseIds, cashRegisterIds: membership.cashRegisterIds, subscriptionStatus: undefined };
+  return { uid: authUserId, tenantId: resolvedTenantId, role: membership.member.role as TenantRole, email: membership.profile.email || undefined, branchIds: membership.branchIds, warehouseIds: membership.warehouseIds, cashRegisterIds: membership.cashRegisterIds, unavailableResources: membership.unavailableResources, subscriptionStatus: undefined };
 }

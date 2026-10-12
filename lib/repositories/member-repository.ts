@@ -1,5 +1,12 @@
 import { getSupabaseServer } from '@/lib/supabase/server';
-import { supabaseAuthUserToProfileId } from '@/lib/repositories/organization-repository';
+import { isMissingRelation, supabaseAuthUserToProfileId } from '@/lib/repositories/organization-repository';
+
+export type ResourceAssignments = { warehouseIds?: string[]; cashRegisterIds?: string[] };
+type ResourceKind = 'warehouses' | 'cashRegisters';
+const resourceConfig: Record<ResourceKind, { table: 'warehouses' | 'cash_registers'; assignmentTable: 'member_warehouses' | 'member_cash_registers'; column: 'warehouse_id' | 'cash_register_id'; notFound: 'WAREHOUSE_NOT_FOUND' | 'CASH_REGISTER_NOT_FOUND' }> = {
+  warehouses: { table: 'warehouses', assignmentTable: 'member_warehouses', column: 'warehouse_id', notFound: 'WAREHOUSE_NOT_FOUND' },
+  cashRegisters: { table: 'cash_registers', assignmentTable: 'member_cash_registers', column: 'cash_register_id', notFound: 'CASH_REGISTER_NOT_FOUND' },
+};
 
 function fail(error: { message?: string } | null): never { throw new Error(error?.message || 'SUPABASE_REQUEST_FAILED'); }
 
@@ -17,10 +24,32 @@ async function profileRow(authUserId: string, email?: string, name?: string) {
   return result.data;
 }
 
+/** Referencias (legacy_firestore_id || id) de los recursos asignados a cada miembro. Sin tabla = sin asignación. */
+async function resourceReferencesByMember(tenantId: string, kind: ResourceKind): Promise<Map<string, string[]>> {
+  const config = resourceConfig[kind];
+  const supabase = getSupabaseServer();
+  const assignments = await supabase.from(config.assignmentTable).select(`member_id,${config.column}`).eq('tenant_id', tenantId);
+  if (assignments.error) {
+    if (isMissingRelation(assignments.error)) return new Map();
+    fail(assignments.error);
+  }
+  const resources = await supabase.from(config.table).select('id,legacy_firestore_id').eq('tenant_id', tenantId);
+  if (resources.error) fail(resources.error);
+  const reference = new Map((resources.data || []).map((row) => [String(row.id), String(row.legacy_firestore_id || row.id)]));
+  const byMember = new Map<string, string[]>();
+  for (const row of (assignments.data || []) as unknown as Array<Record<string, unknown>>) {
+    const resourceId = String(row[config.column]);
+    const memberId = String(row.member_id);
+    byMember.set(memberId, [...(byMember.get(memberId) || []), reference.get(resourceId) || resourceId]);
+  }
+  return byMember;
+}
+
 export async function listMembers(tenantId: string) {
   const tenant = await tenantRow(tenantId);
   const result = await getSupabaseServer().from('members').select('id,profile_id,role,status,created_at,updated_at,profiles(legacy_firestore_id,auth_user_id,email,display_name),member_branches(branch_id,branches(legacy_firestore_id))').eq('tenant_id', tenant.id).order('created_at');
   if (result.error) fail(result.error);
+  const [warehouseRefs, cashRefs] = await Promise.all([resourceReferencesByMember(tenant.id, 'warehouses'), resourceReferencesByMember(tenant.id, 'cashRegisters')]);
   return (result.data || []).map((row) => {
     const item = row as Record<string, any>;
     const profile = item.profiles || {};
@@ -32,6 +61,8 @@ export async function listMembers(tenantId: string) {
       role: item.role,
       status: item.status === 'inactive' ? 'disabled' : item.status,
       branchIds: (item.member_branches || []).map((assignment: any) => String(assignment.branches?.legacy_firestore_id || assignment.branch_id)),
+      warehouseIds: warehouseRefs.get(String(item.id)) || [],
+      cashRegisterIds: cashRefs.get(String(item.id)) || [],
       createdAt: item.created_at,
       updatedAt: item.updated_at,
     };
@@ -59,14 +90,62 @@ export async function createMember(tenantId: string, authUserId: string, name: s
   return { member: member.data, profile };
 }
 
-export async function updateMember(tenantId: string, authUserId: string, changes: Record<string, unknown>, branchIds?: string[]) {
+export async function updateMember(tenantId: string, authUserId: string, changes: Record<string, unknown>, branchIds?: string[], resources?: ResourceAssignments) {
   const current = await findMemberByAuthUserId(tenantId, authUserId);
   if (!current) return null;
   const update = { ...changes, ...(changes.status === 'disabled' ? { status: 'inactive' } : {}) };
   const result = await getSupabaseServer().from('members').update(update).eq('id', current.member.id).eq('tenant_id', current.tenant.id).select('id,legacy_firestore_id,tenant_id,profile_id,role,status,created_at,updated_at').single();
   if (result.error) fail(result.error);
   if (branchIds) await replaceBranchAssignments(current.tenant.id, current.member.id, branchIds);
+  if (resources?.warehouseIds) await replaceResourceAssignments(current.tenant.id, current.member.id, 'warehouses', resources.warehouseIds);
+  if (resources?.cashRegisterIds) await replaceResourceAssignments(current.tenant.id, current.member.id, 'cashRegisters', resources.cashRegisterIds);
   return { before: current, after: result.data };
+}
+
+/**
+ * Resuelve referencias de almacenes o cajas (legacy_firestore_id o uuid) a su uuid y a la referencia de su sucursal.
+ * Los inactivos se tratan como inexistentes. Todo se valida antes de tocar la asignación.
+ */
+export async function resolveResourceReferences(tenantId: string, kind: ResourceKind, references: string[]): Promise<Array<{ id: string; branchRef: string }>> {
+  const config = resourceConfig[kind];
+  const supabase = getSupabaseServer();
+  const [resources, branches] = await Promise.all([
+    supabase.from(config.table).select('id, legacy_firestore_id, branch_id').eq('tenant_id', tenantId).eq('active', true),
+    supabase.from('branches').select('id, legacy_firestore_id').eq('tenant_id', tenantId),
+  ]);
+  if (resources.error) fail(resources.error);
+  if (branches.error) fail(branches.error);
+  const branchReference = new Map((branches.data || []).map((row) => [String(row.id), String(row.legacy_firestore_id || row.id)]));
+  const byReference = new Map<string, { id: string; branchRef: string }>();
+  for (const row of resources.data || []) {
+    const entry = { id: String(row.id), branchRef: branchReference.get(String(row.branch_id)) || String(row.branch_id) };
+    byReference.set(entry.id, entry);
+    if (row.legacy_firestore_id) byReference.set(String(row.legacy_firestore_id), entry);
+  }
+  const resolved = new Map<string, { id: string; branchRef: string }>();
+  for (const reference of references) {
+    const entry = byReference.get(reference);
+    if (!entry) throw new Error(config.notFound);
+    resolved.set(entry.id, entry);
+  }
+  return Array.from(resolved.values());
+}
+
+/** Reemplaza las asignaciones de almacenes o cajas. Sin tabla lanza RESOURCE_ASSIGNMENTS_UNAVAILABLE: nunca se deja abierto el acceso. */
+async function replaceResourceAssignments(tenantId: string, memberId: string, kind: ResourceKind, ids: string[]) {
+  const config = resourceConfig[kind];
+  const supabase = getSupabaseServer();
+  const deleted = await supabase.from(config.assignmentTable).delete().eq('tenant_id', tenantId).eq('member_id', memberId);
+  if (deleted.error) {
+    if (isMissingRelation(deleted.error)) throw new Error('RESOURCE_ASSIGNMENTS_UNAVAILABLE');
+    fail(deleted.error);
+  }
+  if (!ids.length) return;
+  const inserted = await supabase.from(config.assignmentTable).insert(ids.map((id) => ({ tenant_id: tenantId, member_id: memberId, [config.column]: id })));
+  if (inserted.error) {
+    if (isMissingRelation(inserted.error)) throw new Error('RESOURCE_ASSIGNMENTS_UNAVAILABLE');
+    fail(inserted.error);
+  }
 }
 
 /**

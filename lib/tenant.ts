@@ -6,6 +6,7 @@ import type { PermissionAction, PermissionModule } from '@/lib/permissions';
 import { entitlementErrorResponse } from '@/lib/entitlement-guard';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { findMembership } from '@/lib/repositories/organization-repository';
+import type { ScopedResource } from '@/lib/data-scope';
 
 export type TenantRole =
   | 'owner' | 'admin' | 'gerente' | 'supervisor_sucursal' | 'vendedor' | 'cajero'
@@ -21,6 +22,8 @@ export interface TenantContext {
   warehouseIds: string[];
   /** Cajas asignadas explícitamente al miembro. Vacío = todas las de sus sucursales. */
   cashRegisterIds: string[];
+  /** Recursos sin tabla de asignación disponible: bloquean a miembros no administrativos. */
+  unavailableResources?: ScopedResource[];
   subscriptionStatus?: string;
 }
 
@@ -87,6 +90,7 @@ export async function requireTenantMember(request: NextRequest, allowedRoles?: T
     branchIds: membership.branchIds,
     warehouseIds: membership.warehouseIds,
     cashRegisterIds: membership.cashRegisterIds,
+    unavailableResources: membership.unavailableResources,
     subscriptionStatus: typeof membership.tenant.subscription_status === 'string' ? membership.tenant.subscription_status : undefined,
   };
 }
@@ -117,6 +121,9 @@ export function tenantErrorResponse(error: unknown) {
   if (code === 'BRANCH_NOT_FOUND') return { status: 404, body: { error: 'La sucursal no existe o no está activa.', code } };
   if (code === 'WAREHOUSE_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para ese almacén.', code } };
   if (code === 'CASH_REGISTER_OUT_OF_SCOPE') return { status: 403, body: { error: 'No tienes permisos para esa caja.', code } };
+  if (code === 'WAREHOUSE_NOT_FOUND') return { status: 404, body: { error: 'El almacén no existe o no está activo.', code } };
+  if (code === 'CASH_REGISTER_NOT_FOUND') return { status: 404, body: { error: 'La caja no existe o no está activa.', code } };
+  if (code === 'RESOURCE_ASSIGNMENTS_UNAVAILABLE') return { status: 503, body: { error: 'La asignación de almacenes y cajas todavía no está disponible en Supabase. Aplica la migración de accesos por miembro; mientras tanto solo los administradores pueden operar.', code: 'DATABASE_MIGRATION_REQUIRED' } };
   if (code === 'EMAIL_NOT_VERIFIED') return { status: 403, body: { error: 'Verifica tu correo electrónico antes de continuar.', code } };
   if (code === 'SESSION_EXPIRED') return { status: 401, body: { error: 'Tu sesión expiró. Inicia sesión nuevamente.', code } };
   if (code === 'MFA_REQUIRED') return { status: 403, body: { error: 'La autenticación multifactor es obligatoria para este rol.', code } };

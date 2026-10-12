@@ -1216,3 +1216,6 @@ button:disabled { cursor: not-allowed; opacity: .65; }
 .member-branch-option:has(input:checked) { background: #eff8e5; border-color: #c9e3a4; }
 .member-branch-option:has(input:disabled) { cursor: not-allowed; opacity: .6; }
 @media (max-width: 720px) { .member-branch-options { grid-template-columns: 1fr; } .member-branches-header .button { width: 100%; } }
+.member-resources { gap: 14px; }
+.member-resource-group { display: grid; gap: 8px; }
+.member-resources .member-branch-option { min-height: 44px; }

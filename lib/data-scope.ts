@@ -3,6 +3,8 @@ import type { TenantRole } from '@/lib/tenant';
 const ADMIN_ROLES = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 const SENSITIVE_FIELDS = new Set(['cost', 'unitCost', 'margin', 'profit', 'supplierCost', 'bankAccount', 'taxId', 'internalNotes']);
 
+export type ScopedResource = 'warehouses' | 'cashRegisters';
+
 export type ScopeContext = {
   role: TenantRole;
   branchIds?: readonly string[];
@@ -10,7 +12,20 @@ export type ScopeContext = {
   warehouseIds?: readonly string[];
   /** Cajas asignadas explícitamente. Vacío o ausente = todas las cajas de sus sucursales. */
   cashRegisterIds?: readonly string[];
+  /**
+   * Recursos cuya tabla de asignación no existe en la base. Para miembros no administrativos
+   * se deniega el acceso (fail-closed): sin la tabla no se puede saber si existe una restricción.
+   */
+  unavailableResources?: readonly ScopedResource[];
 };
+
+function isResourceUnavailable(context: ScopeContext, resource: ScopedResource): boolean {
+  return !ADMIN_ROLES.has(context.role) && Boolean(context.unavailableResources?.includes(resource));
+}
+
+export function assertResourceAssignmentsAvailable(context: ScopeContext, resource: ScopedResource): void {
+  if (isResourceUnavailable(context, resource)) throw new Error('RESOURCE_ASSIGNMENTS_UNAVAILABLE');
+}
 
 export function canAccessBranch(context: ScopeContext, branchId: unknown): boolean {
   if (ADMIN_ROLES.has(context.role)) return true;
@@ -25,28 +40,34 @@ export function assertBranchAccess(context: ScopeContext, branchId: unknown): vo
 /** Sin almacenes asignados explícitamente el miembro accede a todos; los roles administrativos siempre pasan. */
 export function canAccessWarehouse(context: ScopeContext, warehouseId: unknown): boolean {
   if (ADMIN_ROLES.has(context.role)) return true;
+  if (isResourceUnavailable(context, 'warehouses')) return false;
   if (!context.warehouseIds?.length) return true;
   return typeof warehouseId === 'string' && context.warehouseIds.includes(warehouseId);
 }
 
 export function assertWarehouseAccess(context: ScopeContext, warehouseId: unknown): void {
+  assertResourceAssignmentsAvailable(context, 'warehouses');
   if (!canAccessWarehouse(context, warehouseId)) throw new Error('WAREHOUSE_OUT_OF_SCOPE');
 }
 
 /** Sin cajas asignadas explícitamente el miembro accede a todas; los roles administrativos siempre pasan. */
 export function canAccessCashRegister(context: ScopeContext, cashRegisterId: unknown): boolean {
   if (ADMIN_ROLES.has(context.role)) return true;
+  if (isResourceUnavailable(context, 'cashRegisters')) return false;
   if (!context.cashRegisterIds?.length) return true;
   return typeof cashRegisterId === 'string' && context.cashRegisterIds.includes(cashRegisterId);
 }
 
 export function assertCashRegisterAccess(context: ScopeContext, cashRegisterId: unknown): void {
+  assertResourceAssignmentsAvailable(context, 'cashRegisters');
   if (!canAccessCashRegister(context, cashRegisterId)) throw new Error('CASH_REGISTER_OUT_OF_SCOPE');
 }
 
-/** Filtra una lista de ids a los que el contexto puede ver. Sin asignación explícita devuelve todos. */
-export function filterAuthorizedIds(context: ScopeContext, ids: readonly string[], assigned?: readonly string[]): string[] {
-  if (ADMIN_ROLES.has(context.role) || !assigned?.length) return [...ids];
+/** Filtra una lista de ids a los que el contexto puede ver. Sin asignación explícita devuelve todos (salvo recurso no disponible). */
+export function filterAuthorizedIds(context: ScopeContext, ids: readonly string[], assigned?: readonly string[], resource?: ScopedResource): string[] {
+  if (ADMIN_ROLES.has(context.role)) return [...ids];
+  if (resource && isResourceUnavailable(context, resource)) return [];
+  if (!assigned?.length) return [...ids];
   return ids.filter((id) => assigned.includes(id));
 }
 
