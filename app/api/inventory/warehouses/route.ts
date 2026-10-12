@@ -33,9 +33,27 @@ type ProductNameRow = { id: string; name?: string; sku?: string };
 
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 function units(value: unknown) { return Number(value || 0); }
+const INVENTORY_ERROR_CODES: ReadonlyArray<readonly [code: string, status: number, message: string]> = [
+  ['INVENTORY_MOVEMENT_ZERO', 409, 'El conteo no se registró porque no produjo una diferencia. Verifica el stock y la actualización de inventario antes de reintentarlo.'],
+  ['INSUFFICIENT_STOCK:RESERVED', 409, 'El conteo no puede dejar el stock por debajo de las unidades reservadas.'],
+  ['INSUFFICIENT_STOCK', 409, 'El movimiento dejaría el inventario en negativo.'],
+  ['INVALID_QUANTITY', 400, 'La cantidad indicada no es válida.'],
+  ['INVALID_MOVEMENT_TYPE', 400, 'El tipo de movimiento no es válido.'],
+  ['PRODUCT_NOT_FOUND', 404, 'El producto no existe o está archivado.'],
+  ['WAREHOUSE_NOT_FOUND', 404, 'El almacén no existe o está inactivo.'],
+];
+
+function inventoryErrorResponse(error: unknown) {
+  const code = error instanceof Error ? error.message.trim() : typeof error === 'string' ? error.trim() : '';
+  const mapping = INVENTORY_ERROR_CODES.find(([prefix]) => code === prefix || code.startsWith(`${prefix}:`));
+  return mapping ? { status: mapping[1], body: { error: mapping[2], code } } : null;
+}
+
 function errorResponse(error: unknown) {
   const transferError = transferErrorResponse(error);
   if (transferError) return NextResponse.json(transferError.body, { status: transferError.status });
+  const inventoryError = inventoryErrorResponse(error);
+  if (inventoryError) return NextResponse.json(inventoryError.body, { status: inventoryError.status });
   const response = tenantErrorResponse(error);
   return NextResponse.json(response.body, { status: response.status });
 }
@@ -217,7 +235,20 @@ export async function POST(request: NextRequest) {
       const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: action === 'receive' ? 'receive' : 'set', target_quantity: targetQuantity, target_reason: reason, target_user_id: context.uid });
       if (result.error) throw new Error(result.error.message);
       const row = Array.isArray(result.data) ? result.data[0] : result.data;
-      await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: `inventory.${action}`, entity: 'product', entityId: productId, before: { stock: row?.previous_quantity }, after: { stock: row?.new_quantity, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory/warehouses' }, result: 'success' });
+      try {
+        await writeImmutableAudit({ tenantId: context.tenantId, actor: context, action: `inventory.${action}`, entity: 'product', entityId: productId, before: { stock: row?.previous_quantity }, after: { stock: row?.new_quantity, reason }, request: { requestId: request.headers.get('x-correlation-id') || undefined, method: 'POST', path: '/api/inventory/warehouses' }, result: 'success' });
+      } catch (error: unknown) {
+        if (action !== 'count') throw error;
+        return NextResponse.json({
+          error: 'El conteo actualizó el stock, pero no se pudo confirmar la auditoría. Revisa el stock y el historial antes de volver a intentarlo.',
+          code: 'INVENTORY_COUNT_AUDIT_FAILED',
+          applied: true,
+          current: row?.previous_quantity ?? null,
+          next: row?.new_quantity ?? null,
+          difference: row?.delta ?? null,
+          movementId: row?.movement_id ?? null,
+        }, { status: 500 });
+      }
       return NextResponse.json({ ok: true, status: 'completed', current: row?.previous_quantity, next: row?.new_quantity, difference: row?.delta, movementId: row?.movement_id }, { status: 201 });
     }
 

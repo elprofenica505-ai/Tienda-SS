@@ -11,6 +11,17 @@ import {
 import { seedMember, startFakeSupabase, type FakeRow, type FakeSupabase } from './helpers/fake-supabase';
 
 type RouteModule = typeof import('@/app/api/inventory/warehouses/route');
+type TransferResponseRow = {
+  transferNumber: string;
+  status: string;
+  originWarehouseId: string;
+  destinationWarehouseId: string;
+  requested: number;
+  shipped: number;
+  received: number;
+  pending: number;
+  items: FakeRow[];
+};
 
 const TENANT_ID = '11111111-1111-4111-8111-111111111111';
 const BRANCH_ID = '22222222-2222-4222-8222-222222222222';
@@ -212,7 +223,7 @@ test('los totales de la transferencia salen de sus líneas', () => {
 test('GET: entrega existencias canónicas y las transferencias reales con sus líneas', async () => {
   const response = await route.GET(request(OWNER_TOKEN, 'principal', 'GET', undefined, `?warehouseId=${ORIGIN_WAREHOUSE_ID}`));
   assert.equal(response.status, 200);
-  const body = await response.json() as { warehouses: FakeRow[]; stocks: FakeRow[]; transfers: Array<Record<string, any>> };
+  const body = await response.json() as { warehouses: FakeRow[]; stocks: FakeRow[]; transfers: TransferResponseRow[] };
 
   assert.equal(body.warehouses.length, 2, 'sólo los almacenes de la sucursal activa');
   assert.deepEqual(body.stocks[0], {
@@ -416,6 +427,67 @@ test('POST: un estado inválido se reporta como conflicto con el código del SQL
   const response = await route.POST(request(OWNER_TOKEN, 'principal', 'POST', { action: 'dispatch-transfer', transferId: TRANSFER_ID }));
   assert.equal(response.status, 409);
   assert.equal((await response.json() as FakeRow).code, 'INVALID_TRANSFER_STATUS:draft');
+});
+
+test('POST count: un conteo igual al stock registra auditoría y responde éxito sin movimiento', async () => {
+  fake.rpc.adjust_inventory = () => ({ body: { previous_quantity: 40, new_quantity: 40, delta: 0, movement_id: null } });
+  const response = await route.POST(request(OWNER_TOKEN, 'principal', 'POST', {
+    action: 'count',
+    warehouseId: ORIGIN_WAREHOUSE_ID,
+    productId: PRODUCT_ID,
+    countedQuantity: 40,
+    reason: 'Conteo físico sin diferencia',
+  }));
+
+  assert.equal(response.status, 201);
+  const body = await response.json() as FakeRow;
+  assert.equal(body.current, 40);
+  assert.equal(body.next, 40);
+  assert.equal(body.difference, 0);
+  assert.equal(body.movementId, null);
+  assert.equal(rpcCall('adjust_inventory').length, 1);
+  assert.equal(auditCalls.length, 1);
+  assert.equal(auditCalls[0].target_action, 'inventory.count');
+  const auditPayload = auditCalls[0].target_payload as { after?: { stock?: number; reason?: string } };
+  assert.deepEqual(auditPayload.after, { stock: 40, reason: 'Conteo físico sin diferencia' });
+});
+
+test('POST count: traduce el antiguo rechazo de movimiento cero a un conflicto explícito', async () => {
+  fake.rpc.adjust_inventory = () => sqlError('INVENTORY_MOVEMENT_ZERO');
+  const response = await route.POST(request(OWNER_TOKEN, 'principal', 'POST', {
+    action: 'count',
+    warehouseId: ORIGIN_WAREHOUSE_ID,
+    productId: PRODUCT_ID,
+    countedQuantity: 40,
+    reason: 'Conteo físico',
+  }));
+
+  assert.equal(response.status, 409);
+  assert.equal((await response.json() as FakeRow).code, 'INVENTORY_MOVEMENT_ZERO');
+  assert.equal(rpcCall('adjust_inventory').length, 1);
+  assert.equal(auditCalls.length, 0, 'una RPC revertida no se audita como éxito');
+});
+
+test('POST count: si falla la auditoría después de la RPC, informa que el ajuste ya se aplicó', async () => {
+  fake.rpc.adjust_inventory = () => ({ body: { previous_quantity: 40, new_quantity: 39, delta: -1, movement_id: 'count-movement-1' } });
+  fake.rpc.append_audit_log = () => sqlError('AUDIT_WRITE_FAILED', 500);
+  const response = await route.POST(request(OWNER_TOKEN, 'principal', 'POST', {
+    action: 'count',
+    warehouseId: ORIGIN_WAREHOUSE_ID,
+    productId: PRODUCT_ID,
+    countedQuantity: 39,
+    reason: 'Conteo físico',
+  }));
+
+  assert.equal(response.status, 500);
+  const body = await response.json() as FakeRow;
+  assert.equal(body.code, 'INVENTORY_COUNT_AUDIT_FAILED');
+  assert.equal(body.applied, true);
+  assert.equal(body.current, 40);
+  assert.equal(body.next, 39);
+  assert.equal(body.difference, -1);
+  assert.equal(body.movementId, 'count-movement-1');
+  assert.equal(rpcCall('adjust_inventory').length, 1, 'la ruta no reenvía la RPC');
 });
 
 test('POST: el conteo físico sigue usando adjust_inventory y su aprobación exige jefatura', async () => {
