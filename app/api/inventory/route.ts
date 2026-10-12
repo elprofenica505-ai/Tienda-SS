@@ -3,7 +3,8 @@ import { DEFAULT_PAGE_SIZE, paginatedResponse, parseCursor, parsePageSize } from
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse } from '@/lib/tenant';
 import { writeImmutableAudit } from '@/lib/audit';
-import { resolveAuthorizedBranchId, resolveTenantWarehouseId } from '@/lib/organization-scope';
+import { resolveAuthorizedBranchId, resolveTenantBranchIds, resolveTenantWarehouseId } from '@/lib/organization-scope';
+import { assertResourceAssignmentsAvailable, assertWarehouseAccess, canAccessWarehouse } from '@/lib/data-scope';
 
 export const runtime = 'nodejs';
 function text(value: unknown, max = 180) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
@@ -12,9 +13,17 @@ type InventoryProduct = { id: string; name: string; sku: string; imageUrl?: stri
 function productImage(metadata: unknown) { const value = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>).imageUrl || (metadata as Record<string, unknown>).image_url : null; return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null; }
 function responseFor(error: unknown) { const message = error instanceof Error ? error.message : ''; if (message.includes('PRODUCT_NOT_FOUND')) return NextResponse.json({ error: 'El producto no existe o está archivado.' }, { status: 404 }); if (message.includes('WAREHOUSE_NOT_FOUND')) return NextResponse.json({ error: 'El almacén no existe o está inactivo.' }, { status: 404 }); if (message.includes('INSUFFICIENT_STOCK:RESERVED')) return NextResponse.json({ error: 'El movimiento dejaría el stock por debajo de las unidades apartadas.', code: 'INSUFFICIENT_STOCK:RESERVED' }, { status: 409 }); if (message.includes('INSUFFICIENT_WAREHOUSE_STOCK')) return NextResponse.json({ error: 'No hay existencia disponible suficiente en el almacén.', code: 'INSUFFICIENT_WAREHOUSE_STOCK' }, { status: 409 }); if (message.includes('INSUFFICIENT_STOCK')) return NextResponse.json({ error: 'El movimiento dejaría el inventario en negativo.' }, { status: 409 }); const response = tenantErrorResponse(error); return NextResponse.json(response.body, { status: response.status }); }
 
+function movementBranchId(item: Record<string, unknown>): string {
+  const w = item.warehouses;
+  if (Array.isArray(w) && w[0] && typeof w[0] === 'object') return String((w[0] as Record<string, unknown>).branch_id || '');
+  if (w && typeof w === 'object') return String((w as Record<string, unknown>).branch_id || '');
+  return '';
+}
+
 export async function GET(request: NextRequest) {
   try {
     const context = await requireTenantPermission(request, 'inventory', 'view');
+    assertResourceAssignmentsAvailable(context, 'warehouses');
     const supabase = getSupabaseServer();
     const params = new URL(request.url).searchParams;
     const productsRequested = params.get('products') === 'true';
@@ -23,53 +32,63 @@ export async function GET(request: NextRequest) {
     let productQuery = supabase.from('products').select('id,name,sku,item_type,min_stock,active,metadata').eq('tenant_id', context.tenantId).eq('active', true).order('name').order('id').limit(pageSize + 1);
     if (rawCursor) { try { const cursor = JSON.parse(Buffer.from(rawCursor, 'base64url').toString('utf8')) as { name?: string; id?: string }; if (cursor.name && cursor.id) productQuery = productQuery.or(`name.gt.${cursor.name},and(name.eq.${cursor.name},id.gt.${cursor.id})`); } catch { return NextResponse.json({ error: 'Cursor de inventario inválido.' }, { status: 400 }); } }
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const userBranchDbIds = await resolveTenantBranchIds(context.tenantId, context.branchIds);
     const authorizedWarehouses = await supabase.from('warehouses').select('id,branch_id').eq('tenant_id', context.tenantId).eq('active', true);
     if (authorizedWarehouses.error) throw new Error(authorizedWarehouses.error.message);
     const allowedWarehouseIds = (authorizedWarehouses.data || [])
-      .filter((warehouse: any) => ['owner', 'admin', 'gerente', 'jefe'].includes(context.role) || context.branchIds.includes(String(warehouse.branch_id)))
-      .map((warehouse: any) => String(warehouse.id));
+      .filter((warehouse: { id: string; branch_id: string }) =>
+        (['owner', 'admin', 'gerente', 'jefe'].includes(context.role) ||
+          context.branchIds.includes(String(warehouse.branch_id)) ||
+          userBranchDbIds.includes(String(warehouse.branch_id))) &&
+        canAccessWarehouse(context, String(warehouse.id))
+      )
+      .map((warehouse: { id: string }) => String(warehouse.id));
     const [movementsResult, productsResult] = await Promise.all([
       supabase.from('inventory_movements').select('id,product_id,warehouse_id,movement_type,quantity,unit_cost,reference_type,reference_id,performed_by,metadata,created_at,warehouses!inner(branch_id)').eq('tenant_id', context.tenantId).gte('created_at', cutoff).order('created_at', { ascending: false }).limit(DEFAULT_PAGE_SIZE),
-      productsRequested ? productQuery : Promise.resolve({ data: [], error: null } as any),
+      productsRequested ? productQuery : Promise.resolve({ data: [], error: null } as unknown as { data: Array<Record<string, unknown>>; error: null }),
     ]);
     if (movementsResult.error) throw new Error(movementsResult.error.message);
     if (productsResult.error) throw new Error(productsResult.error.message);
-    const movementRows = (movementsResult.data || []).filter((row) => context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' || context.branchIds.includes(String((row as any).warehouses?.branch_id || '')));
-    const movementProductIds = Array.from(new Set(movementRows.map((row: any) => String(row.product_id))));
-    const movementActorIds = Array.from(new Set(movementRows.map((row: any) => String(row.performed_by || '')).filter(Boolean)));
+    const movementRows = ((movementsResult.data || []) as unknown as Array<Record<string, unknown>>).filter((row) => {
+      const bId = movementBranchId(row);
+      return context.role === 'owner' || context.role === 'admin' || context.role === 'gerente' || context.role === 'jefe' ||
+        ((context.branchIds.includes(bId) || userBranchDbIds.includes(bId)) && canAccessWarehouse(context, String(row.warehouse_id || '')));
+    });
+    const movementProductIds = Array.from(new Set(movementRows.map((row) => String(row.product_id || ''))));
+    const movementActorIds = Array.from(new Set(movementRows.map((row) => String(row.performed_by || '')).filter(Boolean)));
     const [movementProducts, movementActors] = await Promise.all([
-      movementProductIds.length ? supabase.from('products').select('id,name,sku').eq('tenant_id', context.tenantId).in('id', movementProductIds) : Promise.resolve({ data: [], error: null } as any),
-      movementActorIds.length ? supabase.from('profiles').select('auth_user_id,display_name,email').in('auth_user_id', movementActorIds) : Promise.resolve({ data: [], error: null } as any),
+      movementProductIds.length ? supabase.from('products').select('id,name,sku').eq('tenant_id', context.tenantId).in('id', movementProductIds) : Promise.resolve({ data: [], error: null } as unknown as { data: Array<Record<string, unknown>>; error: null }),
+      movementActorIds.length ? supabase.from('profiles').select('auth_user_id,display_name,email').in('auth_user_id', movementActorIds) : Promise.resolve({ data: [], error: null } as unknown as { data: Array<Record<string, unknown>>; error: null }),
     ]);
     if (movementProducts.error) throw new Error(movementProducts.error.message);
     if (movementActors.error) throw new Error(movementActors.error.message);
-    const productById = new Map<string, { name?: string; sku?: string }>((movementProducts.data || []).map((item: any) => [String(item.id), item] as [string, { name?: string; sku?: string }]));
-    const actorById = new Map<string, { display_name?: string; email?: string }>((movementActors.data || []).map((item: any) => [String(item.auth_user_id), item] as [string, { display_name?: string; email?: string }]));
-    const movements = movementRows.map((row: any) => ({
-      id: row.id,
-      productId: row.product_id,
+    const productById = new Map<string, { name?: string; sku?: string }>(((movementProducts.data || []) as unknown as Array<{ id: string; name?: string; sku?: string }>).map((item) => [String(item.id), item]));
+    const actorById = new Map<string, { display_name?: string; email?: string }>(((movementActors.data || []) as unknown as Array<{ auth_user_id: string; display_name?: string; email?: string }>).map((item) => [String(item.auth_user_id), item]));
+    const movements = movementRows.map((row) => ({
+      id: String(row.id || ''),
+      productId: String(row.product_id || ''),
       productName: productById.get(String(row.product_id))?.name || 'Producto archivado',
       productSku: productById.get(String(row.product_id))?.sku || '',
-      warehouseId: row.warehouse_id,
-      type: row.movement_type,
+      warehouseId: String(row.warehouse_id || ''),
+      type: String(row.movement_type || ''),
       quantity: Number(row.quantity || 0),
       delta: Number(row.quantity || 0),
-      reason: row.metadata?.reason || row.metadata?.notes || row.reference_type || 'Movimiento de inventario',
+      reason: (row.metadata && typeof row.metadata === 'object' && ((row.metadata as Record<string, unknown>).reason || (row.metadata as Record<string, unknown>).notes)) || row.reference_type || 'Movimiento de inventario',
       referenceType: row.reference_type,
       referenceId: row.reference_id,
       unitCost: Number(row.unit_cost || 0),
       performedBy: row.performed_by,
       performedByName: actorById.get(String(row.performed_by))?.display_name || actorById.get(String(row.performed_by))?.email || row.performed_by || 'Sistema',
       performedByEmail: actorById.get(String(row.performed_by))?.email || '',
-      createdAt: row.created_at,
+      createdAt: String(row.created_at || ''),
     }));
-    const productPage = (productsResult.data || []).slice(0, pageSize);
-    const productIds = productPage.map((row: any) => row.id);
+    const productPage = ((productsResult.data || []) as unknown as Array<{ id: string; name: string; sku: string; metadata?: Record<string, unknown>; item_type: string; min_stock?: number; active: boolean }>).slice(0, pageSize);
+    const productIds = productPage.map((row) => row.id);
     const stocks = productIds.length && allowedWarehouseIds.length ? await supabase.from('inventory_stocks').select('product_id, quantity, reserved_quantity, in_transit_quantity, reorder_point, warehouse_id').eq('tenant_id', context.tenantId).in('product_id', productIds).in('warehouse_id', allowedWarehouseIds) : { data: [], error: null };
     if (stocks.error) throw new Error(stocks.error.message);
     const stockByProduct = new Map<string, { quantity: number; reserved: number; inTransit: number }>();
-    for (const stock of stocks.data || []) { const current = stockByProduct.get(stock.product_id) || { quantity: 0, reserved: 0, inTransit: 0 }; current.quantity += Number(stock.quantity || 0); current.reserved += Number(stock.reserved_quantity || 0); current.inTransit += Number(stock.in_transit_quantity || 0); stockByProduct.set(stock.product_id, current); }
-    const products: InventoryProduct[] = productPage.map((row: any) => { const stock = stockByProduct.get(row.id) || { quantity: 0, reserved: 0, inTransit: 0 }; return { id: row.id, name: row.name, sku: row.sku, imageUrl: productImage(row.metadata), itemType: row.item_type, stock: stock.quantity, reserved: stock.reserved, available: Math.max(0, stock.quantity - stock.reserved), inTransit: stock.inTransit, minStock: Number(row.min_stock || 0), active: row.active }; });
+    for (const stock of (stocks.data || []) as unknown as Array<{ product_id: string; quantity?: number; reserved_quantity?: number; in_transit_quantity?: number }>) { const current = stockByProduct.get(stock.product_id) || { quantity: 0, reserved: 0, inTransit: 0 }; current.quantity += Number(stock.quantity || 0); current.reserved += Number(stock.reserved_quantity || 0); current.inTransit += Number(stock.in_transit_quantity || 0); stockByProduct.set(stock.product_id, current); }
+    const products: InventoryProduct[] = productPage.map((row) => { const stock = stockByProduct.get(row.id) || { quantity: 0, reserved: 0, inTransit: 0 }; return { id: row.id, name: row.name, sku: row.sku, imageUrl: productImage(row.metadata), itemType: row.item_type, stock: stock.quantity, reserved: stock.reserved, available: Math.max(0, stock.quantity - stock.reserved), inTransit: stock.inTransit, minStock: Number(row.min_stock || 0), active: row.active }; });
     const lowStock = products.filter((item) => item.itemType !== 'service' && item.stock <= item.minStock);
     const next = (productsResult.data || []).length > pageSize ? productPage[productPage.length - 1] : null;
     const nextCursor = next ? Buffer.from(JSON.stringify({ name: next.name, id: next.id }), 'utf8').toString('base64url') : undefined;
@@ -89,12 +108,14 @@ export async function POST(request: NextRequest) {
     let warehouseId = text(body.warehouseId, 120);
     if (!productId || !movementType || quantity <= 0) return NextResponse.json({ error: 'Producto, tipo y cantidad son obligatorios.' }, { status: 400 });
     const branchId = await resolveAuthorizedBranchId(context, request.headers.get('x-branch-id') || undefined);
-    if (!warehouseId) warehouseId = await resolveTenantWarehouseId(context.tenantId, branchId);
-    if (!warehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+    const resolvedWarehouseId = await resolveTenantWarehouseId(context.tenantId, branchId, warehouseId);
+    if (!resolvedWarehouseId) throw new Error('WAREHOUSE_NOT_FOUND');
+    warehouseId = resolvedWarehouseId;
     const warehouse = await supabase.from('warehouses').select('id,branch_id').eq('tenant_id', context.tenantId).eq('id', warehouseId).eq('active', true).maybeSingle();
     if (warehouse.error) throw new Error(warehouse.error.message);
     if (!warehouse.data) throw new Error('WAREHOUSE_NOT_FOUND');
     if (String(warehouse.data.branch_id) !== branchId) throw new Error('BRANCH_OUT_OF_SCOPE');
+    assertWarehouseAccess(context, warehouseId);
     const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: movementType, target_quantity: quantity, target_reason: reason, target_user_id: context.uid });
     if (result.error) throw new Error(result.error.message);
     const row = Array.isArray(result.data) ? result.data[0] : result.data;

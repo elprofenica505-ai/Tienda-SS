@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireTenantPermission, tenantErrorResponse, type TenantContext } from '@/lib/tenant';
-import { assertBranchAccess } from '@/lib/data-scope';
+import { assertBranchAccess, assertResourceAssignmentsAvailable, assertWarehouseAccess, canAccessWarehouse } from '@/lib/data-scope';
 import { writeImmutableAudit } from '@/lib/audit';
 import { parseReceiptItems, parseTransferItems, transferErrorResponse, transferTotals } from '@/lib/inventory-transfers';
 
@@ -138,12 +138,14 @@ function audit(request: NextRequest, context: TenantContext, action: string, ent
 export async function GET(request: NextRequest) {
   try {
     const { context, dbBranchId } = await contextFor(request, 'view');
+    assertResourceAssignmentsAvailable(context, 'warehouses');
     const warehouseId = text(new URL(request.url).searchParams.get('warehouseId'), 128);
     const supabase = getSupabaseServer();
     const warehousesResult = await supabase.from('warehouses').select('id,tenant_id,branch_id,code,name,active').eq('tenant_id', context.tenantId).eq('branch_id', dbBranchId).eq('active', true).order('name').limit(100);
     if (warehousesResult.error) throw new Error(warehousesResult.error.message);
-    const warehouses = warehousesResult.data || [];
+    const warehouses = (warehousesResult.data || []).filter((row) => canAccessWarehouse(context, String(row.id)));
     if (warehouseId && !warehouses.some((row) => row.id === warehouseId)) return NextResponse.json({ error: 'El almacén no está autorizado para este usuario.' }, { status: 403 });
+    if (warehouseId) assertWarehouseAccess(context, warehouseId);
     const warehouseIds: string[] = (warehouseId ? warehouses.filter((row) => row.id === warehouseId) : warehouses).map((row) => String(row.id));
     const stockResult = warehouseId ? await supabase.from('inventory_stocks').select('id,warehouse_id,product_id,quantity,reserved_quantity,in_transit_quantity,reorder_point,average_cost,updated_at,products(id,name,sku,price,cost,item_type,active)').eq('tenant_id', context.tenantId).eq('warehouse_id', warehouseId).limit(500) : { data: [], error: null };
     if (stockResult.error) throw new Error(stockResult.error.message);
@@ -232,6 +234,7 @@ export async function POST(request: NextRequest) {
       const warehouse = await supabase.from('warehouses').select('id').eq('tenant_id', context.tenantId).eq('id', warehouseId).eq('branch_id', dbBranchId).eq('active', true).maybeSingle();
       if (warehouse.error) throw new Error(warehouse.error.message);
       if (!warehouse.data) return NextResponse.json({ error: 'El almacén no pertenece a la sucursal activa.' }, { status: 404 });
+      assertWarehouseAccess(context, warehouseId);
       const result = await supabase.rpc('adjust_inventory', { target_tenant_id: context.tenantId, target_product_id: productId, target_warehouse_id: warehouseId, target_movement_type: action === 'receive' ? 'receive' : 'set', target_quantity: targetQuantity, target_reason: reason, target_user_id: context.uid });
       if (result.error) throw new Error(result.error.message);
       const row = Array.isArray(result.data) ? result.data[0] : result.data;
@@ -259,6 +262,7 @@ export async function POST(request: NextRequest) {
         const destination = await resolveTransferWarehouse(context, text(body.toWarehouseId, 128) || text(body.destinationWarehouseId, 128), 'DESTINATION_WAREHOUSE_NOT_FOUND');
         const branchNames = await branchClientIds(context.tenantId, [origin.branchId, destination.branchId]);
         await assertTransferBranchScope(context, dbBranchId, [origin.branchId, destination.branchId], branchNames);
+        assertWarehouseAccess(context, origin.warehouseId);
         const items = parseTransferItems(body);
         const reason = text(body.reason, 300) || 'Transferencia entre almacenes';
         const result = await supabase.rpc('create_stock_transfer', { target_tenant_id: context.tenantId, target_origin_warehouse_id: origin.warehouseId, target_destination_warehouse_id: destination.warehouseId, target_user_id: context.uid, target_items: items, target_reason: reason });
@@ -274,6 +278,8 @@ export async function POST(request: NextRequest) {
       const sideBranchId = String(transferRpc === 'receive_stock_transfer' ? transfer.destination_branch_id : transfer.origin_branch_id);
       const branchNames = await branchClientIds(context.tenantId, [sideBranchId]);
       await assertTransferBranchScope(context, dbBranchId, [sideBranchId], branchNames);
+      const sideWarehouseId = String(transferRpc === 'receive_stock_transfer' ? transfer.destination_warehouse_id : transfer.origin_warehouse_id);
+      assertWarehouseAccess(context, sideWarehouseId);
       const args = transferRpc === 'receive_stock_transfer'
         ? { target_tenant_id: context.tenantId, target_transfer_id: transferId, target_user_id: context.uid, target_items: parseReceiptItems(body) }
         : transferRpc === 'cancel_stock_transfer'
