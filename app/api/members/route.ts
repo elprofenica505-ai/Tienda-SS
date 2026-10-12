@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase/server';
 import { requireSupabaseTenantPermission } from '@/lib/supabase/tenant-access';
 import { tenantErrorResponse, type TenantRole } from '@/lib/tenant';
+import { assertCashRegisterAccess, assertWarehouseAccess, type ScopeContext } from '@/lib/data-scope';
 import { canAssignRole, canManageRole } from '@/lib/role-policy';
-import { createMember, findMemberByAuthUserId, listMembers, updateMember } from '@/lib/repositories/member-repository';
+import { createMember, findMemberByAuthUserId, listMembers, resolveResourceReferences, updateMember, type ResourceAssignments } from '@/lib/repositories/member-repository';
 
 export const runtime = 'nodejs';
 const assignableRoles: TenantRole[] = ['admin', 'gerente', 'supervisor_sucursal', 'vendedor', 'cajero', 'bodega', 'compras', 'chofer', 'despachador', 'solo_lectura', 'jefe'];
 const globalMemberRoles = new Set<TenantRole>(['owner', 'admin', 'gerente', 'jefe']);
 function text(value: unknown, max = 160) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
-function branchIds(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()).slice(0, 100))) : []; }
+function referenceIds(value: unknown): string[] { return Array.isArray(value) ? Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map((item) => item.trim()).slice(0, 100))) : []; }
 function responseFor(error: unknown) {
   const message = error instanceof Error ? error.message : '';
   if (message.startsWith('SUPABASE_') || message.includes('relation') || message.includes('schema cache')) return NextResponse.json({ error: 'La conexión del servidor con Supabase no está configurada correctamente.' }, { status: 503 });
@@ -23,11 +24,32 @@ async function findAuthUserByEmail(email: string) {
 }
 function canManageMemberBranches(context: { role: TenantRole; branchIds: string[] }, member: { branchIds?: unknown }) {
   if (globalMemberRoles.has(context.role)) return true;
-  const targetBranches = branchIds(member.branchIds);
+  const targetBranches = referenceIds(member.branchIds);
   return targetBranches.length > 0 && targetBranches.some((id) => context.branchIds.includes(id));
 }
+/** Valida que el admin que asigna pueda tocar cada almacén/caja: sucursal dentro de su alcance y recurso asignado a él. */
+function assertResourceAssignable(context: ScopeContext, kind: 'warehouses' | 'cashRegisters', resource: { id: string; branchRef: string }) {
+  if (!globalMemberRoles.has(context.role) && !context.branchIds?.includes(resource.branchRef)) throw new Error('BRANCH_OUT_OF_SCOPE');
+  if (kind === 'warehouses') assertWarehouseAccess(context, resource.id);
+  else assertCashRegisterAccess(context, resource.id);
+}
+async function requestedResources(context: ScopeContext & { tenantId: string }, body: Record<string, unknown>): Promise<ResourceAssignments | undefined> {
+  if (body.warehouseIds === undefined && body.cashRegisterIds === undefined) return undefined;
+  const resources: ResourceAssignments = {};
+  if (body.warehouseIds !== undefined) {
+    const warehouses = await resolveResourceReferences(context.tenantId, 'warehouses', referenceIds(body.warehouseIds));
+    warehouses.forEach((warehouse) => assertResourceAssignable(context, 'warehouses', warehouse));
+    resources.warehouseIds = warehouses.map((warehouse) => warehouse.id);
+  }
+  if (body.cashRegisterIds !== undefined) {
+    const cashRegisters = await resolveResourceReferences(context.tenantId, 'cashRegisters', referenceIds(body.cashRegisterIds));
+    cashRegisters.forEach((cashRegister) => assertResourceAssignable(context, 'cashRegisters', cashRegister));
+    resources.cashRegisterIds = cashRegisters.map((cashRegister) => cashRegister.id);
+  }
+  return resources;
+}
 function requestedBranchIds(context: { role: TenantRole; branchIds: string[] }, value: unknown) {
-  const requested = branchIds(value);
+  const requested = referenceIds(value);
   if (globalMemberRoles.has(context.role)) return requested;
   if (!requested.length || requested.some((id) => !context.branchIds.includes(id))) throw new Error('BRANCH_OUT_OF_SCOPE');
   return requested;
@@ -81,13 +103,15 @@ export async function PATCH(request: NextRequest) {
       changes.role = body.role;
     }
     let nextBranchIds: string[] | undefined;
-    if (body.branchIds !== undefined) {
-      try { nextBranchIds = requestedBranchIds(context, body.branchIds); } catch (error) { return responseFor(error); }
-    }
+    let resources: ResourceAssignments | undefined;
+    try {
+      if (body.branchIds !== undefined) nextBranchIds = requestedBranchIds(context, body.branchIds);
+      resources = await requestedResources(context, body);
+    } catch (error) { return responseFor(error); }
     if (typeof body.status === 'string' && ['active', 'disabled'].includes(body.status)) changes.status = body.status;
-    if (!Object.keys(changes).length && !nextBranchIds) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
-    await updateMember(context.tenantId, uid, changes, nextBranchIds);
-    return NextResponse.json({ ok: true, uid, changes: { ...changes, ...(nextBranchIds ? { branchIds: nextBranchIds } : {}) } });
+    if (!Object.keys(changes).length && !nextBranchIds && !resources) return NextResponse.json({ error: 'No hay cambios válidos.' }, { status: 400 });
+    await updateMember(context.tenantId, uid, changes, nextBranchIds, resources);
+    return NextResponse.json({ ok: true, uid, changes: { ...changes, ...(nextBranchIds ? { branchIds: nextBranchIds } : {}), ...(resources || {}) } });
   } catch (error: unknown) { return responseFor(error); }
 }
 
