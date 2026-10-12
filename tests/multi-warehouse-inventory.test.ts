@@ -17,6 +17,7 @@ import {
 } from '@/lib/inventory-transfers';
 
 const migrationFile = readFileSync('supabase/migrations/20261010000001_multi_warehouse_inventory.sql', 'utf8');
+const zeroDeltaCountMigration = readFileSync('supabase/migrations/20261011000002_fix_zero_delta_inventory_counts.sql', 'utf8');
 const warehouseInventoryPage = readFileSync('app/workspace/warehouse-inventory/page.tsx', 'utf8');
 const globalStyles = readFileSync('app/globals.css', 'utf8');
 /** Los contratos se verifican sobre el SQL ejecutable, no sobre la documentación. */
@@ -71,6 +72,47 @@ test('transferencias apiladas mantienen estado y acciones disponibles en móvil'
 test('el recorte móvil de columnas solo aplica a Inventario general y transferencias conservan cuatro columnas en escritorio', () => {
   assert.match(globalStyles, /\.inventory-main \.inventory-row span:nth-child\(2\),\.inventory-main \.inventory-row span:nth-child\(4\),\.inventory-main \.inventory-row-head span:nth-child\(2\),\.inventory-main \.inventory-row-head span:nth-child\(4\)\{display:none\}/);
   assert.match(globalStyles, /\.warehouse-transfer-table \.inventory-row\{grid-template-columns:minmax\(0,1\.4fr\) minmax\(0,1fr\) minmax\(0,1\.4fr\) minmax\(0,1fr\)\}/);
+});
+
+test('un error al registrar el conteo conserva los campos y refresca el stock antes de reintentar', () => {
+  const submitStart = warehouseInventoryPage.indexOf('  async function submit');
+  const receiveStart = warehouseInventoryPage.indexOf('  function receiveLine', submitStart);
+  const callStart = warehouseInventoryPage.indexOf('  const call = useCallback', 0);
+  assert.ok(submitStart >= 0 && receiveStart > submitStart);
+  assert.ok(callStart >= 0 && callStart < submitStart);
+  const submitSource = warehouseInventoryPage.slice(submitStart, receiveStart);
+  const callSource = warehouseInventoryPage.slice(callStart, submitStart);
+
+  assert.match(submitSource, /const saved = await call\(/);
+  assert.match(submitSource, /if \(saved\) setForm\(/, 'el formulario sólo se reinicia cuando la API confirmó éxito');
+  assert.doesNotMatch(submitSource, /await call\([^;]*\);\s*setForm\(/, 'no debe limpiar incondicionalmente después de un fallo capturado');
+  assert.match(callSource, /return false/);
+  assert.match(callSource, /if \(countOutcomeUncertain\) \{[\s\S]*?await load\(\)/);
+  assert.match(callSource, /verifícalo antes de volver a intentarlo/);
+  assert.match(warehouseInventoryPage, /value=\{form\.productId\}/);
+  assert.match(warehouseInventoryPage, /value=\{form\.countedQuantity\}/);
+  assert.match(warehouseInventoryPage, /value=\{form\.reason\}/);
+});
+
+test('una respuesta exitosa del conteo confirma la operación antes de limpiar el formulario', () => {
+  const submitStart = warehouseInventoryPage.indexOf('  async function submit');
+  const receiveStart = warehouseInventoryPage.indexOf('  function receiveLine', submitStart);
+  const callStart = warehouseInventoryPage.indexOf('  const call = useCallback', 0);
+  const submitSource = warehouseInventoryPage.slice(submitStart, receiveStart);
+  const callSource = warehouseInventoryPage.slice(callStart, submitStart);
+
+  assert.match(callSource, /if \(!response\.ok\) \{[\s\S]*?throw new Error/);
+  assert.match(callSource, /const refreshed = await load\(\);[\s\S]*?return true/);
+  assert.match(submitSource, /if \(saved\) setForm\(/);
+});
+
+test('un conteo sin diferencia no inserta un movimiento cero y conserva su auditoría por la API', () => {
+  assert.match(zeroDeltaCountMigration, /target_quantity < 0[\s\S]*?target_movement_type in \('receive', 'remove'\) and target_quantity = 0/);
+  assert.match(zeroDeltaCountMigration, /if calculated_delta <> 0 then\s+insert into public\.inventory_movements/);
+  assert.match(zeroDeltaCountMigration, /else\s+new_movement_id := null;\s+end if;/);
+  assert.match(zeroDeltaCountMigration, /return query\s+select current_quantity, resulting_quantity, calculated_delta, new_movement_id/);
+  assert.match(zeroDeltaCountMigration, /grant execute on function public\.adjust_inventory\(uuid, uuid, uuid, text, numeric, text, uuid\)\s+to service_role/);
+  assert.doesNotMatch(zeroDeltaCountMigration, /public\.reserve_inventory/);
 });
 
 test('el ciclo de vida de la transferencia es draft -> approved -> in_transit -> received', () => {

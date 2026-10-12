@@ -10,6 +10,9 @@ type Product = { id: string; name: string; sku?: string; stock?: number; average
 type Stock = { id: string; warehouseId: string; productId: string; quantity: number; reservedQuantity: number; inTransitQuantity: number; available: number; averageCost?: number };
 type TransferLine = { transferItemId: string; productId: string; productName: string; productSku: string; requested: number; shipped: number; received: number; pending: number; unitCost: number };
 type Transfer = { id: string; transferNumber: string; status: string; originWarehouseId: string; destinationWarehouseId: string; reason?: string; createdAt?: string; requested: number; shipped: number; received: number; pending: number; items: TransferLine[] };
+type WarehouseInventoryResponse = { error?: string; warehouses?: Warehouse[]; stocks?: Stock[]; transfers?: Transfer[] };
+type CatalogResponse = { error?: string; products?: Product[] };
+type OperationResponse = { error?: string; applied?: boolean };
 
 const STATUS_LABELS: Record<string, string> = { draft: 'Borrador', approved: 'Aprobada', in_transit: 'En tránsito', received: 'Recibida', cancelled: 'Cancelada' };
 function statusLabel(status: string) { return STATUS_LABELS[status] || status; }
@@ -18,19 +21,77 @@ function units(value: number | undefined) { return Number(value || 0); }
 function WarehouseInventoryContent() {
   const router = useRouter(); const { authUser, tenant, member, organization, activeBranchId, loading: tenantLoading } = useTenant();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]); const [products, setProducts] = useState<Product[]>([]); const [stocks, setStocks] = useState<Stock[]>([]); const [transfers, setTransfers] = useState<Transfer[]>([]); const [warehouseId, setWarehouseId] = useState(''); const [tab, setTab] = useState<'receive' | 'transfer' | 'count'>('receive'); const [form, setForm] = useState({ productId: '', quantity: '', unitCost: '', fromWarehouseId: '', toWarehouseId: '', countedQuantity: '', reason: '' }); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
-  const load = useCallback(async () => { if (!authUser || !tenant || !activeBranchId) return; setLoading(true); try { const token = await authUser.getIdToken(); const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId }; const [inventoryResponse, catalogResponse] = await Promise.all([fetch(`/api/inventory/warehouses?warehouseId=${encodeURIComponent(warehouseId)}`, { headers, cache: 'no-store' }), fetch('/api/catalog?pageSize=25', { headers, cache: 'no-store' })]); const inventory = await inventoryResponse.json(); const catalog = await catalogResponse.json(); if (!inventoryResponse.ok) throw new Error(inventory.error || 'No se pudo cargar almacenes.'); setWarehouses(inventory.warehouses || []); setStocks(inventory.stocks || []); setTransfers(inventory.transfers || []); setProducts(catalog.products || []); if (!warehouseId && inventory.warehouses?.[0]) setWarehouseId(inventory.warehouses[0].id); } catch (error) { setMessage(error instanceof Error ? error.message : 'No se pudo cargar inventario por almacén.'); } finally { setLoading(false); } }, [authUser, tenant, activeBranchId, warehouseId]);
-  useEffect(() => { void load(); }, [load]);
-  const call = useCallback(async (payload: Record<string, unknown>, successMessage: string, failureMessage: string) => {
-    if (!authUser || !tenant || !activeBranchId) return;
-    setSaving(true); setMessage('');
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!authUser || !tenant || !activeBranchId) return false;
+    setLoading(true);
     try {
       const token = await authUser.getIdToken();
-      const response = await fetch('/api/inventory/warehouses', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId }, body: JSON.stringify(payload) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || failureMessage);
-      setMessage(successMessage);
-      await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : failureMessage); } finally { setSaving(false); }
+      const headers = { Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId };
+      const [inventoryResponse, catalogResponse] = await Promise.all([
+        fetch(`/api/inventory/warehouses?warehouseId=${encodeURIComponent(warehouseId)}`, { headers, cache: 'no-store' }),
+        fetch('/api/catalog?pageSize=25', { headers, cache: 'no-store' }),
+      ]);
+      const inventory = await inventoryResponse.json() as WarehouseInventoryResponse;
+      const catalog = await catalogResponse.json() as CatalogResponse;
+      if (!inventoryResponse.ok) throw new Error(inventory.error || 'No se pudo cargar almacenes.');
+      setWarehouses(inventory.warehouses || []);
+      setStocks(inventory.stocks || []);
+      setTransfers(inventory.transfers || []);
+      setProducts(catalog.products || []);
+      if (!warehouseId && inventory.warehouses?.[0]) setWarehouseId(inventory.warehouses[0].id);
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No se pudo cargar inventario por almacén.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [authUser, tenant, activeBranchId, warehouseId]);
+  useEffect(() => { void load(); }, [load]);
+  const call = useCallback(async (payload: Record<string, unknown>, successMessage: string, failureMessage: string): Promise<boolean> => {
+    if (!authUser || !tenant || !activeBranchId) return false;
+    setSaving(true);
+    setMessage('');
+    let countOutcomeUncertain = false;
+    let countWasApplied = false;
+    try {
+      const token = await authUser.getIdToken();
+      countOutcomeUncertain = payload.action === 'count';
+      const response = await fetch('/api/inventory/warehouses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'x-tenant-id': tenant.id, 'x-branch-id': activeBranchId },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json() as OperationResponse;
+      if (!response.ok) {
+        if (payload.action === 'count') {
+          countWasApplied = data.applied === true;
+          countOutcomeUncertain = response.status >= 500 || countWasApplied;
+        }
+        throw new Error(data.error || failureMessage);
+      }
+      const refreshed = await load();
+      setMessage(refreshed ? successMessage : `${successMessage} No se pudo actualizar la vista; vuelve a cargar para comprobar el stock.`);
+      return true;
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : failureMessage;
+      if (countOutcomeUncertain) {
+        const refreshed = await load();
+        const warning = countWasApplied
+          ? refreshed
+            ? 'El servidor confirmó que se aplicó; revisa el stock actualizado y no vuelvas a enviarlo.'
+            : 'El servidor confirmó que se aplicó; no vuelvas a enviarlo y comprueba el stock antes de otra acción.'
+          : refreshed
+            ? 'Se consultó el stock actual; verifícalo antes de volver a intentarlo, porque la respuesta no confirma si se guardó.'
+            : 'No se pudo comprobar el stock actual; no reenvíes el conteo hasta verificarlo.';
+        setMessage(`${failure} ${warning}`);
+      } else {
+        setMessage(failure);
+      }
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }, [authUser, tenant, activeBranchId, load]);
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -40,8 +101,8 @@ function WarehouseInventoryContent() {
         ? { action: 'create-transfer', fromWarehouseId: form.fromWarehouseId, toWarehouseId: form.toWarehouseId, items: [{ productId: form.productId, quantity: Number(form.quantity) }], reason: form.reason }
         : { action: 'count', warehouseId, productId: form.productId, countedQuantity: Number(form.countedQuantity), reason: form.reason };
     const success = tab === 'count' ? 'Conteo registrado.' : tab === 'transfer' ? 'Transferencia creada como borrador: apruébala para apartar el stock.' : 'Operación de inventario registrada.';
-    await call(payload, success, 'No se pudo registrar la operación.');
-    setForm({ productId: '', quantity: '', unitCost: '', fromWarehouseId: '', toWarehouseId: '', countedQuantity: '', reason: '' });
+    const saved = await call(payload, success, 'No se pudo registrar la operación.');
+    if (saved) setForm({ productId: '', quantity: '', unitCost: '', fromWarehouseId: '', toWarehouseId: '', countedQuantity: '', reason: '' });
   }
   function receiveLine(transfer: Transfer, line: TransferLine) {
     const value = window.prompt(`Cantidad a recibir de ${line.productName} (máximo ${line.pending})`, String(line.pending));
